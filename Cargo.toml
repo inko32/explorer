@@ -6,7 +6,7 @@ description = "Windows 8 style file explorer for POSIX/Windows — iced spike"
 license = "MIT"
 
 [dependencies]
-iced = { version = "0.14", default-features = false, features = ["tiny-skia", "wayland", "crisp", "thread-pool"] }
+iced = { version = "0.14", default-features = false, features = ["tiny-skia", "wayland", "crisp", "thread-pool", "svg"] }
 
 [profile.release]
 opt-level = 2
