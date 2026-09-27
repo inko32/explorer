@@ -100,7 +100,8 @@ use iced::{Color, Element, Length};
 
 use crate::fs::{self, Entry};
 use crate::icons;
-use crate::model::{self, Explorer, Message, Tab, ViewMode};
+use crate::model::{self, Explorer, Message, ViewMode};
+use crate::ribbon::{self, GroupDef, TabDef};
 
 pub fn view(state: &Explorer) -> Element<'_, Message> {
     let skin = if state.dark { skin::DARK } else { skin::LIGHT };
@@ -197,7 +198,7 @@ fn ribbon(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
 }
 
 fn tab_button(
-    label: &'static str,
+    label: &str,
     width: f32,
     active: bool,
     is_file: bool,
@@ -211,7 +212,7 @@ fn tab_button(
     } else {
         skin.subtle
     };
-    button(text(label).size(12.0).color(text_color))
+    button(text(label.to_string()).size(12.0).color(text_color))
         .width(Length::Fixed(width))
         .height(Length::Fixed(28.0))
         .style(move |_t, status| button::Style {
@@ -233,6 +234,23 @@ fn tab_button(
         .into()
 }
 
+/// Tabs visible right now: main tabs + contextual tabs whose `when` matches.
+fn visible_tabs(state: &Explorer) -> Vec<&TabDef> {
+    let ctx = state.context();
+    state
+        .ribbon
+        .tabs
+        .iter()
+        .chain(
+            state
+                .ribbon
+                .contextual_tabs
+                .iter()
+                .filter(|t| t.when.as_deref().map(|w| ribbon::eval_when(w, ctx)).unwrap_or(true)),
+        )
+        .collect()
+}
+
 fn tab_row(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     let help = button(icon(icons::help(&skin), 16.0))
         .width(Length::Fixed(24.0))
@@ -244,12 +262,21 @@ fn tab_row(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
             shadow: Default::default(),
             snap: true,
         });
+    let mut tabs_row = row![].height(Length::Fixed(28.0));
+    for tab in visible_tabs(state) {
+        let width = 20.0 + tab.label.len() as f32 * 7.5;
+        tabs_row = tabs_row.push(tab_button(
+            &tab.label,
+            width,
+            state.active_tab == tab.id,
+            tab.kind.as_deref() == Some("file"),
+            Message::SetTab(tab.id.clone()),
+            skin,
+        ));
+    }
     container(
         row![
-            tab_button("File", 46.0, state.tab == Tab::File, true, Message::SetTab(Tab::File), skin),
-            tab_button("Home", 58.0, state.tab == Tab::Home, false, Message::SetTab(Tab::Home), skin),
-            tab_button("Share", 58.0, state.tab == Tab::Share, false, Message::SetTab(Tab::Share), skin),
-            tab_button("View", 54.0, state.tab == Tab::View, false, Message::SetTab(Tab::View), skin),
+            tabs_row,
             Space::new().width(Length::Fill),
             container(help).height(Length::Fixed(28.0)).center_y(Length::Fixed(28.0)).padding([0.0, 6.0]),
         ]
@@ -286,14 +313,14 @@ fn cmd_style(
 
 fn big_cmd(
     handle: svg::Handle,
-    label: &'static str,
+    label: &str,
     enabled: bool,
     msg: Option<Message>,
     skin: skin::Skin,
 ) -> Element<'static, Message> {
     let content = column![
         svg(handle).width(Length::Fixed(42.0)).height(Length::Fixed(42.0)),
-        text(label).size(11.0).color(if enabled { skin.text } else { skin.disabled }),
+        text(label.to_string()).size(11.0).color(if enabled { skin.text } else { skin.disabled }),
     ]
     .spacing(2)
     .align_x(iced::Alignment::Center)
@@ -309,7 +336,7 @@ fn big_cmd(
 
 fn small_cmd(
     handle: svg::Handle,
-    label: &'static str,
+    label: &str,
     width: f32,
     enabled: bool,
     msg: Option<Message>,
@@ -317,7 +344,7 @@ fn small_cmd(
 ) -> Element<'static, Message> {
     let content = row![
         svg(handle).width(Length::Fixed(16.0)).height(Length::Fixed(16.0)),
-        text(label).size(11.0).color(if enabled { skin.text } else { skin.disabled }),
+        text(label.to_string()).size(11.0).color(if enabled { skin.text } else { skin.disabled }),
     ]
     .spacing(5)
     .align_y(iced::Alignment::Center);
@@ -331,7 +358,7 @@ fn small_cmd(
     }
 }
 
-fn group(caption: &'static str, width: f32, content: Element<'static, Message>, skin: skin::Skin) -> Element<'static, Message> {
+fn group(caption: &str, width: f32, content: Element<'static, Message>, skin: skin::Skin) -> Element<'static, Message> {
     let sep = container(Space::new().width(Length::Fixed(1.0)).height(Length::Fixed(76.0)))
         .style(bg(skin.sep))
         .height(Length::Fixed(76.0))
@@ -340,7 +367,7 @@ fn group(caption: &'static str, width: f32, content: Element<'static, Message>, 
         sep,
         column![
             container(content).width(Length::Fixed(width)).height(Length::Fixed(79.0)).padding([4.0, 3.0]),
-            container(text(caption).size(11.0).color(skin.subtle))
+            container(text(caption.to_string()).size(11.0).color(skin.subtle))
                 .width(Length::Fixed(width + 4.0))
                 .height(Length::Fixed(15.0))
                 .center_x(Length::Fixed(width + 4.0)),
@@ -350,142 +377,57 @@ fn group(caption: &'static str, width: f32, content: Element<'static, Message>, 
 }
 
 fn ribbon_body(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
-    let has_sel = !state.selected.is_empty();
-    let has_items = !state.entries.is_empty();
-    let has_clip = state.clipboard.is_some();
-    match state.tab {
-        Tab::Home => row![
-            group(
-                "Clipboard",
-                160.0,
-                row![
-                    big_cmd(icons::paste(&skin), "Paste", has_clip, Some(Message::Paste), skin),
-                    column![
-                        small_cmd(icons::cut(&skin), "Cut", 100.0, has_sel, Some(Message::CutSelection), skin),
-                        small_cmd(icons::copy(&skin), "Copy", 100.0, has_sel, Some(Message::CopySelection), skin),
-                        small_cmd(icons::copy_path(&skin), "Copy path", 100.0, false, None, skin),
-                        small_cmd(icons::paste_shortcut(&skin), "Paste shortcut", 100.0, false, None, skin),
-                    ]
-                    .spacing(1),
-                ]
-                .into(),
-                skin,
-            ),
-            group(
-                "Organize",
-                210.0,
-                row![
-                    column![
-                        small_cmd(icons::move_to(&skin), "Move to", 100.0, false, None, skin),
-                        small_cmd(icons::delete(&skin), "Delete", 100.0, has_sel, Some(Message::DeleteSelection), skin),
-                    ]
-                    .spacing(1),
-                    column![
-                        small_cmd(icons::copy_to(&skin), "Copy to", 100.0, false, None, skin),
-                        small_cmd(icons::rename(&skin), "Rename", 100.0, has_sel, Some(Message::RenameSelected), skin),
-                    ]
-                    .spacing(1),
-                ]
-                .spacing(2)
-                .into(),
-                skin,
-            ),
-            group(
-                "New",
-                148.0,
-                row![
-                    big_cmd(icons::new_folder(&skin), "New folder", true, Some(Message::NewFolder), skin),
-                    column![
-                        small_cmd(icons::new_item(&skin), "New item", 84.0, false, None, skin),
-                        small_cmd(icons::easy_access(&skin), "Easy access", 84.0, false, None, skin),
-                    ]
-                    .spacing(1),
-                ]
-                .into(),
-                skin,
-            ),
-            group(
-                "Open",
-                132.0,
-                row![
-                    big_cmd(icons::properties(&skin), "Properties", false, None, skin),
-                    column![
-                        small_cmd(icons::open(&skin), "Open", 68.0, false, None, skin),
-                        small_cmd(icons::edit(&skin), "Edit", 68.0, false, None, skin),
-                        small_cmd(icons::history(&skin), "History", 68.0, false, None, skin),
-                    ]
-                    .spacing(1),
-                ]
-                .into(),
-                skin,
-            ),
-            group(
-                "Select",
-                116.0,
-                column![
-                    small_cmd(icons::select_all(&skin), "Select all", 108.0, has_items, Some(Message::SelectAll), skin),
-                    small_cmd(icons::select_none(&skin), "Select none", 108.0, has_sel, Some(Message::SelectNone), skin),
-                    small_cmd(icons::invert_sel(&skin), "Invert selection", 108.0, has_items, Some(Message::InvertSelection), skin),
-                ]
-                .spacing(1)
-                .into(),
-                skin,
-            ),
-        ]
-        .into(),
-        Tab::Share => row![
-            group(
-                "Share with",
-                100.0,
-                column![small_cmd(icons::properties(&skin), "Nobody", 96.0, false, None, skin)].spacing(1).into(),
-                skin,
-            ),
-            group(
-                "Send",
-                100.0,
-                column![small_cmd(icons::copy_to(&skin), "Email", 96.0, false, None, skin)].spacing(1).into(),
-                skin,
-            ),
-        ]
-        .into(),
-        Tab::View => row![
-            group(
-                "Layout",
-                100.0,
-                column![
-                    small_cmd(icons::view_large(&skin), "Large icons", 96.0, state.view != ViewMode::Large, Some(Message::SetView(ViewMode::Large)), skin),
-                    small_cmd(icons::view_details(&skin), "Details", 96.0, state.view != ViewMode::Details, Some(Message::SetView(ViewMode::Details)), skin),
-                ]
-                .spacing(1)
-                .into(),
-                skin,
-            ),
-            group(
-                "Show/hide",
-                110.0,
-                column![
-                    small_cmd(icons::computer(&skin), "Navigation pane", 106.0, false, None, skin),
-                    small_cmd(icons::file(&skin), "Hidden items", 106.0, true, Some(Message::ToggleHidden), skin),
-                ]
-                .spacing(1)
-                .into(),
-                skin,
-            ),
-            group(
-                "Options",
-                100.0,
-                column![
-                    small_cmd(icons::gear(&skin), "Dark mode", 96.0, true, Some(Message::ToggleDark), skin),
-                    small_cmd(icons::gear(&skin), "Folder options", 96.0, false, None, skin),
-                ]
-                .spacing(1)
-                .into(),
-                skin,
-            ),
-        ]
-        .into(),
-        Tab::File => Space::new().width(Length::Fill).height(Length::Fixed(94.0)).into(),
+    let Some(tab) = visible_tabs(state).into_iter().find(|t| t.id == state.active_tab) else {
+        return Space::new().width(Length::Fill).height(Length::Fixed(94.0)).into();
+    };
+    let mut groups_row = row![];
+    for g in &tab.groups {
+        groups_row = groups_row.push(group_from_config(g, state, skin));
     }
+    groups_row.into()
+}
+
+/// Build one group's content from YAML: big commands stand alone, small
+/// commands stack into `columns` columns (sequential chunks).
+fn group_from_config(g: &GroupDef, state: &Explorer, skin: skin::Skin) -> Element<'static, Message> {
+    let has_sel = !state.selected.is_empty();
+    let has_clip = state.clipboard.is_some();
+    let has_items = !state.entries.is_empty();
+    let mut bigs: Vec<Element<Message>> = Vec::new();
+    let mut smalls: Vec<Element<Message>> = Vec::new();
+    for cmd in &g.commands {
+        let enabled = cmd.enabled.unwrap_or(true)
+            && ribbon::command_enabled(&cmd.id, has_sel, has_clip, has_items);
+        let handle = ribbon::icon_by_name(cmd.icon.as_deref().unwrap_or("file"), &skin);
+        let msg = enabled.then(|| Message::RunCommand(cmd.id.clone()));
+        let el = if cmd.size.as_deref() == Some("big") {
+            big_cmd(handle, &cmd.label, enabled, msg, skin)
+        } else {
+            small_cmd(handle, &cmd.label, 100.0, enabled, msg, skin)
+        };
+        if cmd.size.as_deref() == Some("big") {
+            bigs.push(el);
+        } else {
+            smalls.push(el);
+        }
+    }
+    let columns = g.columns.unwrap_or(1).max(1);
+    let per_col = smalls.len().div_ceil(columns).max(1);
+    let mut content = row![].spacing(2);
+    for b in bigs {
+        content = content.push(b);
+    }
+    let mut it = smalls.into_iter();
+    for _ in 0..columns {
+        let mut col = column![].spacing(1);
+        for _ in 0..per_col {
+            if let Some(s) = it.next() {
+                col = col.push(s);
+            }
+        }
+        content = content.push(col);
+    }
+    group(&g.label.clone(), g.width.unwrap_or(110.0), content.into(), skin)
 }
 
 // ---------------- address bar ----------------
@@ -787,11 +729,32 @@ fn file_view(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     } else {
         match state.view {
         ViewMode::Details => {
+            // Virtualized: build only the rows in view (+overscan), with
+            // spacers preserving total scroll height (D13).
+            const ROW_H: f32 = 22.0;
+            let total = state.entries.len();
+            let view_rows = (state.viewport_h / ROW_H).ceil() as usize + 4;
+            let first = ((state.scroll_y / ROW_H).floor() as usize).saturating_sub(2);
+            let last = (first + view_rows).min(total);
             let mut rows = column![].spacing(0);
-            for (i, e) in state.entries.iter().enumerate() {
-                rows = rows.push(file_row(i, e, state, skin));
+            if first > 0 {
+                rows = rows.push(Space::new().height(Length::Fixed(first as f32 * ROW_H)));
             }
-            scrollable(rows).height(Length::Fill).into()
+            for i in first..last {
+                if let Some(e) = state.entries.get(i) {
+                    rows = rows.push(file_row(i, e, state, skin));
+                }
+            }
+            if last < total {
+                rows = rows.push(Space::new().height(Length::Fixed((total - last) as f32 * ROW_H)));
+            }
+            scrollable(rows)
+                .height(Length::Fill)
+                .on_scroll(|vp| Message::Scrolled {
+                    y: vp.absolute_offset().y,
+                    height: vp.bounds().height,
+                })
+                .into()
         }
         ViewMode::Large => {
             let mut grid = row![].spacing(8).padding(8);

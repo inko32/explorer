@@ -3,6 +3,7 @@
 mod fs;
 mod icons;
 mod model;
+mod ribbon;
 mod ui;
 
 use model::{Explorer, Message};
@@ -35,6 +36,7 @@ fn main() -> iced::Result {
             iced::window::open_events().map(Message::WindowOpened),
             iced::event::listen().map(Message::Event),
             iced::Subscription::run(fs_stream_builder).map(Message::FsEvent),
+            iced::window::resize_events().map(|(_id, size)| Message::WindowResized(size.height)),
         ])
     })
     .window(iced::window::Settings {
