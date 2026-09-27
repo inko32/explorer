@@ -3,7 +3,7 @@
 use crate::app::{Cmd, Cx};
 use crate::icons::{self, Icon};
 use crate::ui::file_view::{format_size, ViewMode};
-use egui::{Align2, Id, Pos2, Rect, Sense, Stroke, Vec2};
+use egui::{Align2, Id, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
 pub struct StatusBar;
 
@@ -12,13 +12,13 @@ impl StatusBar {
         Self
     }
 
-    pub fn show(&mut self, ctx: &egui::Context, cx: &Cx, pending: &mut Vec<Cmd>) {
+    pub fn show(&mut self, ui: &mut Ui, cx: &Cx, pending: &mut Vec<Cmd>) {
         let m = &cx.theme.metrics;
         let p = &cx.theme.palette;
-        egui::TopBottomPanel::bottom("statusbar")
-            .exact_height(m.status_h)
+        egui::Panel::bottom("statusbar")
+            .exact_size(m.status_h)
             .frame(egui::Frame::NONE.fill(p.status_bg))
-            .show(ctx, |ui| {
+            .show(ui, |ui| {
                 let rect = ui.max_rect();
                 ui.painter().line_segment(
                     [rect.left_top(), rect.right_top()],

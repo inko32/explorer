@@ -4,9 +4,7 @@
 use crate::app::{Cmd, Cx};
 use crate::fs::Entry;
 use crate::icons::{self, Icon};
-use egui::{
-    Align, Align2, Color32, Id, Key, Modifiers, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2,
-};
+use egui::{Align2, Id, Painter, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ViewMode {
@@ -82,7 +80,9 @@ impl FileView {
     }
 
     pub fn entry(&self, index: usize) -> Option<&Entry> {
-        self.display_entries().get(index)
+        self.visible_indices()
+            .get(index)
+            .and_then(|&vi| self.entries.get(vi))
     }
 
     pub fn first_selected(&self) -> Option<usize> {
@@ -94,17 +94,23 @@ impl FileView {
     }
 
     pub fn selected_bytes(&self) -> u64 {
-        let d = self.display_entries();
-        self.sel.iter().filter_map(|&i| d.get(i)).map(|e| e.size).sum()
+        self.sel
+            .iter()
+            .filter_map(|&i| self.entry(i))
+            .map(|e| e.size)
+            .sum()
     }
 
     pub fn selected_paths(&self) -> Vec<std::path::PathBuf> {
-        let d = self.display_entries();
-        self.sel.iter().filter_map(|&i| d.get(i)).map(|e| e.path.clone()).collect()
+        self.sel
+            .iter()
+            .filter_map(|&i| self.entry(i))
+            .map(|e| e.path.clone())
+            .collect()
     }
 
     pub fn visible_count(&self) -> usize {
-        self.display_entries().len()
+        self.visible_indices().len()
     }
 
     pub fn clear_selection(&mut self) {
@@ -113,12 +119,12 @@ impl FileView {
     }
 
     pub fn select_all(&mut self) {
-        let n = self.display_entries().len();
+        let n = self.visible_indices().len();
         self.sel = (0..n).collect();
     }
 
     pub fn invert_selection(&mut self) {
-        let n = self.display_entries().len();
+        let n = self.visible_indices().len();
         let old = std::mem::take(&mut self.sel);
         self.sel = (0..n).filter(|i| !old.contains(i)).collect();
     }
@@ -129,7 +135,7 @@ impl FileView {
     }
 
     pub fn start_rename(&mut self, index: usize) {
-        if let Some(e) = self.display_entries().get(index) {
+        if let Some(e) = self.entry(index) {
             self.rename_buf = e.name.clone();
             self.rename = Some(index);
             self.sel.clear();
@@ -138,7 +144,7 @@ impl FileView {
     }
 
     pub fn begin_rename_of(&mut self, name: &str) {
-        if let Some(i) = self.display_entries().iter().position(|e| e.name == name) {
+        if let Some(i) = self.visible_indices().iter().position(|&vi| self.entries[vi].name == name) {
             self.start_rename(i);
         }
     }
@@ -150,10 +156,13 @@ impl FileView {
 
     // ---- internals ----
 
-    fn display_entries(&self) -> Vec<&Entry> {
+    /// Indices into `entries` that are currently visible (hidden filter).
+    fn visible_indices(&self) -> Vec<usize> {
         self.entries
             .iter()
-            .filter(|e| self.show_hidden || !e.is_hidden)
+            .enumerate()
+            .filter(|(_, e)| self.show_hidden || !e.is_hidden)
+            .map(|(i, _)| i)
             .collect()
     }
 
@@ -176,10 +185,10 @@ impl FileView {
 
     // ---- rendering ----
 
-    pub fn show(&mut self, ctx: &egui::Context, cx: &Cx, pending: &mut Vec<Cmd>) {
+    pub fn show(&mut self, ui: &mut Ui, cx: &Cx, pending: &mut Vec<Cmd>) {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(cx.theme.palette.window_bg))
-            .show(ctx, |ui| match self.view {
+            .show(ui, |ui| match self.view {
                 ViewMode::Details => self.show_details(ui, cx, pending),
                 ViewMode::Large => self.show_large(ui, cx, pending),
             });
@@ -197,9 +206,10 @@ impl FileView {
             [header.left_bottom(), header.right_bottom()],
             Stroke::new(1.0, p.separator),
         );
-        let x_date = width - m.col_date_w - m.col_type_w - m.col_size_w;
-        let x_type = width - m.col_type_w - m.col_size_w;
-        let x_size = width - m.col_size_w;
+        let x_date = ui.max_rect().right() - m.col_date_w - m.col_type_w - m.col_size_w;
+        let x_type = ui.max_rect().right() - m.col_type_w - m.col_size_w;
+        let x_size = ui.max_rect().right() - m.col_size_w;
+        let header_font = egui::FontId::proportional(cx.theme.fonts.small);
         for (col, label, rect) in [
             (Column::Name, "Name", Rect::from_min_max(header.min, Pos2::new(x_date, header.bottom()))),
             (
@@ -231,26 +241,29 @@ impl FileView {
                 Pos2::new(rect.left() + 8.0, rect.center().y),
                 Align2::LEFT_CENTER,
                 format!("{label}{arrow}"),
-                egui::FontId::proportional(cx.theme.fonts.small),
+                header_font.clone(),
                 color,
             );
         }
 
-        // rows
+        // rows (index-based iteration keeps borrows disjoint)
         let body_top = header.bottom();
         let row_h = m.row_h;
-        let scroll = egui::ScrollArea::vertical()
+        // advance past the header so the scroll area starts below it
+        ui.allocate_space(Vec2::new(width, m.col_header_h));
+        egui::ScrollArea::vertical()
             .id_salt("fv_scroll")
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                let entries = self.display_entries();
-                let total = entries.len() as f32 * row_h;
+                let visible = self.visible_indices();
+                let total = visible.len() as f32 * row_h;
                 ui.set_min_height(total);
 
                 // click on empty space clears selection
+                let blank_top = ui.cursor().top() + total;
                 let blank = Rect::from_min_size(
-                    Pos2::new(ui.max_rect().left(), ui.cursor().top()),
-                    Vec2::new(width, (total - entries.len() as f32 * row_h).max(row_h)),
+                    Pos2::new(ui.max_rect().left(), blank_top),
+                    Vec2::new(width, row_h.max(1.0)),
                 );
                 let blank_resp = ui.interact(blank, Id::new("fv_blank"), Sense::click());
                 if blank_resp.clicked() {
@@ -258,23 +271,140 @@ impl FileView {
                     self.anchor = None;
                 }
 
-                let mut rows: Vec<(usize, &Entry, Rect)> = Vec::with_capacity(entries.len());
-                for (i, e) in entries.iter().enumerate() {
+                let base_y = ui.cursor().top();
+                let font = egui::FontId::proportional(cx.theme.fonts.size);
+                let small = egui::FontId::proportional(cx.theme.fonts.size);
+                for (disp_i, &vi) in visible.iter().enumerate() {
                     let rect = Rect::from_min_size(
-                        Pos2::new(ui.max_rect().left(), ui.cursor().top() + i as f32 * row_h),
+                        Pos2::new(ui.max_rect().left(), base_y + disp_i as f32 * row_h),
                         Vec2::new(width, row_h),
                     );
-                    rows.push((i, e, rect));
-                }
-                // advance the cursor so egui knows the content size
-                ui.allocate_space(Vec2::new(width, total.max(row_h)));
+                    let resp = ui.interact(rect, Id::new(("row", disp_i)), Sense::click());
 
-                for (i, e, rect) in rows {
-                    self.paint_row(ui, cx, i, e, rect, x_date, x_type, x_size, pending);
+                    // selection (index-only; no entry borrow needed)
+                    if resp.clicked() {
+                        let mods = ui.ctx().input(|in_| in_.modifiers);
+                        if mods.ctrl || mods.command {
+                            if !self.sel.insert(disp_i) {
+                                self.sel.remove(&disp_i);
+                            }
+                            self.anchor = Some(disp_i);
+                        } else if mods.shift {
+                            let a = self.anchor.unwrap_or(disp_i);
+                            let (lo, hi) = if a <= disp_i { (a, disp_i) } else { (disp_i, a) };
+                            self.sel = (lo..=hi).collect();
+                        } else {
+                            self.sel.clear();
+                            self.sel.insert(disp_i);
+                            self.anchor = Some(disp_i);
+                        }
+                    }
+                    let e = &self.entries[vi];
+                    if resp.double_clicked() {
+                        if e.is_dir() {
+                            pending.push(Cmd::Navigate(e.path.clone()));
+                        } else {
+                            pending.push(Cmd::Status(format!("Open “{}”: coming soon", e.name)));
+                        }
+                    }
+
+                    // selection band
+                    if self.sel.contains(&disp_i) {
+                        let fill = if cx.focused { p.sel_fill } else { p.sel_fill_unfocused };
+                        ui.painter().rect_filled(rect, 0.0, fill);
+                        if cx.focused {
+                            ui.painter().rect_stroke(
+                                rect.shrink(0.5),
+                                0.0,
+                                Stroke::new(1.0, p.sel_border),
+                                egui::StrokeKind::Inside,
+                            );
+                        }
+                    }
+
+                    // icon + name (or inline rename editor)
+                    let icon_rect = Rect::from_center_size(
+                        Pos2::new(rect.left() + 6.0 + m.details_icon / 2.0, rect.center().y),
+                        Vec2::splat(m.details_icon),
+                    );
+                    let icon = if e.is_dir() {
+                        Icon::Folder
+                    } else if is_image(&e.name) {
+                        Icon::FileImage
+                    } else {
+                        Icon::File
+                    };
+                    icons::draw(ui.painter(), icon, icon_rect, cx.theme, true);
+
+                    let name_x = icon_rect.right() + 4.0;
+                    if self.rename == Some(disp_i) {
+                        let edit_rect = Rect::from_min_max(
+                            Pos2::new(name_x, rect.top() + 1.0),
+                            Pos2::new(x_date - 4.0, rect.bottom() - 1.0),
+                        );
+                        ui.painter().rect_filled(edit_rect, 1.0, p.window_bg);
+                        ui.painter().rect_stroke(
+                            edit_rect.shrink(0.5),
+                            1.0,
+                            Stroke::new(1.0, p.accent),
+                            egui::StrokeKind::Inside,
+                        );
+                        let mut buf = std::mem::take(&mut self.rename_buf);
+                        let edit = egui::TextEdit::singleline(&mut buf)
+                            .id(Id::new("fv_rename"))
+                            .desired_width(edit_rect.width())
+                            .margin(egui::Margin::symmetric(2, 0))
+                            .frame(egui::Frame::NONE);
+                        let out = ui.put(edit_rect, edit);
+                        self.rename_buf = buf;
+                        // singleline TextEdit surrenders focus on Enter;
+                        // clicking away also loses focus — both commit.
+                        if out.lost_focus() {
+                            let name = self.rename_buf.clone();
+                            pending.push(Cmd::CommitRename { index: disp_i, name });
+                        } else {
+                            ui.ctx().memory_mut(|mem| mem.request_focus(Id::new("fv_rename")));
+                        }
+                    } else {
+                        let max_w = (x_date - 12.0 - name_x).max(10.0);
+                        let shown = elide(ui.painter(), &e.name, font.clone(), p.text, max_w);
+                        ui.painter().text(
+                            Pos2::new(name_x, rect.center().y),
+                            Align2::LEFT_CENTER,
+                            shown,
+                            font.clone(),
+                            p.text,
+                        );
+                    }
+
+                    // fixed columns
+                    ui.painter().text(
+                        Pos2::new(x_date + 8.0, rect.center().y),
+                        Align2::LEFT_CENTER,
+                        e.modified.map(format_date).unwrap_or_default(),
+                        small.clone(),
+                        p.text,
+                    );
+                    ui.painter().text(
+                        Pos2::new(x_type + 8.0, rect.center().y),
+                        Align2::LEFT_CENTER,
+                        type_label(e),
+                        small.clone(),
+                        p.text,
+                    );
+                    if !e.is_dir() {
+                        ui.painter().text(
+                            Pos2::new(x_size - 8.0 + m.col_size_w, rect.center().y),
+                            Align2::RIGHT_CENTER,
+                            format_size(e.size),
+                            small.clone(),
+                            p.text,
+                        );
+                    }
                 }
+                ui.allocate_space(Vec2::new(width, total.max(row_h)));
             });
 
-        let _ = scroll;
         if self.loading {
             ui.painter().text(
                 Pos2::new(width / 2.0, body_top + 40.0),
@@ -295,178 +425,56 @@ impl FileView {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn paint_row(
-        &mut self,
-        ui: &mut Ui,
-        cx: &Cx,
-        i: usize,
-        e: &Entry,
-        rect: Rect,
-        x_date: f32,
-        x_type: f32,
-        x_size: f32,
-        pending: &mut Vec<Cmd>,
-    ) {
-        let p = &cx.theme.palette;
-        let m = &cx.theme.metrics;
-        let id = Id::new(("row", i));
-        let resp = ui.interact(rect, id, Sense::click());
-
-        if resp.clicked() {
-            let mods = ui.ctx().input(|in_| in_.modifiers);
-            if mods.ctrl || mods.command {
-                if !self.sel.insert(i) {
-                    self.sel.remove(&i);
-                }
-                self.anchor = Some(i);
-            } else if mods.shift {
-                let a = self.anchor.unwrap_or(i);
-                let (lo, hi) = if a <= i { (a, i) } else { (i, a) };
-                self.sel = (lo..=hi).collect();
-            } else {
-                self.sel.clear();
-                self.sel.insert(i);
-                self.anchor = Some(i);
-            }
-        }
-        if resp.double_clicked() {
-            if e.is_dir() {
-                pending.push(Cmd::Navigate(e.path.clone()));
-            } else {
-                pending.push(Cmd::Status(format!("Open “{}”: coming soon", e.name)));
-            }
-        }
-
-        // selection band
-        let selected = self.sel.contains(&i);
-        if selected {
-            let fill = if cx.focused { p.sel_fill } else { p.sel_fill_unfocused };
-            ui.painter().rect_filled(rect, 0.0, fill);
-            if cx.focused {
-                ui.painter().rect_stroke(rect.shrink(0.5), 0.0, Stroke::new(1.0, p.sel_border), egui::StrokeKind::Inside);
-            }
-        }
-
-        // icon + name
-        let icon_rect = Rect::from_center_size(
-            Pos2::new(rect.left() + 6.0 + m.details_icon / 2.0, rect.center().y),
-            Vec2::splat(m.details_icon),
-        );
-        let icon = if e.is_dir() {
-            Icon::Folder
-        } else if is_image(&e.name) {
-            Icon::FileImage
-        } else {
-            Icon::File
-        };
-        icons::draw(ui.painter(), icon, icon_rect, cx.theme, true);
-
-        let text_color = p.text;
-        if self.rename == Some(i) {
-            let edit_rect = Rect::from_min_max(
-                Pos2::new(icon_rect.right() + 4.0, rect.top() + 1.0),
-                Pos2::new(x_date - 4.0, rect.bottom() - 1.0),
-            );
-            let mut buf = std::mem::take(&mut self.rename_buf);
-            let edit = egui::TextEdit::singleline(&mut buf)
-                .id(Id::new("fv_rename"))
-                .desired_width(edit_rect.width())
-                .margin(egui::Margin::symmetric(2, 0))
-                .frame(true);
-            let out = ui.put(edit_rect, edit);
-            self.rename_buf = buf;
-            // singleline TextEdit surrenders focus on Enter; clicking away
-            // also loses focus — both commit.
-            if out.lost_focus() {
-                let name = self.rename_buf.clone();
-                pending.push(Cmd::CommitRename { index: i, name });
-            } else {
-                ui.memory_mut(|mem| mem.request_focus(Id::new("fv_rename")));
-            }
-        } else {
-            let max_w = (x_date - 16.0 - (icon_rect.right() + 4.0)).max(10.0);
-            let galley = ui.painter().layout(
-                e.name.clone(),
-                egui::FontId::proportional(cx.theme.fonts.size),
-                text_color,
-                max_w,
-                egui::Align::LEFT,
-            );
-            let pos = Pos2::new(icon_rect.right() + 4.0, rect.center().y);
-            let row = galley.rows.first().cloned();
-            if let Some(row) = row {
-                ui.painter().galley(pos - Vec2::new(0.0, row.rect.height() / 2.0), row.galley, text_color);
-            }
-        }
-
-        // columns
-        let small = egui::FontId::proportional(cx.theme.fonts.size);
-        ui.painter().text(
-            Pos2::new(x_date + 8.0, rect.center().y),
-            Align2::LEFT_CENTER,
-            e.modified.map(format_date).unwrap_or_default(),
-            small.clone(),
-            text_color,
-        );
-        ui.painter().text(
-            Pos2::new(x_type + 8.0, rect.center().y),
-            Align2::LEFT_CENTER,
-            type_label(e),
-            small.clone(),
-            text_color,
-        );
-        if !e.is_dir() {
-            ui.painter().text(
-                Pos2::new(x_size - 8.0 + m.col_size_w, rect.center().y),
-                Align2::RIGHT_CENTER,
-                format_size(e.size),
-                small,
-                text_color,
-            );
-        }
-    }
-
     fn show_large(&mut self, ui: &mut Ui, cx: &Cx, pending: &mut Vec<Cmd>) {
         let p = &cx.theme.palette;
         let m = &cx.theme.metrics;
         let width = ui.max_rect().width();
         egui::ScrollArea::vertical().id_salt("fv_scroll_large").auto_shrink([false, false]).show(ui, |ui| {
-            let entries = self.display_entries();
+            let visible = self.visible_indices();
             let cols = (width / m.large_cell_w).max(1.0) as usize;
-            let rows = entries.len().div_ceil(cols);
+            let rows = visible.len().div_ceil(cols.max(1));
             let total_h = rows as f32 * m.large_cell_h;
             ui.set_min_height(total_h);
 
-            for (i, e) in entries.iter().enumerate() {
-                let r = i / cols;
-                let cidx = i % cols;
+            let base_y = ui.cursor().top();
+            for (disp_i, &vi) in visible.iter().enumerate() {
+                let r = disp_i / cols.max(1);
+                let cidx = disp_i % cols.max(1);
                 let cell = Rect::from_min_size(
-                    Pos2::new(ui.max_rect().left() + cidx as f32 * m.large_cell_w, ui.cursor().top() + r as f32 * m.large_cell_h),
+                    Pos2::new(
+                        ui.max_rect().left() + cidx as f32 * m.large_cell_w,
+                        base_y + r as f32 * m.large_cell_h,
+                    ),
                     Vec2::new(m.large_cell_w, m.large_cell_h),
                 );
-                let resp = ui.interact(cell, Id::new(("cell", i)), Sense::click());
+                let resp = ui.interact(cell, Id::new(("cell", disp_i)), Sense::click());
                 if resp.clicked() {
                     let mods = ui.ctx().input(|in_| in_.modifiers);
                     if mods.ctrl || mods.command {
-                        if !self.sel.insert(i) {
-                            self.sel.remove(&i);
+                        if !self.sel.insert(disp_i) {
+                            self.sel.remove(&disp_i);
                         }
-                        self.anchor = Some(i);
+                        self.anchor = Some(disp_i);
                     } else {
                         self.sel.clear();
-                        self.sel.insert(i);
-                        self.anchor = Some(i);
+                        self.sel.insert(disp_i);
+                        self.anchor = Some(disp_i);
                     }
                 }
+                let e = &self.entries[vi];
                 if resp.double_clicked() && e.is_dir() {
                     pending.push(Cmd::Navigate(e.path.clone()));
                 }
-                if self.sel.contains(&i) {
+                if self.sel.contains(&disp_i) {
                     let fill = if cx.focused { p.sel_fill } else { p.sel_fill_unfocused };
                     ui.painter().rect_filled(cell.shrink(2.0), 0.0, fill);
                     if cx.focused {
-                        ui.painter().rect_stroke(cell.shrink(2.5), 0.0, Stroke::new(1.0, p.sel_border), egui::StrokeKind::Inside);
+                        ui.painter().rect_stroke(
+                            cell.shrink(2.5),
+                            0.0,
+                            Stroke::new(1.0, p.sel_border),
+                            egui::StrokeKind::Inside,
+                        );
                     }
                 }
                 let icon_rect = Rect::from_center_size(
@@ -475,23 +483,20 @@ impl FileView {
                 );
                 let icon = if e.is_dir() { Icon::Folder } else if is_image(&e.name) { Icon::FileImage } else { Icon::File };
                 icons::draw(ui.painter(), icon, icon_rect, cx.theme, true);
-                // label (wrap to 2 lines)
-                let galley = ui.painter().layout(
+                // wrapped label, clipped to the cell
+                let mut label_painter = ui.painter().clone();
+                label_painter.set_clip_rect(cell.shrink(2.0));
+                let galley = label_painter.layout(
                     e.name.clone(),
                     egui::FontId::proportional(cx.theme.fonts.small),
                     p.text,
                     cell.width() - 8.0,
-                    Align::LEFT,
                 );
-                let mut ly = icon_rect.bottom() + 6.0;
-                for row in galley.rows.iter().take(2) {
-                    ui.painter().galley(
-                        Pos2::new(cell.center().x - row.rect.width() / 2.0, ly),
-                        row.galley.clone(),
-                        p.text,
-                    );
-                    ly += row.rect.height();
-                }
+                label_painter.galley(
+                    Pos2::new(cell.center().x - galley.size().x / 2.0, icon_rect.bottom() + 6.0),
+                    galley,
+                    p.text,
+                );
             }
             ui.allocate_space(Vec2::new(width, total_h.max(m.large_cell_h)));
         });
@@ -505,6 +510,29 @@ impl FileView {
         self.sort_entries();
         self.sel.clear();
     }
+}
+
+/// Single-line text truncated with "…" to fit `max_w` (no wrap, cheap binary
+/// search — names are short).
+fn elide(painter: &Painter, text: &str, font: egui::FontId, color: egui::Color32, max_w: f32) -> String {
+    let width_of = |s: &str| painter.layout_no_wrap(s.to_string(), font.clone(), color).rect.width();
+    if width_of(text) <= max_w {
+        return text.to_string();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let dots = width_of("…");
+    let mut lo = 0usize;
+    let mut hi = chars.len();
+    while lo < hi {
+        let mid = (lo + hi + 1) / 2;
+        let prefix: String = chars[..mid].iter().collect();
+        if width_of(&prefix) + dots <= max_w {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    format!("{}…", chars[..lo].iter().collect::<String>())
 }
 
 // ---- formatting helpers (pure functions — UI-spec owned) ----
@@ -643,6 +671,3 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     era * 146_097 + doe - 719_468
 }
-
-#[allow(dead_code)]
-fn unused_modifiers(_: Modifiers) {}

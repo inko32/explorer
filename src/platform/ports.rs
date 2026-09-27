@@ -18,7 +18,6 @@ pub trait WindowPort {
     fn drag_resize(&self, dir: ResizeDir);
     fn minimize(&self);
     fn toggle_maximize(&self);
-    fn close(&self);
     fn is_maximized(&self) -> bool;
 }
 
@@ -30,7 +29,6 @@ impl WindowPort for NullPort {
     fn drag_resize(&self, _dir: ResizeDir) {}
     fn minimize(&self) {}
     fn toggle_maximize(&self) {}
-    fn close(&self) {}
     fn is_maximized(&self) -> bool {
         false
     }
@@ -56,7 +54,7 @@ impl WindowPort for WinitPort {
             ResizeDir::BottomLeft => winit::window::ResizeDirection::SouthWest,
             ResizeDir::BottomRight => winit::window::ResizeDirection::SouthEast,
         };
-        let _ = self.window.drag_resize(d);
+        let _ = self.window.drag_resize_window(d);
     }
     fn minimize(&self) {
         self.window.set_minimized(true);
@@ -64,10 +62,6 @@ impl WindowPort for WinitPort {
     fn toggle_maximize(&self) {
         let max = self.window.is_maximized();
         self.window.set_maximized(!max);
-    }
-    fn close(&self) {
-        // App turns this into an exit request handled by the event loop.
-        self.window.request_redraw();
     }
     fn is_maximized(&self) -> bool {
         self.window.is_maximized()
