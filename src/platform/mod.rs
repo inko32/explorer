@@ -164,12 +164,23 @@ impl Runner {
         state.handle_platform_output(&window, output.platform_output);
 
         let clipped = self.ctx.tessellate(output.shapes, output.pixels_per_point);
+        if std::env::var_os("EXPLORER_DEBUG_PPP").is_some() {
+            let size = window.inner_size();
+            eprintln!(
+                "ppp={} zoom={} native={:?} win_phys={}x{}",
+                self.ctx.pixels_per_point(),
+                self.ctx.zoom_factor(),
+                self.ctx.native_pixels_per_point(),
+                size.width,
+                size.height
+            );
+        }
         let size = window.inner_size();
         self.renderer.resize(size.width as usize, size.height as usize);
         for (id, delta) in &output.textures_delta.set {
             self.renderer.textures.apply(*id, delta);
         }
-        self.renderer.render(&clipped);
+        self.renderer.render(&clipped, output.pixels_per_point);
 
         if let Some(surface) = &mut self.surface {
             // wayland backend requires an explicit size before buffer_mut()

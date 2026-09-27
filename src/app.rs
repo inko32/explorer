@@ -67,7 +67,6 @@ pub struct Cx<'a> {
     pub cwd_label: &'a str,
     pub focused: bool,
     pub maximized: bool,
-    pub window: (f32, f32), // logical size (points)
     // navigation
     pub can_back: bool,
     pub can_forward: bool,
@@ -111,6 +110,9 @@ pub struct App {
     fs_rx: Receiver<FsEvent>,
 
     port: Box<dyn WindowPort>,
+    /// Physical window size in px, kept current by resize events (future use:
+    /// per-monitor metrics). UI code uses logical units — never draw with this.
+    #[allow(dead_code)]
     window: (f32, f32),
     focused: bool,
     exit: bool,
@@ -197,7 +199,6 @@ impl App {
             cwd_label: &self.cwd_label,
             focused: self.focused,
             maximized: self.port.is_maximized(),
-            window: self.window,
             can_back: !self.history_back.is_empty(),
             can_forward: !self.history_forward.is_empty(),
             can_up: self.cwd.parent().is_some(),

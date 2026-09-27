@@ -39,9 +39,10 @@ impl CpuRenderer {
     /// Rasterize a frame. Caller applies texture deltas before and frees
     /// textures afterwards (platform does both around this call).
     ///
-    /// NOTE: `ctx.tessellate` already emits physical-pixel coordinates, so
-    /// no further scaling happens here.
-    pub fn render(&mut self, primitives: &[ClippedPrimitive]) {
+    /// egui 0.36 tessellates in **logical points** (verified against epaint
+    /// source: ppp is only used for pixel-snapping); the painter scales to
+    /// physical pixels here.
+    pub fn render(&mut self, primitives: &[ClippedPrimitive], pixels_per_point: f32) {
         self.buffer.fill(0x00FFFFFF);
         let screen = (self.width as f32, self.height as f32);
         let width_i = self.width as i32;
@@ -58,12 +59,12 @@ impl CpuRenderer {
             if mesh.indices.len() < 3 || mesh.vertices.is_empty() {
                 continue;
             }
-            // clip rect is already in physical pixels; intersect the screen
+            // clip rect: points -> px, intersect screen
             let clip = prim.clip_rect;
-            let cx0 = clip.min.x.round().max(0.0) as i32;
-            let cy0 = clip.min.y.round().max(0.0) as i32;
-            let cx1 = clip.max.x.round().min(screen.0) as i32;
-            let cy1 = clip.max.y.round().min(screen.1) as i32;
+            let cx0 = (clip.min.x * pixels_per_point).round().max(0.0) as i32;
+            let cy0 = (clip.min.y * pixels_per_point).round().max(0.0) as i32;
+            let cx1 = (clip.max.x * pixels_per_point).round().min(screen.0) as i32;
+            let cy1 = (clip.max.y * pixels_per_point).round().min(screen.1) as i32;
             if cx1 <= cx0 || cy1 <= cy0 {
                 continue;
             }
@@ -75,9 +76,9 @@ impl CpuRenderer {
                 }
                 let v = [&mesh.vertices[a], &mesh.vertices[b], &mesh.vertices[c]];
                 let p: [(f32, f32); 3] = [
-                    (v[0].pos.x, v[0].pos.y),
-                    (v[1].pos.x, v[1].pos.y),
-                    (v[2].pos.x, v[2].pos.y),
+                    (v[0].pos.x * pixels_per_point, v[0].pos.y * pixels_per_point),
+                    (v[1].pos.x * pixels_per_point, v[1].pos.y * pixels_per_point),
+                    (v[2].pos.x * pixels_per_point, v[2].pos.y * pixels_per_point),
                 ];
                 let min_x = p[0].0.min(p[1].0).min(p[2].0).round().max(cx0 as f32) as i32;
                 let max_x = p[0].0.max(p[1].0).max(p[2].0).round().min(cx1 as f32) as i32;
