@@ -1,10 +1,26 @@
 //! Explorer — iced. Windows 8 style file explorer for POSIX (Wayland first).
 
+mod fs;
 mod icons;
 mod model;
 mod ui;
 
 use model::{Explorer, Message};
+
+/// Fs event stream, taken by `Subscription::run` exactly once.
+pub static FS_STREAM_RX: std::sync::OnceLock<
+    std::sync::Mutex<Option<fs::EventReceiver>>,
+> = std::sync::OnceLock::new();
+
+fn fs_stream_builder() -> fs::EventReceiver {
+    FS_STREAM_RX
+        .get()
+        .unwrap()
+        .lock()
+        .unwrap()
+        .take()
+        .unwrap_or_else(|| iced::futures::channel::mpsc::unbounded().1)
+}
 
 fn main() -> iced::Result {
     iced::application(
@@ -18,6 +34,7 @@ fn main() -> iced::Result {
         iced::Subscription::batch(vec![
             iced::window::open_events().map(Message::WindowOpened),
             iced::event::listen().map(Message::Event),
+            iced::Subscription::run(fs_stream_builder).map(Message::FsEvent),
         ])
     })
     .window(iced::window::Settings {
