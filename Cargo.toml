@@ -7,6 +7,8 @@ license = "MIT"
 
 [dependencies]
 iced = { version = "0.14", default-features = false, features = ["tiny-skia", "wayland", "crisp", "thread-pool", "svg"] }
+gio  = "0.21"  # GIO backend for the VFS (local fs, volumes, trash)
+glib = "0.21"  # gio companion
 
 [profile.release]
 opt-level = 2

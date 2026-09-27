@@ -431,6 +431,15 @@ pub fn view_large(s: &Skin) -> svg::Handle {
     doc(rect(2.5, 2.5, 11.0, 11.0, s.folder, Some((s.folder_edge, 1.0))))
 }
 
+pub fn archive(s: &Skin) -> svg::Handle {
+    doc(format!(
+        "{}{}{}",
+        rect(2.0, 3.5, 12.0, 10.0, s.folder, Some((s.folder_edge, 1.0))),
+        rect(2.0, 3.5, 12.0, 2.5, s.folder_edge, None),
+        rect(7.0, 6.5, 2.0, 3.0, s.window_bg, Some((glyph(s), 0.8))),
+    ))
+}
+
 pub fn gear(s: &Skin) -> svg::Handle {
     let mut out = circle(8.0, 8.0, 4.5, glyph(s), None);
     for i in 0..8 {
