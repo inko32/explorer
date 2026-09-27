@@ -34,7 +34,7 @@ pub fn run(opts: Options, out: &std::path::Path) -> Result<(), Box<dyn std::erro
         for (id, delta) in &output.textures_delta.set {
             renderer.textures.apply(*id, delta);
         }
-        renderer.render(&clipped);
+        renderer.render(&clipped, output.pixels_per_point);
         bmp::write(out, renderer.width as u32, renderer.height as u32, &renderer.buffer)?;
         for id in &output.textures_delta.free {
             renderer.textures.free(*id);

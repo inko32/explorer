@@ -206,9 +206,9 @@ impl FileView {
             [header.left_bottom(), header.right_bottom()],
             Stroke::new(1.0, p.separator),
         );
-        let x_date = width - m.col_date_w - m.col_type_w - m.col_size_w;
-        let x_type = width - m.col_type_w - m.col_size_w;
-        let x_size = width - m.col_size_w;
+        let x_date = ui.max_rect().right() - m.col_date_w - m.col_type_w - m.col_size_w;
+        let x_type = ui.max_rect().right() - m.col_type_w - m.col_size_w;
+        let x_size = ui.max_rect().right() - m.col_size_w;
         let header_font = egui::FontId::proportional(cx.theme.fonts.small);
         for (col, label, rect) in [
             (Column::Name, "Name", Rect::from_min_max(header.min, Pos2::new(x_date, header.bottom()))),

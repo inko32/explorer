@@ -28,9 +28,9 @@ pub fn titlebar(ui: &mut Ui, cx: &Cx, pending: &mut Vec<Cmd>) {
             );
             icons::draw(ui.painter(), Icon::Folder, icon_rect, cx.theme, true);
 
-            // title, centered over the whole window
+            // title, centered over the title bar band (logical units)
             ui.painter().text(
-                Pos2::new(cx.window.0 / 2.0, rect.center().y),
+                Pos2::new(rect.center().x, rect.center().y),
                 Align2::CENTER_CENTER,
                 cx.cwd_label,
                 egui::FontId::proportional(cx.theme.fonts.title),
