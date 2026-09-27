@@ -168,6 +168,38 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         icons::maximize(&skin)
     };
 
+    // Win8: contextual tab labels are colored blocks on the title bar,
+    // right-aligned before the caption buttons. Title centers in the
+    // space left of them (so it shifts when they appear).
+    let mut ctx_blocks = row![].height(Length::Fixed(30.0));
+    for tab in visible_tabs(state) {
+        let Some(accent) = tab.color.as_deref().and_then(ribbon::color_by_name) else { continue };
+        let active = state.active_tab == tab.id;
+        let width = 28.0 + tab.label.chars().count() as f32 * 7.5;
+        let block = container(
+            text(tab.label.clone())
+                .size(12.0)
+                .color(accent.scale_alpha(0.9))
+                .width(Length::Shrink),
+        )
+        .width(Length::Fixed(width))
+        .height(Length::Fixed(30.0))
+        .center_x(Length::Fixed(width))
+        .center_y(Length::Fixed(30.0))
+        .style(move |_| container::Style {
+            background: Some(accent.scale_alpha(if active { 0.5 } else { 0.3 }).into()),
+            border: iced::Border {
+                color: accent.scale_alpha(if active { 1.0 } else { 0.7 }),
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        });
+        ctx_blocks = ctx_blocks.push(
+            mouse_area(block).on_press(Message::SetTab(tab.id.clone())),
+        );
+    }
+
     container(
         row![
             container(icon(icons::folder(&skin), 16.0))
@@ -176,6 +208,7 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
                 .center_x(Length::Fixed(28.0))
                 .center_y(Length::Fill),
             drag_zone,
+            ctx_blocks,
             caption(icons::minimize(&skin), Message::Minimize, Color::from_rgba(1.0, 1.0, 1.0, 0.18)),
             caption(max_icon, Message::Maximize, Color::from_rgba(1.0, 1.0, 1.0, 0.18)),
             caption(icons::close(&skin), Message::Close, skin.close_hover),
@@ -219,7 +252,15 @@ fn tab_button(
         skin.subtle
     };
     let text_color = accent.map(|a| if active { a } else { a.scale_alpha(0.75) }).unwrap_or(text_color);
-    let btn = button(text(label.to_string()).size(12.0).color(text_color))
+    let font = if active && accent.is_none() {
+        iced::Font {
+            weight: iced::font::Weight::Bold,
+            ..Default::default()
+        }
+    } else {
+        iced::Font::default()
+    };
+    let btn = button(text(label.to_string()).size(12.0).color(text_color).font(font))
         .width(Length::Fixed(width))
         .height(Length::Fixed(28.0))
         .style(move |_t, status| {
@@ -267,6 +308,7 @@ fn tab_button(
 }
 
 /// Tabs visible right now: main tabs + contextual tabs whose `when` matches.
+
 fn visible_tabs(state: &Explorer) -> Vec<&TabDef> {
     let ctx = state.context();
     state
@@ -296,18 +338,47 @@ fn tab_row(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         });
     let mut tabs_row = row![].height(Length::Fixed(28.0));
     for tab in visible_tabs(state) {
-        let width = 20.0 + tab.label.len() as f32 * 7.5;
+        let width = 20.0 + tab.label.chars().count() as f32 * 7.5;
         let accent = tab.color.as_deref().and_then(ribbon::color_by_name);
-        tabs_row = tabs_row.push(tab_button(
-            &tab.label,
-            width,
-            state.active_tab == tab.id,
-            tab.kind.as_deref() == Some("file"),
-            accent,
-            state.self_border,
-            Message::SetTab(tab.id.clone()),
-            skin,
-        ));
+        if let Some(accent) = accent.filter(|_| state.self_border) {
+            // Win8: connecting stub under the title-bar block, labeled with
+            // the first group's caption.
+            let active = state.active_tab == tab.id;
+            let stub_label = tab.groups.first().map(|g| g.label.clone()).unwrap_or_default();
+            let stub = container(
+                text(stub_label)
+                    .size(12.0)
+                    .color(accent.scale_alpha(0.9))
+                    .width(Length::Shrink),
+            )
+            .width(Length::Fixed(width))
+            .height(Length::Fixed(28.0))
+            .center_x(Length::Fixed(width))
+            .center_y(Length::Fixed(28.0))
+            .style(move |_| container::Style {
+                background: Some(skin.ribbon_bg.into()),
+                border: iced::Border {
+                    color: accent.scale_alpha(if active { 1.0 } else { 0.55 }),
+                    width: 1.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            });
+            tabs_row = tabs_row.push(
+                mouse_area(stub).on_press(Message::SetTab(tab.id.clone())),
+            );
+        } else {
+            tabs_row = tabs_row.push(tab_button(
+                &tab.label,
+                width,
+                state.active_tab == tab.id,
+                tab.kind.as_deref() == Some("file"),
+                accent,
+                state.self_border,
+                Message::SetTab(tab.id.clone()),
+                skin,
+            ));
+        }
     }
     container(
         row![
