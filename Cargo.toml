@@ -1,0 +1,20 @@
+[package]
+name = "explorer"
+version = "0.1.0"
+edition = "2021"
+description = "Windows 8 style file explorer for POSIX/Windows (early skeleton)"
+license = "MIT"
+
+# Dependency policy (see docs/DECISIONS.md): as few as possible, all swappable.
+[dependencies]
+egui        = "0.36"  # UI toolkit — immediate mode, CPU tessellation
+egui-winit  = "0.36"  # winit <-> egui event translation (no GPU deps)
+winit       = "0.30"  # windowing (Wayland-first early stage)
+softbuffer  = "0.4"   # CPU presentation (wl_shm on Wayland)
+gio         = "0.21"  # GLib/GIO — the filesystem backend (wrapped, swappable)
+glib        = "0.21"  # gio companion
+
+[profile.release]
+opt-level = 2
+debug = false
+strip = "symbols"
