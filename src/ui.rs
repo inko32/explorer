@@ -105,14 +105,15 @@ use crate::ribbon::{self, GroupDef, TabDef};
 
 pub fn view(state: &Explorer) -> Element<'_, Message> {
     let skin = if state.dark { skin::DARK } else { skin::LIGHT };
-    column![
-        titlebar(state, skin),
-        ribbon(state, skin),
-        address_bar(state, skin),
-        row![nav_pane(state, skin), file_view(state, skin)].height(Length::Fill),
-        statusbar(state, skin),
-    ]
-    .into()
+    let mut root = column![];
+    if state.self_border {
+        root = root.push(titlebar(state, skin));
+    }
+    root = root.push(ribbon(state, skin));
+    root = root.push(address_bar(state, skin));
+    root = root.push(row![nav_pane(state, skin), file_view(state, skin)].height(Length::Fill));
+    root = root.push(statusbar(state, skin));
+    root.into()
 }
 
 fn bg(color: Color) -> impl Fn(&iced::Theme) -> container::Style + 'static {
@@ -129,20 +130,6 @@ fn icon(handle: svg::Handle, size: f32) -> Element<'static, Message> {
 // ---------------- title bar ----------------
 
 fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
-    let title_text = text(state.title())
-        .size(12.0)
-        .color(Color::WHITE)
-        .width(Length::Shrink);
-    let drag_zone = mouse_area(
-        container(title_text)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .center_x(Length::Fill)
-            .center_y(Length::Fill),
-    )
-    .on_press(Message::TitlebarPress)
-    .on_double_click(Message::TitlebarDoubleClick);
-
     let caption = |handle: svg::Handle, msg: Message, hover_bg: Color| {
         button(svg(handle).width(Length::Fixed(15.0)).height(Length::Fixed(15.0)))
             .width(Length::Fixed(46.0))
@@ -167,6 +154,56 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         icons::maximize(&skin)
     };
 
+    // Win8: contextual tab labels are colored blocks on the title bar,
+    // right-aligned before the caption buttons. Title centers in the
+    // space left of them (so it shifts when they appear).
+    let mut ctx_blocks = row![].height(Length::Fixed(30.0));
+    for tab in visible_tabs(state) {
+        let Some(accent) = tab.color.as_deref().and_then(ribbon::color_by_name) else { continue };
+        let active = state.active_tab == tab.id;
+        let width = tab_width(&tab.label);
+        let block = container(
+            text(tab.label.clone())
+                .size(12.0)
+                .color(accent.scale_alpha(0.9))
+                .width(Length::Shrink),
+        )
+        .width(Length::Fixed(width))
+        .height(Length::Fixed(30.0))
+        .center_x(Length::Fixed(width))
+        .center_y(Length::Fixed(30.0))
+        .style(move |_| container::Style {
+            background: Some(accent.scale_alpha(if active { 0.5 } else { 0.3 }).into()),
+            border: iced::Border {
+                color: accent.scale_alpha(if active { 1.0 } else { 0.7 }),
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        });
+        ctx_blocks = ctx_blocks.push(
+            mouse_area(block).on_press(Message::SetTab(tab.id.clone())),
+        );
+    }
+
+    // Win8: the contextual blocks sit exactly above their tab-row stubs
+    // (which start right after the main tabs); the title centers between
+    // the icon and the blocks.
+    let title_zone = (main_tabs_width(state) - 28.0).max(60.0);
+    let title = container(
+        text(state.title())
+            .size(12.0)
+            .color(Color::WHITE)
+            .width(Length::Shrink),
+    )
+    .width(Length::Fixed(title_zone))
+    .height(Length::Fill)
+    .center_x(Length::Fixed(title_zone))
+    .center_y(Length::Fill);
+    let drag_title = mouse_area(title)
+        .on_press(Message::TitlebarPress)
+        .on_double_click(Message::TitlebarDoubleClick);
+
     container(
         row![
             container(icon(icons::folder(&skin), 16.0))
@@ -174,7 +211,11 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
                 .height(Length::Fill)
                 .center_x(Length::Fixed(28.0))
                 .center_y(Length::Fill),
-            drag_zone,
+            drag_title,
+            ctx_blocks,
+            mouse_area(Space::new().width(Length::Fill))
+                .on_press(Message::TitlebarPress)
+                .on_double_click(Message::TitlebarDoubleClick),
             caption(icons::minimize(&skin), Message::Minimize, Color::from_rgba(1.0, 1.0, 1.0, 0.18)),
             caption(max_icon, Message::Maximize, Color::from_rgba(1.0, 1.0, 1.0, 0.18)),
             caption(icons::close(&skin), Message::Close, skin.close_hover),
@@ -202,9 +243,14 @@ fn tab_button(
     width: f32,
     active: bool,
     is_file: bool,
+    accent: Option<Color>,
+    highlight_bar: bool,
     msg: Message,
     skin: skin::Skin,
 ) -> Element<'static, Message> {
+    // Win8 contextual tabs: colored label + colored highlight bar at the
+    // top of the tab, touching the title bar (only with the self-drawn
+    // border — native decorations have no title area for the bar).
     let text_color = if is_file {
         Color::WHITE
     } else if active {
@@ -212,29 +258,74 @@ fn tab_button(
     } else {
         skin.subtle
     };
-    button(text(label.to_string()).size(12.0).color(text_color))
+    let text_color = accent.map(|a| if active { a } else { a.scale_alpha(0.75) }).unwrap_or(text_color);
+    let font = if active && accent.is_none() {
+        iced::Font {
+            weight: iced::font::Weight::Bold,
+            ..Default::default()
+        }
+    } else {
+        iced::Font::default()
+    };
+    let btn = button(text(label.to_string()).size(12.0).color(text_color).font(font))
         .width(Length::Fixed(width))
         .height(Length::Fixed(28.0))
-        .style(move |_t, status| button::Style {
-            background: if is_file {
-                Some(skin.accent.into())
+        .style(move |_t, status| {
+            let bg = if is_file {
+                Some(skin.accent)
             } else {
                 match status {
-                    button::Status::Active if active => Some(skin.ribbon_bg.into()),
-                    button::Status::Hovered if !active => Some(skin.hover.into()),
+                    button::Status::Active if active => Some(skin.ribbon_bg),
+                    button::Status::Hovered if !active => Some(skin.hover),
                     _ => None,
                 }
-            },
-            text_color,
-            border: Default::default(),
-            shadow: Default::default(),
-            snap: true,
+            };
+            let border_color = match accent {
+                Some(a) if active => a,
+                _ => Color::TRANSPARENT,
+            };
+            button::Style {
+                background: bg.map(Into::into),
+                text_color,
+                border: iced::Border {
+                    color: border_color,
+                    width: if border_color == Color::TRANSPARENT { 0.0 } else { 1.0 },
+                    radius: 0.0.into(),
+                },
+                shadow: Default::default(),
+                snap: true,
+            }
         })
-        .on_press(msg)
-        .into()
+        .on_press(msg);
+    match (accent, highlight_bar) {
+        (Some(a), true) => column![
+            container(Space::new().width(Length::Fixed(width)).height(Length::Fill))
+                .width(Length::Fixed(width))
+                .height(Length::Fixed(if active { 3.0 } else { 2.0 }))
+                .style(move |_| container::Style {
+                    background: Some(a.scale_alpha(if active { 1.0 } else { 0.45 }).into()),
+                    ..Default::default()
+                }),
+            btn,
+        ]
+        .width(Length::Fixed(width))
+        .into(),
+        _ => btn.into(),
+    }
 }
 
 /// Tabs visible right now: main tabs + contextual tabs whose `when` matches.
+
+fn tab_width(label: &str) -> f32 {
+    20.0 + label.chars().count() as f32 * 7.5
+}
+
+/// Width of the main tabs region in the tab row — contextual title-bar
+/// blocks align directly above their stubs.
+fn main_tabs_width(state: &Explorer) -> f32 {
+    state.ribbon.tabs.iter().map(|t| tab_width(&t.label)).sum()
+}
+
 fn visible_tabs(state: &Explorer) -> Vec<&TabDef> {
     let ctx = state.context();
     state
@@ -264,15 +355,47 @@ fn tab_row(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         });
     let mut tabs_row = row![].height(Length::Fixed(28.0));
     for tab in visible_tabs(state) {
-        let width = 20.0 + tab.label.len() as f32 * 7.5;
-        tabs_row = tabs_row.push(tab_button(
-            &tab.label,
-            width,
-            state.active_tab == tab.id,
-            tab.kind.as_deref() == Some("file"),
-            Message::SetTab(tab.id.clone()),
-            skin,
-        ));
+        let width = tab_width(&tab.label);
+        let accent = tab.color.as_deref().and_then(ribbon::color_by_name);
+        if let Some(accent) = accent.filter(|_| state.self_border) {
+            // Win8: connecting stub under the title-bar block, labeled with
+            // the first group's caption.
+            let active = state.active_tab == tab.id;
+            let stub_label = tab.groups.first().map(|g| g.label.clone()).unwrap_or_default();
+            let stub = container(
+                text(stub_label)
+                    .size(12.0)
+                    .color(accent.scale_alpha(0.9))
+                    .width(Length::Shrink),
+            )
+            .width(Length::Fixed(width))
+            .height(Length::Fixed(28.0))
+            .center_x(Length::Fixed(width))
+            .center_y(Length::Fixed(28.0))
+            .style(move |_| container::Style {
+                background: Some(skin.ribbon_bg.into()),
+                border: iced::Border {
+                    color: accent.scale_alpha(if active { 1.0 } else { 0.55 }),
+                    width: 1.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            });
+            tabs_row = tabs_row.push(
+                mouse_area(stub).on_press(Message::SetTab(tab.id.clone())),
+            );
+        } else {
+            tabs_row = tabs_row.push(tab_button(
+                &tab.label,
+                width,
+                state.active_tab == tab.id,
+                tab.kind.as_deref() == Some("file"),
+                accent,
+                state.self_border,
+                Message::SetTab(tab.id.clone()),
+                skin,
+            ));
+        }
     }
     container(
         row![
@@ -342,6 +465,18 @@ fn small_cmd(
     msg: Option<Message>,
     skin: skin::Skin,
 ) -> Element<'static, Message> {
+    small_cmd_active(handle, label, width, enabled, false, msg, skin)
+}
+
+fn small_cmd_active(
+    handle: svg::Handle,
+    label: &str,
+    width: f32,
+    enabled: bool,
+    active: bool,
+    msg: Option<Message>,
+    skin: skin::Skin,
+) -> Element<'static, Message> {
     let content = row![
         svg(handle).width(Length::Fixed(16.0)).height(Length::Fixed(16.0)),
         text(label.to_string()).size(11.0).color(if enabled { skin.text } else { skin.disabled }),
@@ -351,7 +486,18 @@ fn small_cmd(
     let btn = button(content)
         .width(Length::Fixed(width))
         .height(Length::Fixed(22.0))
-        .style(cmd_style(enabled, skin));
+        .style(move |_t, status| {
+            let mut style = cmd_style(enabled, skin)(_t, status);
+            if active {
+                style.background = Some(skin.pressed.into());
+                style.border = iced::Border {
+                    color: skin.accent,
+                    width: 1.0,
+                    radius: 0.0.into(),
+                };
+            }
+            style
+        });
     match (enabled, msg) {
         (true, Some(m)) => btn.on_press(m).into(),
         _ => btn.into(),
@@ -398,12 +544,18 @@ fn group_from_config(g: &GroupDef, state: &Explorer, skin: skin::Skin) -> Elemen
     for cmd in &g.commands {
         let enabled = cmd.enabled.unwrap_or(true)
             && ribbon::command_enabled(&cmd.id, has_sel, has_clip, has_items);
+        let active = match cmd.id.as_str() {
+            "toggle_border" => state.self_border,
+            "toggle_dark" => state.dark,
+            "toggle_hidden" => state.show_hidden,
+            _ => false,
+        };
         let handle = ribbon::icon_by_name(cmd.icon.as_deref().unwrap_or("file"), &skin);
         let msg = enabled.then(|| Message::RunCommand(cmd.id.clone()));
         let el = if cmd.size.as_deref() == Some("big") {
             big_cmd(handle, &cmd.label, enabled, msg, skin)
         } else {
-            small_cmd(handle, &cmd.label, 100.0, enabled, msg, skin)
+            small_cmd_active(handle, &cmd.label, 100.0, enabled, active, msg, skin)
         };
         if cmd.size.as_deref() == Some("big") {
             bigs.push(el);
