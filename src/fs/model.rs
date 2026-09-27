@@ -11,6 +11,7 @@ pub enum EntryKind {
 }
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct Entry {
     pub name: String,
     pub path: PathBuf,
@@ -31,6 +32,7 @@ impl Entry {
 }
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct Volume {
     pub name: String,
     pub mount: PathBuf,

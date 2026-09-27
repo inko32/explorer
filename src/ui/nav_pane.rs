@@ -3,7 +3,7 @@
 use crate::app::{Cmd, Cx};
 use crate::fs::Volume;
 use crate::icons::{self, Icon};
-use egui::{Align2, Id, Pos2, Rect, Sense, Stroke, Ui, Vec2};
+use egui::{Align2, Id, Pos2, Rect, Sense, Stroke, Vec2};
 use std::path::{Path, PathBuf};
 
 pub struct NavPane {
@@ -14,6 +14,7 @@ pub struct NavPane {
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 struct NavItem {
     section: &'static str,
     label: String,
@@ -57,16 +58,16 @@ impl NavPane {
         self.rebuild = false;
     }
 
-    pub fn show(&mut self, ctx: &egui::Context, cx: &Cx, pending: &mut Vec<Cmd>) {
+    pub fn show(&mut self, ui: &mut egui::Ui, cx: &Cx, pending: &mut Vec<Cmd>) {
         if self.rebuild {
             self.rebuild_items();
         }
-        egui::SidePanel::left("nav_pane")
+        egui::Panel::left("nav_pane")
             .resizable(true)
-            .default_width(cx.theme.metrics.nav_w)
-            .width_range(120.0..=420.0)
+            .default_size(cx.theme.metrics.nav_w)
+            .size_range(120.0..=420.0)
             .frame(egui::Frame::NONE.fill(cx.theme.palette.nav_bg))
-            .show(ctx, |ui| {
+            .show(ui, |ui| {
                 let m = &cx.theme.metrics;
                 let width = ui.max_rect().width();
                 egui::ScrollArea::vertical().id_salt("nav_scroll").auto_shrink([false, false]).show(ui, |ui| {
@@ -175,7 +176,7 @@ impl XdgDirs {
                 downloads: Some(home.join("Downloads")),
             };
         };
-        let mut get = |key: &str| -> Option<PathBuf> {
+        let get = |key: &str| -> Option<PathBuf> {
             for line in text.lines() {
                 let line = line.trim();
                 if let Some(rest) = line.strip_prefix(key).and_then(|r| r.trim_start().strip_prefix('=')) {

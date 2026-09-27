@@ -31,18 +31,19 @@ impl Ribbon {
         Self { tab: Tab::Home, collapsed: false, backstage: false }
     }
 
-    pub fn show(&mut self, ctx: &egui::Context, cx: &Cx, pending: &mut Vec<Cmd>) {
+    pub fn show(&mut self, ui: &mut egui::Ui, cx: &Cx, pending: &mut Vec<Cmd>) {
         let m = &cx.theme.metrics;
-        egui::TopBottomPanel::top("ribbon")
-            .exact_height(m.ribbon_tab_h + if self.collapsed { 0.0 } else { m.ribbon_h })
+        egui::Panel::top("ribbon")
+            .exact_size(m.ribbon_tab_h + if self.collapsed { 0.0 } else { m.ribbon_h })
             .frame(egui::Frame::NONE.fill(cx.theme.palette.ribbon_bg))
-            .show(ctx, |ui| {
+            .show(ui, |ui| {
                 self.tab_row(ui, cx, pending);
+                let body_top = ui.max_rect().top() + m.ribbon_tab_h;
                 if self.backstage && self.tab == Tab::File {
                     self.backstage_panel(ui, cx, pending);
                 } else if !self.collapsed {
                     let body = Rect::from_min_size(
-                        Pos2::new(ui.max_rect().left(), ui.max_rect().top()),
+                        Pos2::new(ui.max_rect().left(), body_top),
                         Vec2::new(ui.max_rect().width(), m.ribbon_h),
                     );
                     let mut strip = ui.new_child(egui::UiBuilder::new().max_rect(body));

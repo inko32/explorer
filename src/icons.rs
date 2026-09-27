@@ -7,6 +7,7 @@ use crate::theme::Theme;
 use egui::{epaint::PathShape, Color32, Painter, Pos2, Rect, Shape, Stroke, Vec2};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[allow(dead_code)] // icon vocabulary grows with features
 pub enum Icon {
     // nav pane / items
     Folder,
