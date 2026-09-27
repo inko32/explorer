@@ -1,6 +1,7 @@
 //! Application state (MVU model) — pure logic, no widgets.
 
 use std::path::{Path, PathBuf};
+use crate::fs::{self, FsEvent, Job};
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -37,20 +38,7 @@ pub enum Message {
     RenameInput(String),
     Status(String),
     Event(iced::Event),
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Tab {
-    File,
-    Home,
-    Share,
-    View,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum EntryKind {
-    Dir,
-    File,
+    FsEvent(FsEvent),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -65,20 +53,18 @@ pub enum ClipMode {
     Cut,
 }
 
-#[derive(Clone, Debug)]
-pub struct Entry {
-    pub name: String,
-    pub path: PathBuf,
-    pub kind: EntryKind,
-    pub size: u64,
-    pub modified: Option<i64>,
-    pub is_hidden: bool,
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Tab {
+    File,
+    Home,
+    Share,
+    View,
 }
 
 pub struct Explorer {
     pub window: Option<iced::window::Id>,
     pub cwd: PathBuf,
-    pub entries: Vec<Entry>,
+    pub entries: Vec<fs::Entry>,
     pub selected: std::collections::BTreeSet<usize>,
     pub hovered: Option<usize>,
     back: Vec<PathBuf>,
@@ -93,11 +79,21 @@ pub struct Explorer {
     pub renaming: Option<(usize, String)>,
     pub status: String,
     pub last_click: Option<(usize, std::time::Instant)>,
+    pub loading: bool,
+    pub volumes: Vec<fs::Volume>,
+    sched: fs::Scheduler,
+    pending_rename: Option<String>,
 }
 
 impl Explorer {
     pub fn new() -> Self {
-        let cwd = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"));
+        let (sched, ev_rx) = fs::spawn();
+        let _ = crate::FS_STREAM_RX.set(std::sync::Mutex::new(Some(ev_rx)));
+        let cwd = std::env::args()
+            .nth(1)
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
+            .unwrap_or_else(|| PathBuf::from("/"));
         let mut s = Self {
             window: None,
             cwd,
@@ -115,8 +111,13 @@ impl Explorer {
             renaming: None,
             status: String::new(),
             last_click: None,
+            loading: false,
+            volumes: Vec::new(),
+            sched,
+            pending_rename: None,
         };
-        s.reload();
+        s.request_listing();
+        s.sched.send(Job::Volumes);
         s
     }
 
@@ -147,11 +148,9 @@ impl Explorer {
         }
     }
 
-    fn reload(&mut self) {
-        self.entries = list_dir(&self.cwd, self.show_hidden);
-        self.selected.clear();
-        self.hovered = None;
-        self.renaming = None;
+    fn request_listing(&mut self) {
+        self.sched.send(Job::List(self.cwd.clone()));
+        self.loading = true;
     }
 
     fn navigate(&mut self, path: PathBuf) {
@@ -161,7 +160,9 @@ impl Explorer {
         self.back.push(self.cwd.clone());
         self.forward.clear();
         self.cwd = path;
-        self.reload();
+        self.selected.clear();
+        self.renaming = None;
+        self.request_listing();
     }
 
     fn selected_paths(&self) -> Vec<PathBuf> {
@@ -182,63 +183,23 @@ impl Explorer {
 
     fn paste(&mut self) {
         let Some((mode, sources)) = self.clipboard.clone() else { return };
-        let dest = self.cwd.clone();
-        let mut errors = 0usize;
-        for src in &sources {
-            if let Err(e) = copy_recursive(src, &dest) {
-                self.status = format!("{}: {}", src.display(), e);
-                errors += 1;
-            }
-            if mode == ClipMode::Cut {
-                let _ = if src.is_dir() {
-                    std::fs::remove_dir_all(src)
-                } else {
-                    std::fs::remove_file(src)
-                };
-            }
+        if sources.is_empty() {
+            return;
         }
-        if errors == 0 {
-            self.status.clear();
-        }
-        if mode == ClipMode::Cut {
+        let cut = mode == ClipMode::Cut;
+        self.sched.send(Job::Copy { sources, dest_dir: self.cwd.clone(), cut });
+        self.status = "Copying…".into();
+        if cut {
             self.clipboard = None;
         }
-        self.reload();
     }
 
     fn delete_selection(&mut self) {
         let paths = self.selected_paths();
-        for p in &paths {
-            let r = if p.is_dir() {
-                std::fs::remove_dir_all(p)
-            } else {
-                std::fs::remove_file(p)
-            };
-            if let Err(e) = r {
-                self.status = format!("{}: {}", p.display(), e);
-            }
+        if paths.is_empty() {
+            return;
         }
-        self.reload();
-    }
-
-    fn new_folder(&mut self) {
-        for n in 0..100 {
-            let name = if n == 0 { "New folder".to_string() } else { format!("New folder ({})", n + 1) };
-            let path = self.cwd.join(&name);
-            if !path.exists() {
-                if let Err(e) = std::fs::create_dir(&path) {
-                    self.status = format!("{}", e);
-                    return;
-                }
-                self.reload();
-                if let Some(i) = self.entries.iter().position(|e| e.name == name) {
-                    self.selected.clear();
-                    self.selected.insert(i);
-                    self.renaming = Some((i, name));
-                }
-                return;
-            }
-        }
+        self.sched.send(Job::Trash(paths));
     }
 
     pub fn start_rename(&mut self) {
@@ -256,12 +217,74 @@ impl Explorer {
             if !name.is_empty() && i < self.entries.len() && name != self.entries[i].name {
                 let from = self.entries[i].path.clone();
                 let to = from.with_file_name(&name);
-                if let Err(e) = std::fs::rename(&from, &to) {
-                    self.status = format!("Rename failed: {e}");
-                }
+                self.sched.send(Job::Rename(from, to));
             }
         }
-        self.reload();
+    }
+
+    fn handle_fs_event(&mut self, ev: FsEvent) {
+        match ev {
+            FsEvent::Listed { path, result } => {
+                if path == self.cwd {
+                    self.loading = false;
+                    match result {
+                        Ok(entries) => {
+                            self.entries = entries;
+                            self.selected.clear();
+                            self.hovered = None;
+                            self.renaming = None;
+                            if let Some(name) = self.pending_rename.take() {
+                                if let Some(i) = self.entries.iter().position(|e| e.name == name) {
+                                    self.selected.insert(i);
+                                    self.renaming = Some((i, name));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            self.entries.clear();
+                            self.status = e;
+                        }
+                    }
+                }
+            }
+            FsEvent::Volumes(v) => self.volumes = v,
+            FsEvent::DirCreated { parent, result } => {
+                if parent == self.cwd {
+                    if let Ok(name) = result {
+                        self.pending_rename = Some(name);
+                    }
+                    self.request_listing();
+                }
+            }
+            FsEvent::Renamed { result } => {
+                if let Err(e) = result {
+                    self.status = format!("Rename failed: {e}");
+                }
+                self.request_listing();
+            }
+            FsEvent::Trashed { result } => {
+                if let Err(e) = result {
+                    self.status = format!("Delete failed: {e}");
+                }
+                self.request_listing();
+            }
+            FsEvent::OpProgress { done_bytes, total_bytes, current } => {
+                let pct = if total_bytes > 0 { done_bytes * 100 / total_bytes } else { 0 };
+                self.status = format!(
+                    "Copying {} — {}%",
+                    current.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
+                    pct
+                );
+            }
+            FsEvent::OpDone { result } => {
+                if let Err(e) = result {
+                    self.status = format!("Operation failed: {e}");
+                } else {
+                    self.status.clear();
+                }
+                self.request_listing();
+            }
+        }
     }
 
     pub fn update(&mut self, message: Message) -> iced::Task<Message> {
@@ -278,7 +301,9 @@ impl Explorer {
                 if let Some(p) = self.back.pop() {
                     self.forward.push(self.cwd.clone());
                     self.cwd = p;
-                    self.reload();
+                    self.selected.clear();
+                    self.renaming = None;
+                    self.request_listing();
                 }
                 iced::Task::none()
             }
@@ -286,7 +311,9 @@ impl Explorer {
                 if let Some(p) = self.forward.pop() {
                     self.back.push(self.cwd.clone());
                     self.cwd = p;
-                    self.reload();
+                    self.selected.clear();
+                    self.renaming = None;
+                    self.request_listing();
                 }
                 iced::Task::none()
             }
@@ -297,7 +324,7 @@ impl Explorer {
                 iced::Task::none()
             }
             Message::Refresh => {
-                self.reload();
+                self.request_listing();
                 iced::Task::none()
             }
             Message::Select(i) => {
@@ -308,9 +335,11 @@ impl Explorer {
                 if let Some((last_i, t)) = self.last_click {
                     if last_i == i && now.duration_since(t).as_millis() < 400 {
                         self.last_click = None;
-                        let p = self.entries[i].path.clone();
-                        if self.entries[i].kind == EntryKind::Dir {
-                            self.navigate(p);
+                        if let Some(e) = self.entries.get(i) {
+                            if e.kind == fs::EntryKind::Dir || fs::archive::is_archive_path(&e.path) {
+                                let p = e.path.clone();
+                                self.navigate(p);
+                            }
                         }
                         return iced::Task::none();
                     }
@@ -324,7 +353,7 @@ impl Explorer {
             }
             Message::Open(i) => {
                 if let Some(e) = self.entries.get(i) {
-                    if e.kind == EntryKind::Dir {
+                    if e.kind == fs::EntryKind::Dir || fs::archive::is_archive_path(&e.path) {
                         let p = e.path.clone();
                         self.navigate(p);
                     }
@@ -392,7 +421,7 @@ impl Explorer {
                 iced::Task::none()
             }
             Message::NewFolder => {
-                self.new_folder();
+                self.sched.send(Job::Mkdir(self.cwd.clone()));
                 iced::Task::none()
             }
             Message::SelectAll => {
@@ -416,7 +445,7 @@ impl Explorer {
             }
             Message::ToggleHidden => {
                 self.show_hidden = !self.show_hidden;
-                self.reload();
+                self.request_listing();
                 iced::Task::none()
             }
             Message::SetTab(t) => {
@@ -439,83 +468,12 @@ impl Explorer {
                 }
                 iced::Task::none()
             }
+            Message::FsEvent(ev) => {
+                self.handle_fs_event(ev);
+                iced::Task::none()
+            }
         }
     }
-}
-
-/// Copy src (file or dir tree) into dest_dir; conflicts auto-rename " (2)".
-fn copy_recursive(src: &Path, dest_dir: &Path) -> std::io::Result<()> {
-    let name = src.file_name().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "no name"))?;
-    let dst = auto_rename(&dest_dir.join(name));
-    if src.is_dir() {
-        std::fs::create_dir_all(&dst)?;
-        for e in std::fs::read_dir(src)? {
-            let e = e?;
-            copy_recursive(&e.path(), &dst)?;
-        }
-    } else {
-        if let Some(parent) = dst.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::copy(src, &dst)?;
-    }
-    Ok(())
-}
-
-fn auto_rename(dst: &Path) -> PathBuf {
-    if !dst.exists() {
-        return dst.to_path_buf();
-    }
-    let parent = dst.parent().unwrap_or(Path::new("/"));
-    let stem = dst.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    let ext = dst.extension().map(|e| e.to_string_lossy().into_owned());
-    for n in 2..1000 {
-        let name = match &ext {
-            Some(ext) if !ext.is_empty() => format!("{} ({}).{}", stem, n, ext),
-            _ => format!("{} ({})", stem, n),
-        };
-        let candidate = parent.join(name);
-        if !candidate.exists() {
-            return candidate;
-        }
-    }
-    dst.to_path_buf()
-}
-
-fn list_dir(path: &Path, show_hidden: bool) -> Vec<Entry> {
-    let mut out: Vec<Entry> = match std::fs::read_dir(path) {
-        Ok(rd) => rd
-            .filter_map(|e| e.ok())
-            .map(|e| {
-                let p = e.path();
-                let name = e.file_name().to_string_lossy().into_owned();
-                let meta = std::fs::metadata(&p).ok();
-                let (kind, size, modified) = match &meta {
-                    Some(m) => (
-                        if m.is_dir() { EntryKind::Dir } else { EntryKind::File },
-                        m.len(),
-                        m.modified()
-                            .ok()
-                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                            .map(|d| d.as_secs() as i64),
-                    ),
-                    None => (EntryKind::File, 0, None),
-                };
-                let is_hidden = name.starts_with('.');
-                Entry { name, path: p, kind, size, modified, is_hidden }
-            })
-            .filter(|e| show_hidden || !e.is_hidden)
-            .collect(),
-        Err(_) => Vec::new(),
-    };
-    out.sort_by(|a, b| {
-        let dir_first = (b.kind == EntryKind::Dir).cmp(&(a.kind == EntryKind::Dir));
-        if dir_first != std::cmp::Ordering::Equal {
-            return dir_first;
-        }
-        a.name.to_lowercase().cmp(&b.name.to_lowercase())
-    });
-    out
 }
 
 /// "3/12/2012 10:20 PM" — Win8 en-US short format (hand-rolled, no chrono).
@@ -572,22 +530,35 @@ pub fn format_size(bytes: u64) -> String {
     }
 }
 
-pub fn type_label(e: &Entry) -> &'static str {
-    if e.kind == EntryKind::Dir {
+pub fn type_label(e: &fs::Entry) -> &'static str {
+    if e.is_symlink {
+        return "Shortcut";
+    }
+    if e.is_dir() {
         return "File folder";
     }
-    match e.name.rsplit_once('.').map(|(_, x)| x.to_lowercase()).unwrap_or_default().as_str() {
+    let ext = e.name.rsplit_once('.').map(|(_, x)| x.to_lowercase()).unwrap_or_default();
+    match ext.as_str() {
+        "7z" => "7-Zip Archive",
+        "zip" => "ZIP Archive",
+        "rar" => "WinRAR Archive",
+        "tar" => "TAR Archive",
+        "gz" | "tgz" => "GZIP Archive",
+        "bz2" => "Bzip2 Archive",
+        "xz" => "XZ Archive",
+        "zst" => "Zstandard Archive",
+        "iso" => "ISO Image",
         "png" => "PNG File",
         "jpg" | "jpeg" => "JPEG Image",
         "gif" => "GIF Image",
         "txt" => "Text Document",
         "md" => "Markdown Document",
         "pdf" => "PDF Document",
-        "zip" => "Compressed Folder",
         "rs" => "Rust Source File",
         "sh" => "Shell Script",
         "mp3" | "flac" | "ogg" => "Audio File",
         "mp4" | "mkv" | "mov" => "Video File",
+        _ if fs::archive::is_archive_path(&e.path) => "Archive File",
         _ => "File",
     }
 }

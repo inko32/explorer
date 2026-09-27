@@ -98,8 +98,9 @@ use iced::widget::{
 };
 use iced::{Color, Element, Length};
 
+use crate::fs::{self, Entry};
 use crate::icons;
-use crate::model::{self, Entry, EntryKind, Explorer, Message, Tab, ViewMode};
+use crate::model::{self, Explorer, Message, Tab, ViewMode};
 
 pub fn view(state: &Explorer) -> Element<'_, Message> {
     let skin = if state.dark { skin::DARK } else { skin::LIGHT };
@@ -637,7 +638,7 @@ fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
 // ---------------- nav pane ----------------
 
 fn nav_item(
-    label: &'static str,
+    label: String,
     handle: svg::Handle,
     selected: bool,
     msg: Option<Message>,
@@ -694,7 +695,7 @@ fn nav_pane(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     for (label, handle, target) in favs.drain(..) {
         let selected = target.as_deref() == Some(state.cwd.as_path());
         let msg = target.map(Message::Navigate);
-        list = list.push(nav_item(label, handle, selected, msg, skin));
+        list = list.push(nav_item(label.to_string(), handle, selected, msg, skin));
     }
 
     list = list.push(
@@ -706,12 +707,23 @@ fn nav_pane(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         .padding([4.0, 6.0]),
     );
     list = list.push(nav_item(
-        "Computer",
+        "Computer".to_string(),
         icons::computer(&skin),
         state.cwd == Path::new("/"),
         Some(Message::Navigate(PathBuf::from("/"))),
         skin,
     ));
+    for v in &state.volumes {
+        let selected = state.cwd == v.mount;
+        let mount = v.mount.clone();
+        list = list.push(nav_item(
+            v.name.clone(),
+            icons::drive(&skin),
+            selected,
+            Some(Message::Navigate(mount)),
+            skin,
+        ));
+    }
 
     list = list.push(
         row![
@@ -721,7 +733,7 @@ fn nav_pane(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         .spacing(6)
         .padding([4.0, 6.0]),
     );
-    list = list.push(nav_item("Network", icons::network(&skin), false, None, skin));
+    list = list.push(nav_item("Network".to_string(), icons::network(&skin), false, None, skin));
 
     container(list)
         .width(Length::Fixed(210.0))
@@ -762,7 +774,18 @@ fn file_view(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         ..Default::default()
     });
 
-    let body: Element<Message> = match state.view {
+    let body: Element<Message> = if state.loading {
+        container(
+            container(text("Loading…").size(12.0).color(skin.subtle))
+                .width(Length::Fill)
+                .center_x(Length::Fill)
+                .center_y(Length::Fill),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+    } else {
+        match state.view {
         ViewMode::Details => {
             let mut rows = column![].spacing(0);
             for (i, e) in state.entries.iter().enumerate() {
@@ -783,6 +806,7 @@ fn file_view(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
             grid = grid.push(current);
             scrollable(grid).height(Length::Fill).into()
         }
+        }
     };
 
     container(column![header, body])
@@ -793,9 +817,12 @@ fn file_view(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
 }
 
 fn entry_icon(e: &Entry, skin: skin::Skin) -> svg::Handle {
+    if !e.is_dir() && fs::archive::is_archive_path(&e.path) {
+        return icons::archive(&skin);
+    }
     match e.kind {
-        EntryKind::Dir => icons::folder(&skin),
-        EntryKind::File => {
+        fs::EntryKind::Dir => icons::folder(&skin),
+        fs::EntryKind::File | fs::EntryKind::Other => {
             if matches!(
                 e.name.rsplit_once('.').map(|(_, x)| x.to_lowercase()).unwrap_or_default().as_str(),
                 "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp"
@@ -844,7 +871,7 @@ fn file_row<'a>(i: usize, e: &Entry, state: &Explorer, skin: skin::Skin) -> Elem
             .width(Length::Fixed(140.0))
             .padding([2.0, 4.0]),
         container(
-            text(if e.kind == EntryKind::Dir { String::new() } else { model::format_size(e.size) })
+            text(if e.kind == fs::EntryKind::Dir { String::new() } else { model::format_size(e.size) })
                 .size(12.0)
                 .color(skin.text),
         )
