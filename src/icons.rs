@@ -1,9 +1,9 @@
 //! Placeholder SVG icon set (spec: "draw an svg and leave all icons pointing
 //! to it"). Every icon is a tiny SVG string with theme colors baked in.
 //! Swap for a real icon theme / shell32-derived set later — only this file
-//! changes.
+//! changes. Vocabulary grows with features.
+#![allow(dead_code)]
 
-#[allow(dead_code)]
 use iced::widget::svg;
 use iced::Color;
 
