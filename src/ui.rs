@@ -9,11 +9,13 @@ pub mod skin {
         pub accent_dark: iced::Color,
         pub titlebar_inactive: iced::Color,
         pub window_bg: iced::Color,
+        pub ribbon_bg: iced::Color,
         pub nav_bg: iced::Color,
         pub toolbar_bg: iced::Color,
         pub status_bg: iced::Color,
         pub col_header_bg: iced::Color,
         pub hover: iced::Color,
+        pub pressed: iced::Color,
         pub sel: iced::Color,
         pub sel_border: iced::Color,
         pub sep: iced::Color,
@@ -21,6 +23,7 @@ pub mod skin {
         pub subtle: iced::Color,
         pub disabled: iced::Color,
         pub folder: iced::Color,
+        pub folder_edge: iced::Color,
         pub close_hover: iced::Color,
         pub address_border: iced::Color,
     }
@@ -30,11 +33,13 @@ pub mod skin {
         accent_dark: color!(0x00559B),
         titlebar_inactive: color!(0xC8C8C8),
         window_bg: color!(0xFFFFFF),
+        ribbon_bg: color!(0xFFFFFF),
         nav_bg: color!(0xFFFFFF),
         toolbar_bg: color!(0xFFFFFF),
         status_bg: color!(0xFFFFFF),
         col_header_bg: color!(0xF7F7F7),
         hover: color!(0xE5F1FB),
+        pressed: color!(0xCCE4F7),
         sel: color!(0xCDE6F7),
         sel_border: color!(0x0078D7),
         sep: color!(0xDADADA),
@@ -42,6 +47,7 @@ pub mod skin {
         subtle: color!(0x666666),
         disabled: color!(0xA0A0A0),
         folder: color!(0xF6C356),
+        folder_edge: color!(0xC88E1E),
         close_hover: color!(0xE81123),
         address_border: color!(0xA9A9A9),
     };
@@ -51,11 +57,13 @@ pub mod skin {
         accent_dark: color!(0x004A86),
         titlebar_inactive: color!(0x3A3A3A),
         window_bg: color!(0x1E1E1E),
+        ribbon_bg: color!(0x2D2D2D),
         nav_bg: color!(0x252526),
         toolbar_bg: color!(0x2D2D2D),
         status_bg: color!(0x252526),
         col_header_bg: color!(0x2B2B2C),
         hover: color!(0x3A4046),
+        pressed: color!(0x4A525A),
         sel: color!(0x2F5480),
         sel_border: color!(0x0078D7),
         sep: color!(0x454545),
@@ -63,6 +71,7 @@ pub mod skin {
         subtle: color!(0xA0A0A0),
         disabled: color!(0x6E6E6E),
         folder: color!(0xC89B3C),
+        folder_edge: color!(0x8A6618),
         close_hover: color!(0xE81123),
         address_border: color!(0x555555),
     };
@@ -83,15 +92,19 @@ pub mod skin {
 
 use std::path::{Path, PathBuf};
 
-use iced::widget::{button, column, container, mouse_area, row, scrollable, text, Space};
+use iced::widget::{
+    button, column, container, mouse_area, row, scrollable, svg, text, text_input, Space,
+};
 use iced::{Color, Element, Length};
 
-use crate::model::{self, Entry, EntryKind, Explorer, Message};
+use crate::icons;
+use crate::model::{self, Entry, EntryKind, Explorer, Message, Tab, ViewMode};
 
 pub fn view(state: &Explorer) -> Element<'_, Message> {
     let skin = if state.dark { skin::DARK } else { skin::LIGHT };
     column![
         titlebar(state, skin),
+        ribbon(state, skin),
         address_bar(state, skin),
         row![nav_pane(state, skin), file_view(state, skin)].height(Length::Fill),
         statusbar(state, skin),
@@ -106,9 +119,14 @@ fn bg(color: Color) -> impl Fn(&iced::Theme) -> container::Style + 'static {
     }
 }
 
+fn icon(handle: svg::Handle, size: f32) -> Element<'static, Message> {
+    svg(handle).width(Length::Fixed(size)).height(Length::Fixed(size)).into()
+}
+
+// ---------------- title bar ----------------
+
 fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
-    let title = state.title();
-    let title_text = text(title)
+    let title_text = text(state.title())
         .size(12.0)
         .color(Color::WHITE)
         .width(Length::Shrink);
@@ -122,8 +140,8 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     .on_press(Message::TitlebarPress)
     .on_double_click(Message::TitlebarDoubleClick);
 
-    let caption = |label: &'static str, msg: Message, hover_bg: Color| {
-        button(text(label).size(11.0).color(Color::WHITE))
+    let caption = |handle: svg::Handle, msg: Message, hover_bg: Color| {
+        button(svg(handle).width(Length::Fixed(15.0)).height(Length::Fixed(15.0)))
             .width(Length::Fixed(46.0))
             .height(Length::Fill)
             .style(move |_t, status| button::Style {
@@ -140,14 +158,23 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
             .on_press(msg)
     };
 
+    let max_icon = if state.maximized {
+        icons::restore(&skin)
+    } else {
+        icons::maximize(&skin)
+    };
+
     container(
         row![
-            container(Space::new().width(Length::Fixed(8.0)).height(Length::Fixed(30.0)))
-                .style(bg(skin.folder)),
+            container(icon(icons::folder(&skin), 16.0))
+                .width(Length::Fixed(28.0))
+                .height(Length::Fill)
+                .center_x(Length::Fixed(28.0))
+                .center_y(Length::Fill),
             drag_zone,
-            caption("—", Message::Minimize, Color::from_rgba(1.0, 1.0, 1.0, 0.18)),
-            caption("□", Message::Maximize, Color::from_rgba(1.0, 1.0, 1.0, 0.18)),
-            caption("✕", Message::Close, skin.close_hover),
+            caption(icons::minimize(&skin), Message::Minimize, Color::from_rgba(1.0, 1.0, 1.0, 0.18)),
+            caption(max_icon, Message::Maximize, Color::from_rgba(1.0, 1.0, 1.0, 0.18)),
+            caption(icons::close(&skin), Message::Close, skin.close_hover),
         ]
         .height(Length::Fixed(30.0)),
     )
@@ -157,69 +184,351 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     .into()
 }
 
-fn nav_pane(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    let mut items: Vec<(&str, Option<PathBuf>)> = vec![
-        ("Desktop", home.as_ref().map(|h| h.join("Desktop"))),
-        ("Documents", home.as_ref().map(|h| h.join("Documents"))),
-        ("Downloads", home.as_ref().map(|h| h.join("Downloads"))),
-    ];
-    items.push(("Computer", Some(PathBuf::from("/"))));
+// ---------------- ribbon ----------------
 
-    let mut list = column![].spacing(0).padding(4);
-    for (label, target) in items {
-        let selected = target.as_deref() == Some(state.cwd.as_path());
-        let bgc = if selected {
-            skin.sel
-        } else {
-            Color::TRANSPARENT
-        };
-        let t = target.clone();
-        let item: Element<Message> = container(
-            text(label.to_string())
-                .size(12.0)
-                .color(if selected { skin.text } else { skin.text }),
-        )
-        .padding([3.0, 8.0])
+fn ribbon(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
+    container(column![tab_row(state, skin), ribbon_body(state, skin)])
         .width(Length::Fill)
-        .style(move |_t: &iced::Theme| container::Style {
-            background: Some(bgc.into()),
-            border: iced::Border {
-                color: if selected { skin.sel_border } else { Color::TRANSPARENT },
-                width: 1.0,
-                radius: 0.0.into(),
-            },
-            ..Default::default()
-        })
-        .into();
-        let el: Element<Message> = match t {
-            Some(path) => mouse_area(item).on_press(Message::Navigate(path)).into(),
-            None => item,
-        };
-        list = list.push(el);
-    }
-
-    container(list)
-        .width(Length::Fixed(210.0))
-        .height(Length::Fill)
-        .style(bg(skin.nav_bg))
+        .height(Length::Fixed(122.0))
+        .style(bg(skin.ribbon_bg))
         .into()
 }
 
-fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
-    let nav_btn = |label: &'static str, msg: Message, enabled: bool| {
-        button(text(label).size(12.0).color(if enabled { skin.accent } else { skin.disabled }))
-            .width(Length::Fixed(28.0))
-            .height(Length::Fixed(28.0))
-            .style(move |_t, _status| button::Style {
-                background: None,
-                text_color: if enabled { skin.accent } else { skin.disabled },
-                border: Default::default(),
-                shadow: Default::default(),
-                snap: true,
-            })
-            .on_press_maybe(enabled.then_some(msg))
+fn tab_button(
+    label: &'static str,
+    width: f32,
+    active: bool,
+    is_file: bool,
+    msg: Message,
+    skin: skin::Skin,
+) -> Element<'static, Message> {
+    let text_color = if is_file {
+        Color::WHITE
+    } else if active {
+        skin.text
+    } else {
+        skin.subtle
     };
+    button(text(label).size(12.0).color(text_color))
+        .width(Length::Fixed(width))
+        .height(Length::Fixed(28.0))
+        .style(move |_t, status| button::Style {
+            background: if is_file {
+                Some(skin.accent.into())
+            } else {
+                match status {
+                    button::Status::Active if active => Some(skin.ribbon_bg.into()),
+                    button::Status::Hovered if !active => Some(skin.hover.into()),
+                    _ => None,
+                }
+            },
+            text_color,
+            border: Default::default(),
+            shadow: Default::default(),
+            snap: true,
+        })
+        .on_press(msg)
+        .into()
+}
+
+fn tab_row(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
+    let help = button(icon(icons::help(&skin), 16.0))
+        .width(Length::Fixed(24.0))
+        .height(Length::Fixed(24.0))
+        .style(|_t, _status| button::Style {
+            background: None,
+            text_color: Color::TRANSPARENT,
+            border: Default::default(),
+            shadow: Default::default(),
+            snap: true,
+        });
+    container(
+        row![
+            tab_button("File", 46.0, state.tab == Tab::File, true, Message::SetTab(Tab::File), skin),
+            tab_button("Home", 58.0, state.tab == Tab::Home, false, Message::SetTab(Tab::Home), skin),
+            tab_button("Share", 58.0, state.tab == Tab::Share, false, Message::SetTab(Tab::Share), skin),
+            tab_button("View", 54.0, state.tab == Tab::View, false, Message::SetTab(Tab::View), skin),
+            Space::new().width(Length::Fill),
+            container(help).height(Length::Fixed(28.0)).center_y(Length::Fixed(28.0)).padding([0.0, 6.0]),
+        ]
+        .height(Length::Fixed(28.0)),
+    )
+    .width(Length::Fill)
+    .height(Length::Fixed(28.0))
+    .into()
+}
+
+fn cmd_style(
+    enabled: bool,
+    skin: skin::Skin,
+) -> impl Fn(&iced::Theme, button::Status) -> button::Style + 'static {
+    move |_t, status| {
+        let (bgc, tc) = if !enabled {
+            (None, skin.disabled)
+        } else {
+            match status {
+                button::Status::Hovered => (Some(skin.hover), skin.text),
+                button::Status::Pressed => (Some(skin.pressed), skin.text),
+                _ => (None, skin.text),
+            }
+        };
+        button::Style {
+            background: bgc.map(Into::into),
+            text_color: tc,
+            border: Default::default(),
+            shadow: Default::default(),
+            snap: true,
+        }
+    }
+}
+
+fn big_cmd(
+    handle: svg::Handle,
+    label: &'static str,
+    enabled: bool,
+    msg: Option<Message>,
+    skin: skin::Skin,
+) -> Element<'static, Message> {
+    let content = column![
+        svg(handle).width(Length::Fixed(42.0)).height(Length::Fixed(42.0)),
+        text(label).size(11.0).color(if enabled { skin.text } else { skin.disabled }),
+    ]
+    .spacing(2)
+    .align_x(iced::Alignment::Center)
+    .width(Length::Fixed(56.0));
+    let btn = button(content)
+        .height(Length::Fixed(77.0))
+        .style(cmd_style(enabled, skin));
+    match (enabled, msg) {
+        (true, Some(m)) => btn.on_press(m).into(),
+        _ => btn.into(),
+    }
+}
+
+fn small_cmd(
+    handle: svg::Handle,
+    label: &'static str,
+    width: f32,
+    enabled: bool,
+    msg: Option<Message>,
+    skin: skin::Skin,
+) -> Element<'static, Message> {
+    let content = row![
+        svg(handle).width(Length::Fixed(16.0)).height(Length::Fixed(16.0)),
+        text(label).size(11.0).color(if enabled { skin.text } else { skin.disabled }),
+    ]
+    .spacing(5)
+    .align_y(iced::Alignment::Center);
+    let btn = button(content)
+        .width(Length::Fixed(width))
+        .height(Length::Fixed(22.0))
+        .style(cmd_style(enabled, skin));
+    match (enabled, msg) {
+        (true, Some(m)) => btn.on_press(m).into(),
+        _ => btn.into(),
+    }
+}
+
+fn group(caption: &'static str, width: f32, content: Element<'static, Message>, skin: skin::Skin) -> Element<'static, Message> {
+    let sep = container(Space::new().width(Length::Fixed(1.0)).height(Length::Fixed(76.0)))
+        .style(bg(skin.sep))
+        .height(Length::Fixed(76.0))
+        .center_y(Length::Fixed(79.0));
+    row![
+        sep,
+        column![
+            container(content).width(Length::Fixed(width)).height(Length::Fixed(79.0)).padding([4.0, 3.0]),
+            container(text(caption).size(11.0).color(skin.subtle))
+                .width(Length::Fixed(width + 4.0))
+                .height(Length::Fixed(15.0))
+                .center_x(Length::Fixed(width + 4.0)),
+        ],
+    ]
+    .into()
+}
+
+fn ribbon_body(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
+    let has_sel = !state.selected.is_empty();
+    let has_items = !state.entries.is_empty();
+    let has_clip = state.clipboard.is_some();
+    match state.tab {
+        Tab::Home => row![
+            group(
+                "Clipboard",
+                160.0,
+                row![
+                    big_cmd(icons::paste(&skin), "Paste", has_clip, Some(Message::Paste), skin),
+                    column![
+                        small_cmd(icons::cut(&skin), "Cut", 100.0, has_sel, Some(Message::CutSelection), skin),
+                        small_cmd(icons::copy(&skin), "Copy", 100.0, has_sel, Some(Message::CopySelection), skin),
+                        small_cmd(icons::copy_path(&skin), "Copy path", 100.0, false, None, skin),
+                        small_cmd(icons::paste_shortcut(&skin), "Paste shortcut", 100.0, false, None, skin),
+                    ]
+                    .spacing(1),
+                ]
+                .into(),
+                skin,
+            ),
+            group(
+                "Organize",
+                210.0,
+                row![
+                    column![
+                        small_cmd(icons::move_to(&skin), "Move to", 100.0, false, None, skin),
+                        small_cmd(icons::delete(&skin), "Delete", 100.0, has_sel, Some(Message::DeleteSelection), skin),
+                    ]
+                    .spacing(1),
+                    column![
+                        small_cmd(icons::copy_to(&skin), "Copy to", 100.0, false, None, skin),
+                        small_cmd(icons::rename(&skin), "Rename", 100.0, has_sel, Some(Message::RenameSelected), skin),
+                    ]
+                    .spacing(1),
+                ]
+                .spacing(2)
+                .into(),
+                skin,
+            ),
+            group(
+                "New",
+                148.0,
+                row![
+                    big_cmd(icons::new_folder(&skin), "New folder", true, Some(Message::NewFolder), skin),
+                    column![
+                        small_cmd(icons::new_item(&skin), "New item", 84.0, false, None, skin),
+                        small_cmd(icons::easy_access(&skin), "Easy access", 84.0, false, None, skin),
+                    ]
+                    .spacing(1),
+                ]
+                .into(),
+                skin,
+            ),
+            group(
+                "Open",
+                132.0,
+                row![
+                    big_cmd(icons::properties(&skin), "Properties", false, None, skin),
+                    column![
+                        small_cmd(icons::open(&skin), "Open", 68.0, false, None, skin),
+                        small_cmd(icons::edit(&skin), "Edit", 68.0, false, None, skin),
+                        small_cmd(icons::history(&skin), "History", 68.0, false, None, skin),
+                    ]
+                    .spacing(1),
+                ]
+                .into(),
+                skin,
+            ),
+            group(
+                "Select",
+                116.0,
+                column![
+                    small_cmd(icons::select_all(&skin), "Select all", 108.0, has_items, Some(Message::SelectAll), skin),
+                    small_cmd(icons::select_none(&skin), "Select none", 108.0, has_sel, Some(Message::SelectNone), skin),
+                    small_cmd(icons::invert_sel(&skin), "Invert selection", 108.0, has_items, Some(Message::InvertSelection), skin),
+                ]
+                .spacing(1)
+                .into(),
+                skin,
+            ),
+        ]
+        .into(),
+        Tab::Share => row![
+            group(
+                "Share with",
+                100.0,
+                column![small_cmd(icons::properties(&skin), "Nobody", 96.0, false, None, skin)].spacing(1).into(),
+                skin,
+            ),
+            group(
+                "Send",
+                100.0,
+                column![small_cmd(icons::copy_to(&skin), "Email", 96.0, false, None, skin)].spacing(1).into(),
+                skin,
+            ),
+        ]
+        .into(),
+        Tab::View => row![
+            group(
+                "Layout",
+                100.0,
+                column![
+                    small_cmd(icons::view_large(&skin), "Large icons", 96.0, state.view != ViewMode::Large, Some(Message::SetView(ViewMode::Large)), skin),
+                    small_cmd(icons::view_details(&skin), "Details", 96.0, state.view != ViewMode::Details, Some(Message::SetView(ViewMode::Details)), skin),
+                ]
+                .spacing(1)
+                .into(),
+                skin,
+            ),
+            group(
+                "Show/hide",
+                110.0,
+                column![
+                    small_cmd(icons::computer(&skin), "Navigation pane", 106.0, false, None, skin),
+                    small_cmd(icons::file(&skin), "Hidden items", 106.0, true, Some(Message::ToggleHidden), skin),
+                ]
+                .spacing(1)
+                .into(),
+                skin,
+            ),
+            group(
+                "Options",
+                100.0,
+                column![
+                    small_cmd(icons::gear(&skin), "Dark mode", 96.0, true, Some(Message::ToggleDark), skin),
+                    small_cmd(icons::gear(&skin), "Folder options", 96.0, false, None, skin),
+                ]
+                .spacing(1)
+                .into(),
+                skin,
+            ),
+        ]
+        .into(),
+        Tab::File => Space::new().width(Length::Fill).height(Length::Fixed(94.0)).into(),
+    }
+}
+
+// ---------------- address bar ----------------
+
+fn nav_circle(handle: svg::Handle, enabled: bool, msg: Message, skin: skin::Skin) -> Element<'static, Message> {
+    let btn = button(svg(handle).width(Length::Fixed(16.0)).height(Length::Fixed(16.0)))
+        .width(Length::Fixed(28.0))
+        .height(Length::Fixed(28.0))
+        .style(move |_t, status| button::Style {
+            background: match (enabled, status) {
+                (true, button::Status::Hovered) => Some(skin.hover.into()),
+                (true, button::Status::Pressed) => Some(skin.pressed.into()),
+                _ => None,
+            },
+            text_color: if enabled { skin.accent } else { skin.disabled },
+            border: iced::Border {
+                color: if enabled { skin.accent } else { skin.sep },
+                width: 1.0,
+                radius: 14.0.into(),
+            },
+            shadow: Default::default(),
+            snap: true,
+        });
+    if enabled {
+        btn.on_press(msg).into()
+    } else {
+        btn.into()
+    }
+}
+
+fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
+    let refresh = button(icon(icons::refresh(&skin), 16.0))
+        .width(Length::Fixed(24.0))
+        .height(Length::Fixed(24.0))
+        .style(move |_t, status| button::Style {
+            background: match status {
+                button::Status::Hovered => Some(skin.hover.into()),
+                _ => None,
+            },
+            text_color: skin.text,
+            border: Default::default(),
+            shadow: Default::default(),
+            snap: true,
+        })
+        .on_press(Message::Refresh);
 
     let mut crumbs = row![].spacing(2).align_y(iced::Alignment::Center);
     let segs: Vec<String> = {
@@ -237,47 +546,65 @@ fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         let cell: Element<Message> = container(seg_text)
             .padding([2.0, 6.0])
             .style(move |_t: &iced::Theme| container::Style {
-                background: Some(
-                    if is_last { Color::TRANSPARENT } else { Color::TRANSPARENT }.into(),
-                ),
+                background: None,
                 ..Default::default()
             })
             .into();
-        let target = prefix_of(&state.cwd, i);
         let cell_el: Element<Message> = if is_last {
             cell
         } else {
-            mouse_area(cell).on_press(Message::Navigate(target)).into()
+            let target = prefix_of(&state.cwd, i);
+            button(cell)
+                .style(move |_t, status| button::Style {
+                    background: match status {
+                        button::Status::Hovered => Some(skin.hover.into()),
+                        button::Status::Pressed => Some(skin.pressed.into()),
+                        _ => None,
+                    },
+                    text_color: skin.text,
+                    border: Default::default(),
+                    shadow: Default::default(),
+                    snap: true,
+                })
+                .on_press(Message::Navigate(target))
+                .into()
         };
         crumbs = crumbs.push(cell_el);
         if !is_last {
-            crumbs = crumbs.push(
-                text("❯").size(9.0).color(skin.subtle),
-            );
+            crumbs = crumbs.push(icon(icons::chevron_right(&skin), 9.0));
         }
     }
 
-    let crumb_bar = container(crumbs)
-        .width(Length::Fill)
-        .height(Length::Fixed(26.0))
-        .style(move |_t: &iced::Theme| container::Style {
-            background: Some(skin.window_bg.into()),
-            border: iced::Border {
-                color: skin.address_border,
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-            ..Default::default()
-        });
+    let crumb_bar = container(
+        row![crumbs, Space::new().width(Length::Fill), refresh]
+            .align_y(iced::Alignment::Center)
+            .padding([0.0, 4.0]),
+    )
+    .width(Length::Fill)
+    .height(Length::Fixed(26.0))
+    .style(move |_t: &iced::Theme| container::Style {
+        background: Some(skin.window_bg.into()),
+        border: iced::Border {
+            color: skin.address_border,
+            width: 1.0,
+            radius: 3.0.into(),
+        },
+        ..Default::default()
+    });
 
     let search = container(
-        text(format!("Search {}", state.title()))
-            .size(12.0)
-            .color(skin.disabled),
+        row![
+            icon(icons::search(&skin), 14.0),
+            text(format!("Search {}", state.title()))
+                .size(12.0)
+                .color(skin.disabled),
+        ]
+        .spacing(6)
+        .align_y(iced::Alignment::Center),
     )
     .width(Length::Fixed(200.0))
     .height(Length::Fixed(26.0))
-    .padding([2.0, 8.0])
+    .padding([0.0, 8.0])
     .style(move |_t: &iced::Theme| container::Style {
         background: Some(skin.window_bg.into()),
         border: iced::Border {
@@ -290,9 +617,9 @@ fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
 
     container(
         row![
-            nav_btn("◀", Message::Back, !state.back_is_empty()),
-            nav_btn("▶", Message::Forward, !state.forward_is_empty()),
-            nav_btn("▲", Message::Up, state.cwd.parent().is_some()),
+            nav_circle(icons::back(&skin), !state.back_is_empty(), Message::Back, skin),
+            nav_circle(icons::forward(&skin), !state.forward_is_empty(), Message::Forward, skin),
+            nav_circle(icons::up(&skin), state.cwd.parent().is_some(), Message::Up, skin),
             crumb_bar,
             search,
         ]
@@ -305,6 +632,104 @@ fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     .style(bg(skin.toolbar_bg))
     .into()
 }
+
+// ---------------- nav pane ----------------
+
+fn nav_item(
+    label: &'static str,
+    handle: svg::Handle,
+    selected: bool,
+    msg: Option<Message>,
+    skin: skin::Skin,
+) -> Element<'static, Message> {
+    let bgc = if selected { skin.sel } else { Color::TRANSPARENT };
+    let border_color = if selected { skin.sel_border } else { Color::TRANSPARENT };
+    let item: Element<Message> = container(
+        row![
+            svg(handle).width(Length::Fixed(16.0)).height(Length::Fixed(16.0)),
+            text(label).size(12.0).color(skin.text),
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center)
+        .padding([2.0, 0.0]),
+    )
+    .padding([3.0, 8.0])
+    .width(Length::Fill)
+    .style(move |_t: &iced::Theme| container::Style {
+        background: Some(bgc.into()),
+        border: iced::Border {
+            color: border_color,
+            width: 1.0,
+            radius: 0.0.into(),
+        },
+        ..Default::default()
+    })
+    .into();
+    match msg {
+        Some(m) => mouse_area(item).on_press(m).into(),
+        None => item,
+    }
+}
+
+fn nav_pane(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let mut list = column![].spacing(0).padding(4);
+
+    list = list.push(
+        row![
+            icon(icons::star(&skin), 14.0),
+            text("Favorites").size(12.0).color(skin.subtle),
+        ]
+        .spacing(6)
+        .padding([2.0, 6.0]),
+    );
+    let mut favs: Vec<(&str, svg::Handle, Option<PathBuf>)> = vec![
+        ("Home", icons::home(&skin), home.clone()),
+        ("Desktop", icons::computer(&skin), home.as_ref().map(|h| h.join("Desktop"))),
+        ("Documents", icons::documents(&skin), home.as_ref().map(|h| h.join("Documents"))),
+        ("Downloads", icons::downloads(&skin), home.as_ref().map(|h| h.join("Downloads"))),
+        ("Recent places", icons::recent(&skin), None),
+    ];
+    for (label, handle, target) in favs.drain(..) {
+        let selected = target.as_deref() == Some(state.cwd.as_path());
+        let msg = target.map(Message::Navigate);
+        list = list.push(nav_item(label, handle, selected, msg, skin));
+    }
+
+    list = list.push(
+        row![
+            icon(icons::computer(&skin), 14.0),
+            text("This PC").size(12.0).color(skin.subtle),
+        ]
+        .spacing(6)
+        .padding([4.0, 6.0]),
+    );
+    list = list.push(nav_item(
+        "Computer",
+        icons::computer(&skin),
+        state.cwd == Path::new("/"),
+        Some(Message::Navigate(PathBuf::from("/"))),
+        skin,
+    ));
+
+    list = list.push(
+        row![
+            icon(icons::network(&skin), 14.0),
+            text("Network").size(12.0).color(skin.subtle),
+        ]
+        .spacing(6)
+        .padding([4.0, 6.0]),
+    );
+    list = list.push(nav_item("Network", icons::network(&skin), false, None, skin));
+
+    container(list)
+        .width(Length::Fixed(210.0))
+        .height(Length::Fill)
+        .style(bg(skin.nav_bg))
+        .into()
+}
+
+// ---------------- file view ----------------
 
 fn file_view(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     let header = container(
@@ -336,20 +761,54 @@ fn file_view(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         ..Default::default()
     });
 
-    let mut rows = column![].spacing(0);
-    for (i, e) in state.entries.iter().enumerate() {
-        rows = rows.push(file_row(i, e, state, skin));
-    }
+    let body: Element<Message> = match state.view {
+        ViewMode::Details => {
+            let mut rows = column![].spacing(0);
+            for (i, e) in state.entries.iter().enumerate() {
+                rows = rows.push(file_row(i, e, state, skin));
+            }
+            scrollable(rows).height(Length::Fill).into()
+        }
+        ViewMode::Large => {
+            let mut grid = row![].spacing(8).padding(8);
+            let mut current = column![].spacing(8);
+            for (i, e) in state.entries.iter().enumerate() {
+                current = current.push(large_cell(i, e, state, skin));
+                if (i + 1) % 6 == 0 {
+                    grid = grid.push(current);
+                    current = column![].spacing(8);
+                }
+            }
+            grid = grid.push(current);
+            scrollable(grid).height(Length::Fill).into()
+        }
+    };
 
-    container(column![header, scrollable(rows).height(Length::Fill)])
+    container(column![header, body])
         .width(Length::Fill)
         .height(Length::Fill)
         .style(bg(skin.window_bg))
         .into()
 }
 
+fn entry_icon(e: &Entry, skin: skin::Skin) -> svg::Handle {
+    match e.kind {
+        EntryKind::Dir => icons::folder(&skin),
+        EntryKind::File => {
+            if matches!(
+                e.name.rsplit_once('.').map(|(_, x)| x.to_lowercase()).unwrap_or_default().as_str(),
+                "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp"
+            ) {
+                icons::file_image(&skin)
+            } else {
+                icons::file(&skin)
+            }
+        }
+    }
+}
+
 fn file_row<'a>(i: usize, e: &Entry, state: &Explorer, skin: skin::Skin) -> Element<'a, Message> {
-    let selected = state.selected == Some(i);
+    let selected = state.selected.contains(&i);
     let hovered = state.hovered == Some(i);
     let bgc = if selected {
         skin.sel
@@ -360,27 +819,36 @@ fn file_row<'a>(i: usize, e: &Entry, state: &Explorer, skin: skin::Skin) -> Elem
     };
     let border_color = if selected { skin.sel_border } else { Color::TRANSPARENT };
 
-    let icon_color = if e.kind == EntryKind::Dir { skin.folder } else { skin.text };
-    let name = text(e.name.clone()).size(12.0).color(skin.text);
-    let date = text(e.modified.map(model::format_date).unwrap_or_default())
-        .size(12.0)
-        .color(skin.text);
-    let typ = text(model::type_label(e)).size(12.0).color(skin.text);
-    let size = text(if e.kind == EntryKind::Dir {
-        String::new()
+    let name_cell: Element<Message> = if state.renaming.as_ref().map(|(ri, _)| *ri) == Some(i) {
+        let buf = state.renaming.as_ref().map(|(_, b)| b.clone()).unwrap_or_default();
+        text_input("Name", &buf)
+            .on_input(Message::RenameInput)
+            .on_submit(Message::CommitRename(buf))
+            .size(12.0)
+            .padding(2)
+            .into()
     } else {
-        model::format_size(e.size)
-    })
-    .size(12.0)
-    .color(skin.text);
+        text(e.name.clone()).size(12.0).color(skin.text).into()
+    };
 
     let content = row![
-        container(Space::new().width(Length::Fixed(6.0)).height(Length::Fixed(12.0)))
-            .style(bg(icon_color)),
-        container(name).width(Length::Fill).padding([2.0, 4.0]),
-        container(date).width(Length::Fixed(170.0)).padding([2.0, 4.0]),
-        container(typ).width(Length::Fixed(140.0)).padding([2.0, 4.0]),
-        container(size).width(Length::Fixed(90.0)).padding([2.0, 4.0]),
+        container(icon(entry_icon(e, skin), 16.0))
+            .width(Length::Fixed(26.0))
+            .center_y(Length::Fixed(16.0)),
+        container(name_cell).width(Length::Fill).padding([2.0, 4.0]),
+        container(text(e.modified.map(model::format_date).unwrap_or_default()).size(12.0).color(skin.text))
+            .width(Length::Fixed(170.0))
+            .padding([2.0, 4.0]),
+        container(text(model::type_label(e)).size(12.0).color(skin.text))
+            .width(Length::Fixed(140.0))
+            .padding([2.0, 4.0]),
+        container(
+            text(if e.kind == EntryKind::Dir { String::new() } else { model::format_size(e.size) })
+                .size(12.0)
+                .color(skin.text),
+        )
+        .width(Length::Fixed(90.0))
+        .padding([2.0, 4.0]),
     ]
     .height(Length::Fixed(22.0))
     .align_y(iced::Alignment::Center);
@@ -405,32 +873,84 @@ fn file_row<'a>(i: usize, e: &Entry, state: &Explorer, skin: skin::Skin) -> Elem
         .into()
 }
 
+fn large_cell<'a>(i: usize, e: &Entry, state: &Explorer, skin: skin::Skin) -> Element<'a, Message> {
+    let selected = state.selected.contains(&i);
+    let bgc = if selected { skin.sel } else { Color::TRANSPARENT };
+    let border_color = if selected { skin.sel_border } else { Color::TRANSPARENT };
+    let content = column![
+        icon(entry_icon(e, skin), 64.0),
+        text(e.name.clone()).size(11.0).color(skin.text).width(Length::Fixed(96.0)),
+    ]
+    .spacing(6)
+    .align_x(iced::Alignment::Center)
+    .width(Length::Fixed(104.0))
+    .height(Length::Fixed(110.0));
+    let styled = container(content)
+        .padding(4)
+        .style(move |_t: &iced::Theme| container::Style {
+            background: Some(bgc.into()),
+            border: iced::Border {
+                color: border_color,
+                width: if selected { 1.0 } else { 0.0 },
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        });
+    mouse_area(styled)
+        .on_press(Message::Select(i))
+        .on_double_click(Message::Open(i))
+        .into()
+}
+
+// ---------------- status bar ----------------
+
 fn statusbar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     let mut left = format!("{} items", state.entries.len());
-    if let Some(i) = state.selected {
-        if let Some(e) = state.entries.get(i) {
-            left += &format!("    1 selected    {}", model::format_size(e.size));
-        }
+    if !state.selected.is_empty() {
+        let bytes: u64 = state.selected.iter().filter_map(|&i| state.entries.get(i)).map(|e| e.size).sum();
+        left += &format!(
+            "    {} selected    {}",
+            state.selected.len(),
+            model::format_size(bytes)
+        );
     }
-    let dark_btn = button(text(if state.dark { "Light" } else { "Dark" }).size(11.0).color(skin.text))
-        .style(move |_t, status| button::Style {
-            background: match status {
-                button::Status::Hovered => Some(skin.hover.into()),
-                _ => None,
-            },
-            text_color: skin.text,
-            border: Default::default(),
-            shadow: Default::default(),
-            snap: true,
-        })
-        .on_press(Message::ToggleDark);
+    if !state.status.is_empty() {
+        left += &format!("    {}", state.status);
+    }
+
+    let view_btn = |handle: svg::Handle, active: bool, msg: Message| {
+        button(svg(handle).width(Length::Fixed(16.0)).height(Length::Fixed(16.0)))
+            .width(Length::Fixed(22.0))
+            .height(Length::Fixed(22.0))
+            .style(move |_t, status| button::Style {
+                background: if active {
+                    Some(skin.pressed.into())
+                } else {
+                    match status {
+                        button::Status::Hovered => Some(skin.hover.into()),
+                        _ => None,
+                    }
+                },
+                text_color: skin.text,
+                border: iced::Border {
+                    color: if active { skin.accent } else { Color::TRANSPARENT },
+                    width: 1.0,
+                    radius: 2.0.into(),
+                },
+                shadow: Default::default(),
+                snap: true,
+            })
+            .on_press(msg)
+    };
 
     container(
         row![
             text(left).size(11.0).color(skin.subtle),
             Space::new().width(Length::Fill),
-            dark_btn,
+            view_btn(icons::view_details(&skin), state.view == ViewMode::Details, Message::SetView(ViewMode::Details)),
+            view_btn(icons::view_large(&skin), state.view == ViewMode::Large, Message::SetView(ViewMode::Large)),
         ]
+        .spacing(2)
         .align_y(iced::Alignment::Center)
         .padding([0.0, 8.0]),
     )
