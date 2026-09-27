@@ -9,6 +9,8 @@ license = "MIT"
 iced = { version = "0.14", default-features = false, features = ["tiny-skia", "wayland", "crisp", "thread-pool", "svg"] }
 gio  = "0.21"  # GIO backend for the VFS (local fs, volumes, trash)
 glib = "0.21"  # gio companion
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"  # ribbon.yaml parsing (D12)
 
 [profile.release]
 opt-level = 2
