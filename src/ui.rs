@@ -4,6 +4,7 @@ pub mod skin {
     use iced::color;
 
     #[derive(Clone, Copy)]
+    #[allow(dead_code)]
     pub struct Skin {
         pub accent: iced::Color,
         pub accent_dark: iced::Color,

@@ -3,6 +3,7 @@
 //! Swap for a real icon theme / shell32-derived set later — only this file
 //! changes.
 
+#[allow(dead_code)]
 use iced::widget::svg;
 use iced::Color;
 
