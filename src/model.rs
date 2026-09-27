@@ -34,11 +34,17 @@ pub enum Message {
     InvertSelection,
     SetView(ViewMode),
     ToggleHidden,
-    SetTab(Tab),
+    SetTab(String),
     RenameInput(String),
     Status(String),
     Event(iced::Event),
     FsEvent(FsEvent),
+    /// Ribbon command (YAML-defined): internal or `sh -c` shell.
+    RunCommand(String),
+    /// Scroll offset + viewport height from the file list scrollable.
+    Scrolled { y: f32, height: f32 },
+    /// Window resized (for list virtualization viewport).
+    WindowResized(f32),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -51,14 +57,6 @@ pub enum ViewMode {
 pub enum ClipMode {
     Copy,
     Cut,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Tab {
-    File,
-    Home,
-    Share,
-    View,
 }
 
 pub struct Explorer {
@@ -74,7 +72,10 @@ pub struct Explorer {
     pub clipboard: Option<(ClipMode, Vec<PathBuf>)>,
     pub view: ViewMode,
     pub show_hidden: bool,
-    pub tab: Tab,
+    pub active_tab: String,
+    pub ribbon: crate::ribbon::RibbonConfig,
+    pub scroll_y: f32,
+    pub viewport_h: f32,
     /// Inline rename: (row index, text buffer).
     pub renaming: Option<(usize, String)>,
     pub status: String,
@@ -107,7 +108,10 @@ impl Explorer {
             clipboard: None,
             view: ViewMode::Details,
             show_hidden: false,
-            tab: Tab::Home,
+            active_tab: "home".into(),
+            ribbon: crate::ribbon::load(),
+            scroll_y: 0.0,
+            viewport_h: 600.0,
             renaming: None,
             status: String::new(),
             last_click: None,
@@ -162,6 +166,7 @@ impl Explorer {
         self.cwd = path;
         self.selected.clear();
         self.renaming = None;
+        self.scroll_y = 0.0;
         self.request_listing();
     }
 
@@ -285,6 +290,97 @@ impl Explorer {
                 self.request_listing();
             }
         }
+    }
+
+    /// The context ribbon `when` rules evaluate against (D12).
+    pub fn context(&self) -> crate::ribbon::Context {
+        let sel_has = |f: &dyn Fn(&fs::Entry) -> bool| {
+            self.selected.iter().filter_map(|&i| self.entries.get(i)).any(f)
+        };
+        let is_media = |exts: &[&str]| {
+            sel_has(&|e| {
+                e.name
+                    .rsplit_once('.')
+                    .map(|(_, x)| exts.contains(&x.to_lowercase().as_str()))
+                    .unwrap_or(false)
+            })
+        };
+        crate::ribbon::Context {
+            is_drive: self.cwd.parent().is_none() || self.volumes.iter().any(|v| v.mount == self.cwd),
+            inside_archive: fs::archive::resolve(&self.cwd).is_some(),
+            has_archive: sel_has(&|e: &fs::Entry| fs::archive::is_archive_path(&e.path)),
+            has_image: is_media(&["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg"]),
+            has_video: is_media(&["mp4", "mkv", "mov", "webm", "avi"]),
+            has_audio: is_media(&["mp3", "flac", "ogg", "wav", "m4a"]),
+            has_selection: !self.selected.is_empty(),
+            is_empty: self.selected.is_empty(),
+        }
+    }
+
+    fn run_command(&mut self, id: &str) -> iced::Task<Message> {
+        let Some(def) = self.ribbon.commands.get(id).cloned() else {
+            self.status = format!("unknown command '{id}'");
+            return iced::Task::none();
+        };
+        if let Some(internal) = def.internal {
+            let first = self.selected.iter().next().copied();
+            let msg = match internal.as_str() {
+                "paste" => Some(Message::Paste),
+                "cut" => Some(Message::CutSelection),
+                "copy" => Some(Message::CopySelection),
+                "delete" => Some(Message::DeleteSelection),
+                "rename" => Some(Message::RenameSelected),
+                "new_folder" => Some(Message::NewFolder),
+                "select_all" => Some(Message::SelectAll),
+                "select_none" => Some(Message::SelectNone),
+                "invert_selection" => Some(Message::InvertSelection),
+                "view_large" => Some(Message::SetView(ViewMode::Large)),
+                "view_details" => Some(Message::SetView(ViewMode::Details)),
+                "toggle_hidden" => Some(Message::ToggleHidden),
+                "toggle_dark" => Some(Message::ToggleDark),
+                "open" => first.map(Message::Open),
+                other => {
+                    self.status = format!("'{other}' is not implemented");
+                    None
+                }
+            };
+            if let Some(m) = msg {
+                return self.update(m);
+            }
+            return iced::Task::none();
+        }
+        if let Some(script) = def.shell {
+            let expanded = self.expand_placeholders(&script);
+            match std::process::Command::new("sh")
+                .arg("-c")
+                .arg(expanded)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+            {
+                Ok(_) => {}
+                Err(e) => self.status = format!("shell: {e}"),
+            }
+        }
+        iced::Task::none()
+    }
+
+    /// {cwd}, {selection}, {selection_count} — single-quoted for sh.
+    fn expand_placeholders(&self, script: &str) -> String {
+        fn q(s: &str) -> String {
+            format!("'{}'", s.replace('\'', "'\\''"))
+        }
+        let selection = self
+            .selected
+            .iter()
+            .filter_map(|&i| self.entries.get(i))
+            .map(|e| q(&e.path.to_string_lossy()))
+            .collect::<Vec<_>>()
+            .join(" ");
+        script
+            .replace("{cwd}", &q(&self.cwd.to_string_lossy()))
+            .replace("{selection}", &selection)
+            .replace("{selection_count}", &self.selected.len().to_string())
     }
 
     pub fn update(&mut self, message: Message) -> iced::Task<Message> {
@@ -449,7 +545,19 @@ impl Explorer {
                 iced::Task::none()
             }
             Message::SetTab(t) => {
-                self.tab = t;
+                self.active_tab = t;
+                iced::Task::none()
+            }
+            Message::RunCommand(id) => {
+                return self.run_command(&id);
+            }
+            Message::Scrolled { y, height } => {
+                self.scroll_y = y;
+                self.viewport_h = height;
+                iced::Task::none()
+            }
+            Message::WindowResized(h) => {
+                self.viewport_h = h;
                 iced::Task::none()
             }
             Message::RenameInput(s) => {
