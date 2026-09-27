@@ -158,23 +158,41 @@ impl Runner {
         let Some(app) = &mut self.app else { return };
 
         let raw_input = state.take_egui_input(&window);
-        let output = self.ctx.run(raw_input, |ctx| {
-            app.frame(ctx);
+        let mut output = self.ctx.run_ui(raw_input, |ui| {
+            app.frame(ui);
         });
         state.handle_platform_output(&window, output.platform_output);
 
         let clipped = self.ctx.tessellate(output.shapes, output.pixels_per_point);
+        if std::env::var_os("EXPLORER_DEBUG_PPP").is_some() {
+            let size = window.inner_size();
+            eprintln!(
+                "ppp={} zoom={} native={:?} win_phys={}x{}",
+                self.ctx.pixels_per_point(),
+                self.ctx.zoom_factor(),
+                self.ctx.native_pixels_per_point(),
+                size.width,
+                size.height
+            );
+        }
         let size = window.inner_size();
         self.renderer.resize(size.width as usize, size.height as usize);
-        for delta in &output.textures_delta.set {
-            self.renderer.textures.apply(delta);
+        for (id, delta) in &output.textures_delta.set {
+            self.renderer.textures.apply(*id, delta);
         }
         self.renderer.render(&clipped, output.pixels_per_point);
 
         if let Some(surface) = &mut self.surface {
+            // wayland backend requires an explicit size before buffer_mut()
+            if size.width > 0 && size.height > 0 {
+                let _ = surface.resize(
+                    std::num::NonZeroU32::new(size.width).unwrap(),
+                    std::num::NonZeroU32::new(size.height).unwrap(),
+                );
+            }
             match surface.buffer_mut() {
                 Ok(mut buffer) => {
-                    let (bw, bh) = (buffer.width() as usize, buffer.height() as usize);
+                    let (bw, bh) = (buffer.width().get() as usize, buffer.height().get() as usize);
                     if (bw, bh) == (self.renderer.width, self.renderer.height) {
                         buffer.copy_from_slice(&self.renderer.buffer);
                     } else {
@@ -194,6 +212,8 @@ impl Runner {
         for id in &output.textures_delta.free {
             self.renderer.textures.free(*id);
         }
+        // TexturesDelta panics in Drop if not fully consumed.
+        output.textures_delta.clear();
 
         // schedule the next frame from egui's repaint hint (cursor blink etc.)
         let delay = output
@@ -201,7 +221,9 @@ impl Runner {
             .values()
             .map(|v| v.repaint_delay)
             .min()
-            .unwrap_or(Duration::from_millis(33));
+            .unwrap_or(Duration::from_millis(33))
+            // cap the busy loop: ~90 fps is plenty for a file manager
+            .clamp(Duration::from_millis(11), Duration::from_millis(1000));
         self.repaint_at = Some(Instant::now() + delay);
 
         if app.exit_requested() {

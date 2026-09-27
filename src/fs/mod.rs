@@ -14,6 +14,7 @@ use std::sync::mpsc;
 
 /// Swappable filesystem backend. All methods are synchronous; they run on the
 /// scheduler's worker thread so the UI never blocks.
+#[allow(dead_code)] // the full trait lands in later stages
 pub trait Backend: Send + 'static {
     fn home(&self) -> PathBuf;
     /// List the immediate children of `path`.
@@ -175,7 +176,7 @@ fn copy_tree(
         });
         match result {
             Ok(()) => {
-                done += bytes.max(current_file_done);
+                done += (*bytes).max(current_file_done);
                 let _ = tx.send(FsEvent::OpProgress { done_bytes: done, total_bytes: total, current: src.clone() });
             }
             Err(e) => return Err(format!("{}: {}", src.display(), e)),

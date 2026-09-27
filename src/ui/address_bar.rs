@@ -2,7 +2,7 @@
 
 use crate::app::{Cmd, Cx};
 use crate::icons::{self, Icon};
-use egui::{Align2, Id, Key, Pos2, Rect, Sense, Stroke, Vec2};
+use egui::{Align2, Id, Key, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
 pub struct AddressBar {
     pub search: String,
@@ -19,12 +19,12 @@ impl AddressBar {
         Self { search: String::new() }
     }
 
-    pub fn show(&mut self, ctx: &egui::Context, cx: &Cx, pending: &mut Vec<Cmd>) {
+    pub fn show(&mut self, ui: &mut Ui, cx: &Cx, pending: &mut Vec<Cmd>) {
         let m = &cx.theme.metrics;
-        egui::TopBottomPanel::top("address_band")
-            .exact_height(m.toolbar_h)
+        egui::Panel::top("address_band")
+            .exact_size(m.toolbar_h)
             .frame(egui::Frame::NONE.fill(cx.theme.palette.toolbar_bg))
-            .show(ctx, |ui| {
+            .show(ui, |ui| {
                 let band = ui.max_rect();
                 let y = band.center().y;
                 let btn = m.nav_btn;
@@ -80,15 +80,17 @@ impl AddressBar {
         let mut x = rect.left() + 6.0;
         let cy = rect.center().y;
         let font = egui::FontId::proportional(cx.theme.fonts.size);
-        let mut seg_index = 0usize;
-        for seg in segments(cx.cwd) {
-            let is_last = seg_index == segment_count(cx.cwd) - 1;
+        let segs = segments(cx.cwd);
+        let seg_count = segs.len();
+        for (seg_index, seg) in segs.iter().enumerate() {
+            let is_root = matches!(seg, Segment::Root);
+            let is_last = seg_index == seg_count - 1;
             let label: String = match seg {
                 Segment::Root => "Computer".into(),
-                Segment::Name(n) => n,
+                Segment::Name(n) => n.clone(),
             };
             let galley = ui.painter().layout_no_wrap(label.clone(), font.clone(), p.text);
-            let w = galley.size().x + 12.0 + if matches!(seg, Segment::Root) { 20.0 } else { 0.0 };
+            let w = galley.size().x + 12.0 + if is_root { 20.0 } else { 0.0 };
             let seg_rect = Rect::from_min_size(Pos2::new(x, rect.top() + 2.0), Vec2::new(w.min(max_x - x), rect.height() - 4.0));
             let enabled = !is_last;
             if enabled {
@@ -101,7 +103,7 @@ impl AddressBar {
                 }
             }
             let mut tx = seg_rect.left() + 6.0;
-            if matches!(seg, Segment::Root) {
+            if is_root {
                 icons::draw(
                     ui.painter(),
                     Icon::Computer,
@@ -123,7 +125,6 @@ impl AddressBar {
                 );
                 x += 12.0;
             }
-            seg_index += 1;
             if x >= max_x {
                 break;
             }
@@ -157,7 +158,7 @@ impl AddressBar {
         let edit = egui::TextEdit::singleline(&mut self.search)
             .id(Id::new("addr_search"))
             .desired_width(edit_rect.width())
-            .frame(false)
+            .frame(egui::Frame::NONE)
             .margin(egui::Margin::symmetric(2, 0));
         let out = ui.put(edit_rect, edit);
         if out.lost_focus() && ui.ctx().input(|i| i.key_pressed(Key::Enter)) {
@@ -212,10 +213,6 @@ fn segments(path: &std::path::Path) -> Vec<Segment> {
         }
     }
     v
-}
-
-fn segment_count(path: &std::path::Path) -> usize {
-    segments(path).len()
 }
 
 fn prefix_of(path: &std::path::Path, seg_index: usize) -> std::path::PathBuf {

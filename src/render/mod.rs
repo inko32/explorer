@@ -5,6 +5,7 @@
 pub mod bmp;
 pub mod cpu;
 
+use egui::epaint::textures::TextureOptions;
 use egui::epaint::{ImageData, ImageDelta, TextureId};
 
 /// CPU-side texture in premultiplied sRGB, 8 bits per channel (RGBA8).
@@ -13,10 +14,12 @@ pub struct Texture {
     pub height: usize,
     /// 0xAARRGGBB premultiplied alpha, native endian.
     pub pixels: Vec<u32>,
+    /// Sampling mode egui registered the texture with (fonts = nearest).
+    pub options: TextureOptions,
 }
 
 impl Texture {
-    fn from_image(image: &egui::ColorImage) -> Self {
+    fn from_image(image: &egui::ColorImage, options: TextureOptions) -> Self {
         let [w, h] = image.size;
         let pixels: Vec<u32> = image
             .pixels
@@ -31,17 +34,7 @@ impl Texture {
                 ((a << 24) | (((r * a / 255) & 0xFF) << 16) | (((g * a / 255) & 0xFF) << 8) | ((b * a / 255) & 0xFF)) as u32
             })
             .collect();
-        Texture { width: w, height: h, pixels }
-    }
-
-    fn from_alpha8(size: [usize; 2], data: &[u8]) -> Self {
-        let [w, h] = size;
-        let mut pixels = Vec::with_capacity(w * h);
-        for &a in data {
-            let a = a as u32;
-            pixels.push((a << 24) | (0xFF * a / 255) << 16 | (0xFF * a / 255) << 8 | (0xFF * a / 255));
-        }
-        Texture { width: w, height: h, pixels }
+        Texture { width: w, height: h, pixels, options }
     }
 }
 
@@ -60,30 +53,29 @@ impl TextureStore {
         Self { textures: std::collections::HashMap::new() }
     }
 
-    pub fn apply(&mut self, delta: &ImageDelta) {
+    pub fn apply(&mut self, id: TextureId, deltas: &[ImageDelta]) {
+        for delta in deltas {
+            self.apply_one(id, delta);
+        }
+    }
+
+    fn apply_one(&mut self, id: TextureId, delta: &ImageDelta) {
         match &delta.image {
             ImageData::Color(image) => {
-                let tex = Texture::from_image(image);
+                let tex = Texture::from_image(image, delta.options);
                 if let Some([ox, oy]) = delta.pos {
-                    if let Some(existing) = self.textures.get_mut(&delta.texture_id) {
+                    if let Some(existing) = self.textures.get_mut(&id) {
                         patch(existing, &tex, ox, oy);
+                        existing.options = delta.options;
                         return;
                     }
                 }
-                self.textures.insert(delta.texture_id, tex);
+                self.textures.insert(id, tex);
             }
-            ImageData::Font(font) => {
-                let tex = Texture::from_alpha8(font.size, &font.pixels);
-                if let Some([ox, oy]) = delta.pos {
-                    if let Some(existing) = self.textures.get_mut(&delta.texture_id) {
-                        patch(existing, &tex, ox, oy);
-                        return;
-                    }
-                }
-                self.textures.insert(delta.texture_id, tex);
-            }
+            #[allow(unreachable_patterns)]
             _ => {
-                // Svg/CompliedShape variants — not produced by egui itself; ignore.
+                // egui 0.36+ rasterizes fonts into colored meshes — no font
+                // texture variants exist anymore.
             }
         }
     }

@@ -6,7 +6,7 @@ use crate::ui::file_view::ViewMode;
 
 pub fn gather(ctx: &egui::Context, pending: &mut Vec<Cmd>) {
     // While a TextEdit (inline rename, search) has focus, only Escape leaves.
-    if ctx.wants_keyboard_input() {
+    if ctx.egui_wants_keyboard_input() {
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             pending.push(Cmd::CancelRename);
         }

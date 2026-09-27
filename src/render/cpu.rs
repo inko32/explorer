@@ -38,6 +38,10 @@ impl CpuRenderer {
 
     /// Rasterize a frame. Caller applies texture deltas before and frees
     /// textures afterwards (platform does both around this call).
+    ///
+    /// egui 0.36 tessellates in **logical points** (verified against epaint
+    /// source: ppp is only used for pixel-snapping); the painter scales to
+    /// physical pixels here.
     pub fn render(&mut self, primitives: &[ClippedPrimitive], pixels_per_point: f32) {
         self.buffer.fill(0x00FFFFFF);
         let screen = (self.width as f32, self.height as f32);
@@ -46,10 +50,10 @@ impl CpuRenderer {
         // borrow) can coexist through the loop.
         let CpuRenderer { buffer, textures, .. } = self;
         for prim in primitives {
-            let Some(mesh) = match &prim.primitive {
+            let Some(mesh) = (match &prim.primitive {
                 egui::epaint::Primitive::Mesh(m) => Some(m),
                 egui::epaint::Primitive::Callback(_) => None,
-            } else {
+            }) else {
                 continue;
             };
             if mesh.indices.len() < 3 || mesh.vertices.is_empty() {
@@ -65,7 +69,6 @@ impl CpuRenderer {
                 continue;
             }
             let texture = textures.get(mesh.texture_id);
-            let scale = pixels_per_point;
             for tri in mesh.indices.chunks_exact(3) {
                 let (a, b, c) = (tri[0] as usize, tri[1] as usize, tri[2] as usize);
                 if a >= mesh.vertices.len() || b >= mesh.vertices.len() || c >= mesh.vertices.len() {
@@ -73,9 +76,9 @@ impl CpuRenderer {
                 }
                 let v = [&mesh.vertices[a], &mesh.vertices[b], &mesh.vertices[c]];
                 let p: [(f32, f32); 3] = [
-                    (v[0].pos.x * scale, v[0].pos.y * scale),
-                    (v[1].pos.x * scale, v[1].pos.y * scale),
-                    (v[2].pos.x * scale, v[2].pos.y * scale),
+                    (v[0].pos.x * pixels_per_point, v[0].pos.y * pixels_per_point),
+                    (v[1].pos.x * pixels_per_point, v[1].pos.y * pixels_per_point),
+                    (v[2].pos.x * pixels_per_point, v[2].pos.y * pixels_per_point),
                 ];
                 let min_x = p[0].0.min(p[1].0).min(p[2].0).round().max(cx0 as f32) as i32;
                 let max_x = p[0].0.max(p[1].0).max(p[2].0).round().min(cx1 as f32) as i32;
@@ -138,7 +141,7 @@ fn raster_tri(
             let (tr, tg, tb, ta) = if let Some(tex) = texture {
                 let u = v[0].uv.x * l0 + v[1].uv.x * l1 + v[2].uv.x * l2;
                 let vv = v[0].uv.y * l0 + v[1].uv.y * l1 + v[2].uv.y * l2;
-                sample_bilinear(tex, u, vv)
+                sample(tex, u, vv)
             } else {
                 (255, 255, 255, 255)
             };
@@ -170,6 +173,27 @@ fn raster_tri(
 #[inline]
 fn edge(ax: f32, ay: f32, bx: f32, by: f32, cx: f32, cy: f32) -> f32 {
     (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+}
+
+/// Sample a premultiplied sRGB texture at normalized uv (origin top-left),
+/// honoring its filtering mode: nearest for font atlases (egui default),
+/// bilinear for linear-registered images. Out-of-bounds reads = WHITE.
+fn sample(tex: &super::Texture, u: f32, v: f32) -> (u32, u32, u32, u32) {
+    let (w, h) = (tex.width as f32, tex.height as f32);
+    if w <= 0.0 || h <= 0.0 {
+        return (255, 255, 255, 255);
+    }
+    if tex.options.magnification == egui::epaint::textures::TextureFilter::Nearest {
+        // egui uv for texel i is (i + 0.5) / w
+        let x = (u * w).floor().clamp(0.0, w - 1.0) as usize;
+        let y = (v * h).floor().clamp(0.0, h - 1.0) as usize;
+        let Some(px) = tex.pixels.get(y * tex.width + x).copied() else {
+            return (255, 255, 255, 255);
+        };
+        ((px >> 16) & 0xFF, (px >> 8) & 0xFF, px & 0xFF, (px >> 24) & 0xFF)
+    } else {
+        sample_bilinear(tex, u, v)
+    }
 }
 
 /// Bilinear sample of a premultiplied sRGB texture at normalized uv.

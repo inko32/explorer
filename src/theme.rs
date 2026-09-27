@@ -18,6 +18,7 @@ pub struct Theme {
 }
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)] // palette is a theme vocabulary
 pub struct Palette {
     // frame
     pub accent: Color32,
@@ -58,6 +59,7 @@ pub struct Palette {
 }
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct Metrics {
     pub resize_margin: f32,
     pub border: f32,
@@ -93,6 +95,7 @@ pub struct Metrics {
 }
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct Fonts {
     /// Base UI font size (points).
     pub size: f32,
@@ -239,33 +242,49 @@ impl Theme {
         self.generation = generation;
     }
 
-    /// Push palette/fonts into the egui style. Call when generation changed.
+    /// Push palette/fonts into the egui style for every system theme
+    /// variant (egui 0.36 keeps per-theme styles).
     pub fn apply(&self, ctx: &egui::Context) {
         let p = &self.palette;
-        let mut style = (*ctx.style()).clone();
-        style.visuals.dark_mode = self.dark;
-        style.visuals.window_fill = p.window_bg;
-        style.visuals.panel_fill = p.window_bg;
-        style.visuals.override_text_color = Some(p.text);
-        style.visuals.selection.bg_fill = p.sel_fill;
-        style.visuals.selection.stroke = Stroke::new(1.0, p.sel_border);
-        style.visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, p.text);
-        style.visuals.widgets.inactive.bg_fill = p.window_bg;
-        style.visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, p.text);
-        style.visuals.widgets.hovered.bg_fill = p.hover_bg;
-        style.visuals.widgets.hovered.fg_stroke = Stroke::new(1.0, p.text);
-        style.visuals.widgets.active.bg_fill = p.pressed_bg;
-        style.visuals.widgets.active.fg_stroke = Stroke::new(1.0, p.text);
-        style.visuals.widgets.noninteractive.bg_fill = p.window_bg;
-        style.visuals.widgets.noninteractive.weak_bg_fill = p.window_bg;
-        style.visuals.widgets.inactive.weak_bg_fill = p.window_bg;
-        style.visuals.widgets.hovered.weak_bg_fill = p.hover_bg;
-        style.visuals.widgets.active.weak_bg_fill = p.pressed_bg;
-        style.visuals.window_corner_radius = CornerRadius::ZERO;
-        style.visuals.window_stroke = Stroke::new(0.0, p.window_bg);
-        style.spacing.item_spacing = egui::vec2(0.0, 0.0);
-        style.spacing.button_padding = egui::vec2(4.0, 2.0);
-        style.spacing.scroll = egui::style::ScrollStyle::thin();
-        ctx.set_style(style);
+        ctx.all_styles_mut(|style| {
+            style.visuals.dark_mode = self.dark;
+            style.visuals.window_fill = p.window_bg;
+            style.visuals.panel_fill = p.window_bg;
+            style.visuals.override_text_color = Some(p.text);
+            style.visuals.selection.bg_fill = p.sel_fill;
+            style.visuals.selection.stroke = Stroke::new(1.0, p.sel_border);
+            style.visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, p.text);
+            style.visuals.widgets.inactive.bg_fill = p.window_bg;
+            style.visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, p.text);
+            style.visuals.widgets.hovered.bg_fill = p.hover_bg;
+            style.visuals.widgets.hovered.fg_stroke = Stroke::new(1.0, p.text);
+            style.visuals.widgets.active.bg_fill = p.pressed_bg;
+            style.visuals.widgets.active.fg_stroke = Stroke::new(1.0, p.text);
+            style.visuals.widgets.noninteractive.bg_fill = p.window_bg;
+            style.visuals.widgets.noninteractive.weak_bg_fill = p.window_bg;
+            style.visuals.widgets.inactive.weak_bg_fill = p.window_bg;
+            style.visuals.widgets.hovered.weak_bg_fill = p.hover_bg;
+            style.visuals.widgets.active.weak_bg_fill = p.pressed_bg;
+            style.visuals.window_corner_radius = CornerRadius::ZERO;
+            style.visuals.window_stroke = Stroke::new(0.0, p.window_bg);
+            style.spacing.item_spacing = egui::vec2(0.0, 0.0);
+            style.spacing.button_padding = egui::vec2(4.0, 2.0);
+            style.spacing.scroll = egui::style::ScrollStyle::thin();
+            style.text_styles = font_map(self);
+        });
     }
+}
+
+/// egui text-style table from our font config.
+fn font_map(theme: &Theme) -> std::collections::BTreeMap<egui::TextStyle, egui::FontId> {
+    let f = &theme.fonts;
+    let proportional = egui::FontId::proportional(f.size);
+    let small = egui::FontId::proportional(f.small);
+    let mut map = std::collections::BTreeMap::new();
+    map.insert(egui::TextStyle::Body, proportional.clone());
+    map.insert(egui::TextStyle::Button, proportional.clone());
+    map.insert(egui::TextStyle::Heading, egui::FontId::proportional(f.size + 2.0));
+    map.insert(egui::TextStyle::Small, small);
+    map.insert(egui::TextStyle::Monospace, egui::FontId::monospace(f.small));
+    map
 }
