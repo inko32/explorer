@@ -4,15 +4,15 @@ use super::{Backend, Entry, EntryKind, FsError, Volume};
 use gio::prelude::*;
 use std::path::{Path, PathBuf};
 
-const ATTRIBUTES: &str = "standard::name,standard::type,standard::size,standard::modified-time,standard::is-hidden,standard::is-symlink,standard::symlink-target";
+const ATTRIBUTES: &str = "standard::name,standard::type,standard::size,standard::is-hidden,standard::is-symlink,standard::symlink-target,time::modified";
 
+#[allow(dead_code)]
 pub struct GioBackend {
     home: PathBuf,
 }
 
 impl GioBackend {
     pub fn new() -> Self {
-        let _ = glib::init();
         Self { home: glib::home_dir() }
     }
 }
@@ -31,8 +31,9 @@ impl Backend for GioBackend {
         )?;
         let mut out = Vec::new();
         for info in enumerator.into_iter().flatten() {
-            let name = info.name().to_string_lossy().into_owned();
-            let child = file.child(&info.name());
+            let info_name = info.name(); // PathBuf in gio 0.21
+            let name = info_name.to_string_lossy().into_owned();
+            let child = file.child(&info_name);
             let path = child.path().unwrap_or_else(|| path.join(&name));
             let kind = match info.file_type() {
                 gio::FileType::Directory => EntryKind::Dir,
@@ -40,8 +41,10 @@ impl Backend for GioBackend {
                 _ => EntryKind::Other,
             };
             let modified = info
-                .modification_date_time()
-                .map(|dt| dt.to_unix())
+                .modification_time()
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()
+                .map(|d| d.as_secs() as i64)
                 .or_else(|| {
                     // fall back to std metadata when GIO has no time (e.g. some symlinks)
                     std::fs::metadata(&path).ok().and_then(|m| {
@@ -49,6 +52,7 @@ impl Backend for GioBackend {
                     })
                 });
             let is_symlink = info.is_symlink();
+            let is_hidden = info.is_hidden() || name.starts_with('.');
             let symlink_target = if is_symlink {
                 std::fs::read_link(&path).ok().map(|p| p.to_string_lossy().into_owned())
             } else {
@@ -60,7 +64,7 @@ impl Backend for GioBackend {
                 kind,
                 size: info.size().max(0) as u64,
                 modified,
-                is_hidden: info.is_hidden() || name.starts_with('.'),
+                is_hidden,
                 is_symlink,
                 symlink_target,
             });
@@ -76,7 +80,7 @@ impl Backend for GioBackend {
             if mount.is_shadowed() {
                 continue;
             }
-            let root = mount.get_root();
+            let root = mount.root();
             let Some(path) = root.path() else { continue };
             if !seen.insert(path.clone()) {
                 continue;
@@ -84,11 +88,11 @@ impl Backend for GioBackend {
             let fs_type = root
                 .query_filesystem_info("filesystem::type", None::<&gio::Cancellable>)
                 .ok()
-                .and_then(|fi| fi.filesystem_type().map(|s| s.to_string_lossy().into_owned()));
+                .and_then(|fi| fi.attribute_string("filesystem::type").map(|s| s.to_string()));
             if fs_type.as_deref().map(is_pseudo_fs).unwrap_or(false) {
                 continue;
             }
-            let name = mount.name().to_string_lossy().into_owned();
+            let name = mount.name().to_string();
             out.push(Volume { name, mount: path, fs_type });
         }
         // Sort by mount path for stable ordering.
@@ -103,7 +107,7 @@ impl Backend for GioBackend {
 
     fn rename(&self, from: &Path, to: &Path) -> Result<(), FsError> {
         gio::File::for_path(from).move_(
-            Some(&gio::File::for_path(to)),
+            &gio::File::for_path(to),
             gio::FileCopyFlags::NONE,
             None::<&gio::Cancellable>,
             None::<&mut dyn FnMut(i64, i64)>,
@@ -131,7 +135,7 @@ impl Backend for GioBackend {
     fn copy_file(&self, src: &Path, dst: &Path, progress: &mut dyn FnMut(u64, u64)) -> Result<(), FsError> {
         let total = std::fs::metadata(src).map(|m| m.len()).unwrap_or(0);
         gio::File::for_path(src).copy(
-            Some(&gio::File::for_path(dst)),
+            &gio::File::for_path(dst),
             gio::FileCopyFlags::NONE,
             None::<&gio::Cancellable>,
             Some(&mut |done: i64, _total: i64| progress(done.max(0) as u64, total)),
@@ -149,7 +153,7 @@ impl Backend for GioBackend {
         gio::File::for_path(path)
             .query_filesystem_info("filesystem::type", None::<&gio::Cancellable>)
             .ok()
-            .and_then(|fi| fi.filesystem_type().map(|s| s.to_string_lossy().into_owned()))
+            .and_then(|fi| fi.attribute_string("filesystem::type").map(|s| s.to_string()))
     }
 }
 

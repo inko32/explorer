@@ -6,7 +6,7 @@
 
 use crate::clipboard::{ClipMode, Clipboard};
 use crate::fs::{self, FsEvent};
-use crate::platform::{NullPort, ResizeDir, WindowPort};
+use crate::platform::{NullPort, WindowPort};
 use crate::theme::Theme;
 use crate::ui::address_bar::AddressBar;
 use crate::ui::file_view::{FileView, ViewMode};
@@ -19,10 +19,10 @@ use std::sync::mpsc::Receiver;
 
 /// Commands UI modules emit; App routes them.
 #[derive(Clone, Debug)]
+#[allow(dead_code)] // reserved commands land in later stages
 pub enum Cmd {
     // window
     DragMove,
-    DragResize(ResizeDir),
     Minimize,
     ToggleMaximize,
     Exit,
@@ -35,7 +35,6 @@ pub enum Cmd {
     // file operations
     NewFolder,
     RenameSelected,
-    StartRename(usize),
     CommitRename { index: usize, name: String },
     CancelRename,
     CopySelection,
@@ -60,6 +59,7 @@ pub enum Cmd {
 }
 
 /// Read-only snapshot handed to UI modules each frame.
+#[allow(dead_code)] // summary fields are consumed as modules grow
 pub struct Cx<'a> {
     pub theme: &'a Theme,
     pub cwd: &'a Path,
@@ -170,46 +170,28 @@ impl App {
         self.window = (w, h);
     }
 
-    pub fn set_focused(&mut self, focused: bool) {
-        self.focused = focused;
-    }
-
     pub fn exit_requested(&self) -> bool {
         self.exit
     }
 
     /// One UI frame: theme, fs events, keyboard, layout bands, route commands.
-    pub fn frame(&mut self, ctx: &egui::Context) {
+    /// `ui` is egui's root Ui for this pass (egui 0.36 `run_ui`).
+    pub fn frame(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
         if self.theme.generation != self.last_theme_gen {
-            self.theme.apply(ctx);
+            self.theme.apply(&ctx);
             self.last_theme_gen = self.theme.generation;
         }
         self.focused = ctx.input(|i| i.focused);
         self.poll_fs();
 
         let mut pending: Vec<Cmd> = Vec::new();
-        input::gather(ctx, &mut pending);
-        border::edge_resize(ctx, &self.theme, &*self.port, &mut pending);
+        input::gather(&ctx, &mut pending);
+        border::edge_resize(&ctx, &self.theme, &*self.port);
 
-        let cx = self.make_cx();
-        border::titlebar(ctx, &cx, &mut pending);
-        self.ribbon.show(ctx, &cx, &mut pending);
-        self.addr.show(ctx, &cx, &mut pending);
-        self.status_bar.show(ctx, &cx, &mut pending);
-        if cx.nav_visible {
-            self.nav.show(ctx, &cx, &mut pending);
-        }
-        self.fv.show(ctx, &cx, &mut pending);
-        border::frame_stroke(ctx, &cx);
-
-        for cmd in pending {
-            self.command(cmd);
-        }
-    }
-
-    fn make_cx(&self) -> Cx<'_> {
-        let sel = self.fv.selected_count();
-        Cx {
+        // Read-only snapshot for UI modules. Built from disjoint field
+        // borrows so modules can still take &mut of their own state (D6).
+        let cx = Cx {
             theme: &self.theme,
             cwd: &self.cwd,
             cwd_label: &self.cwd_label,
@@ -220,9 +202,9 @@ impl App {
             can_forward: !self.history_forward.is_empty(),
             can_up: self.cwd.parent().is_some(),
             item_count: self.fv.visible_count(),
-            selected_count: sel,
+            selected_count: self.fv.selected_count(),
             selected_bytes: self.fv.selected_bytes(),
-            single_selected: if sel == 1 { self.fv.first_selected() } else { None },
+            single_selected: if self.fv.selected_count() == 1 { self.fv.first_selected() } else { None },
             view: self.fv.view,
             show_hidden: self.fv.show_hidden,
             has_clipboard: self.clipboard.as_ref().map(|c| !c.paths.is_empty()).unwrap_or(false),
@@ -231,11 +213,26 @@ impl App {
             ops_line: self.ops_line.clone(),
             status_line: self.status_line.clone(),
             port: &*self.port,
+        };
+
+        border::titlebar(ui, &cx, &mut pending);
+        self.ribbon.show(ui, &cx, &mut pending);
+        self.addr.show(ui, &cx, &mut pending);
+        self.status_bar.show(ui, &cx, &mut pending);
+        if cx.nav_visible {
+            self.nav.show(ui, &cx, &mut pending);
+        }
+        self.fv.show(ui, &cx, &mut pending);
+        border::frame_stroke(&ctx, &cx);
+
+        for cmd in pending {
+            self.command(cmd);
         }
     }
 
     fn poll_fs(&mut self) {
-        for ev in self.fs_rx.try_iter() {
+        let events: Vec<_> = self.fs_rx.try_iter().collect();
+        for ev in events {
             match ev {
                 FsEvent::Listed { path, result } => {
                     if path == self.cwd {
@@ -321,7 +318,6 @@ impl App {
     fn command(&mut self, cmd: Cmd) {
         match cmd {
             Cmd::DragMove => self.port.drag_move(),
-            Cmd::DragResize(d) => self.port.drag_resize(d),
             Cmd::Minimize => self.port.minimize(),
             Cmd::ToggleMaximize => self.port.toggle_maximize(),
             Cmd::Exit => self.exit = true,
@@ -354,7 +350,6 @@ impl App {
                     self.fv.start_rename(i);
                 }
             }
-            Cmd::StartRename(i) => self.fv.start_rename(i),
             Cmd::CommitRename { index, name } => {
                 if let Some(entry) = self.fv.entry(index) {
                     let from = entry.path.clone();

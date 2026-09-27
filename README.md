@@ -20,7 +20,13 @@ make dist              # stripped release binary in dist/
 
 ## Status
 
-Skeleton: self-rendered border + title bar, ribbon (Home wired), breadcrumb
-address bar, navigation pane (favorites / This PC / Network), details +
-large-icon file views, status bar, light/dark theme, GIO filesystem backend on
-a worker thread, software rendering. See ARCHITECTURE.md for what's stubbed.
+Skeleton **runs on Wayland**: self-rendered border + title bar (drag,
+double-click maximize, compositor resize), ribbon (Home wired: clipboard /
+organize / new / open / select), breadcrumb address bar, navigation pane
+(favorites / This PC via GIO volumes / Network stub), details + large-icon
+file views with selection/sorting/inline-rename, status bar, light/dark theme,
+GIO filesystem on a worker thread, software rendering (no GPU needed), hi-dpi
+verified, internal clipboard + copy/cut/paste/delete-to-trash with progress.
+
+Verify layouts headlessly: `cargo run -- --snapshot out.bmp [--dark] [--scale 1.75]`
+See ARCHITECTURE.md for the full module status table.
