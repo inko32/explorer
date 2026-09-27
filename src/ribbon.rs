@@ -19,6 +19,9 @@ pub struct TabDef {
     pub label: String,
     #[serde(default)]
     pub kind: Option<String>,
+    /// Contextual-tab accent color (name or #RRGGBB).
+    #[serde(default)]
+    pub color: Option<String>,
     #[serde(default)]
     pub when: Option<String>,
     #[serde(default)]
@@ -226,6 +229,24 @@ mod tests {
         assert!(eval_when("(has_image or has_selection) and inside_archive", c));
         assert!(!eval_when("unknown_pred", c));
     }
+}
+
+/// Contextual tab accent colors (Win8 palette).
+pub fn color_by_name(name: &str) -> Option<iced::Color> {
+    Some(match name {
+        "gold" => iced::color!(0xE8A33D),
+        "green" => iced::color!(0x3FA046),
+        "blue" => iced::color!(0x0078D7),
+        "orange" => iced::color!(0xE88B00),
+        "purple" => iced::color!(0x8E5BB5),
+        "teal" => iced::color!(0x2E9E9E),
+        "red" => iced::color!(0xD04343),
+        hex if hex.starts_with('#') && hex.len() == 7 => {
+            let v = u32::from_str_radix(&hex[1..], 16).ok()?;
+            iced::Color::from_rgb8(((v >> 16) & 0xFF) as u8, ((v >> 8) & 0xFF) as u8, (v & 0xFF) as u8)
+        }
+        _ => return None,
+    })
 }
 
 // ---------------- enablement ----------------

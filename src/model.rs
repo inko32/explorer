@@ -45,6 +45,8 @@ pub enum Message {
     Scrolled { y: f32, height: f32 },
     /// Window resized (for list virtualization viewport).
     WindowResized(f32),
+    /// Switch between the self-rendered border and native decorations.
+    ToggleSelfBorder,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -69,6 +71,8 @@ pub struct Explorer {
     forward: Vec<PathBuf>,
     pub dark: bool,
     pub maximized: bool,
+    /// Self-rendered window border/title bar (off = native decorations).
+    pub self_border: bool,
     pub clipboard: Option<(ClipMode, Vec<PathBuf>)>,
     pub view: ViewMode,
     pub show_hidden: bool,
@@ -105,6 +109,7 @@ impl Explorer {
             forward: Vec::new(),
             dark: false,
             maximized: false,
+            self_border: true,
             clipboard: None,
             view: ViewMode::Details,
             show_hidden: false,
@@ -122,6 +127,7 @@ impl Explorer {
         };
         s.request_listing();
         s.sched.send(Job::Volumes);
+        s.sync_active_tab();
         s
     }
 
@@ -167,6 +173,7 @@ impl Explorer {
         self.selected.clear();
         self.renaming = None;
         self.scroll_y = 0.0;
+        self.sync_active_tab();
         self.request_listing();
     }
 
@@ -317,6 +324,31 @@ impl Explorer {
         }
     }
 
+    /// Win8 behavior: when a contextual tab's context becomes true (cwd
+    /// change or new selection), activate it; fall back to Home when the
+    /// active tab disappears.
+    fn sync_active_tab(&mut self) {
+        let ctx = self.context();
+        let matching = self
+            .ribbon
+            .contextual_tabs
+            .iter()
+            .find(|t| t.when.as_deref().map(|w| crate::ribbon::eval_when(w, ctx)).unwrap_or(true));
+        match matching {
+            Some(t) => self.active_tab = t.id.clone(),
+            None => {
+                let visible = self.ribbon.tabs.iter().any(|t| t.id == self.active_tab)
+                    || self.ribbon.contextual_tabs.iter().any(|t| {
+                        t.id == self.active_tab
+                            && t.when.as_deref().map(|w| crate::ribbon::eval_when(w, ctx)).unwrap_or(true)
+                    });
+                if !visible {
+                    self.active_tab = "home".into();
+                }
+            }
+        }
+    }
+
     fn run_command(&mut self, id: &str) -> iced::Task<Message> {
         let Some(def) = self.ribbon.commands.get(id).cloned() else {
             self.status = format!("unknown command '{id}'");
@@ -338,6 +370,7 @@ impl Explorer {
                 "view_details" => Some(Message::SetView(ViewMode::Details)),
                 "toggle_hidden" => Some(Message::ToggleHidden),
                 "toggle_dark" => Some(Message::ToggleDark),
+                "toggle_border" => Some(Message::ToggleSelfBorder),
                 "open" => first.map(Message::Open),
                 other => {
                     self.status = format!("'{other}' is not implemented");
@@ -426,6 +459,7 @@ impl Explorer {
             Message::Select(i) => {
                 self.selected.clear();
                 self.selected.insert(i);
+                self.sync_active_tab();
                 // double-click emulation: two presses on the same row within 400ms
                 let now = std::time::Instant::now();
                 if let Some((last_i, t)) = self.last_click {
@@ -558,6 +592,13 @@ impl Explorer {
             }
             Message::WindowResized(h) => {
                 self.viewport_h = h;
+                iced::Task::none()
+            }
+            Message::ToggleSelfBorder => {
+                self.self_border = !self.self_border;
+                if let Some(id) = self.window {
+                    return iced::window::toggle_decorations(id);
+                }
                 iced::Task::none()
             }
             Message::RenameInput(s) => {

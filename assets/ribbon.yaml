@@ -79,14 +79,16 @@ tabs:
           - { id: toggle_nav, label: Navigation pane, icon: computer, size: small, enabled: false }
           - { id: toggle_hidden, label: Hidden items, icon: file, size: small }
       - label: Options
-        width: 100
+        width: 118
         commands:
           - { id: toggle_dark, label: Dark mode, icon: gear, size: small }
+          - { id: toggle_border, label: Custom border, icon: gear, size: small }
           - { id: folder_options, label: Folder options, icon: gear, size: small, enabled: false }
 
 contextual_tabs:
   - id: drive_tools
     label: Drive Tools
+    color: green
     when: "is_drive"
     groups:
       - label: Drive
@@ -96,6 +98,7 @@ contextual_tabs:
           - { id: open_terminal, label: Open terminal, icon: gear, size: small }
   - id: picture_tools
     label: Picture Tools
+    color: gold
     when: "has_image"
     groups:
       - label: Manage
@@ -105,6 +108,7 @@ contextual_tabs:
           - { id: set_wallpaper, label: Set as wallpaper, icon: pictures, size: small, enabled: false }
   - id: archive_tools
     label: Archive Tools
+    color: orange
     when: "inside_archive or has_archive"
     groups:
       - label: Archive
@@ -127,6 +131,7 @@ commands:
   view_details: { internal: view_details }
   toggle_hidden: { internal: toggle_hidden }
   toggle_dark: { internal: toggle_dark }
+  toggle_border: { internal: toggle_border }
   open_picture: { internal: open }
   open_terminal:
     shell: "konsole --workdir {cwd}"
