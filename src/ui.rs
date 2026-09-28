@@ -436,22 +436,36 @@ fn elide(s: &str, max_w: f32) -> String {
 }
 
 fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
+    // caption glyphs per frame scheme: Win10 = 46x30 full-height with a 15px
+    // glyph; Win8 = narrower + shorter (hangs from the title-bar top) with a
+    // thinner 13px glyph
+    let (cap_w, cap_h, glyph) = match state.frame_style {
+        crate::model::FrameStyle::Win8 => (40.0, 24.0, 13.0),
+        crate::model::FrameStyle::Win10 => (46.0, 30.0, 15.0),
+    };
     let caption = |icon_name: &'static str, msg: Message, hover_bg: Color| {
-        button(crate::icon::view(icon_name, 15.0, &skin))
-            .width(Length::Fixed(46.0))
-            .height(Length::Fill)
-            .style(move |_t, status| button::Style {
-                background: match status {
-                    button::Status::Hovered => Some(hover_bg.into()),
-                    button::Status::Pressed => Some(hover_bg.scale_alpha(0.7).into()),
-                    _ => None,
-                },
-                text_color: Color::WHITE,
-                border: Default::default(),
-                shadow: Default::default(),
-                snap: true,
-            })
-            .on_press(msg)
+        button(
+            container(crate::icon::view(icon_name, glyph, &skin))
+                .width(Length::Fixed(cap_w))
+                .height(Length::Fixed(cap_h))
+                .center_x(Length::Fixed(cap_w))
+                .center_y(Length::Fixed(cap_h)),
+        )
+        .width(Length::Fixed(cap_w))
+        .height(Length::Fixed(cap_h))
+        .padding(0)
+        .style(move |_t, status| button::Style {
+            background: match status {
+                button::Status::Hovered => Some(hover_bg.into()),
+                button::Status::Pressed => Some(hover_bg.scale_alpha(0.7).into()),
+                _ => None,
+            },
+            text_color: Color::WHITE,
+            border: Default::default(),
+            shadow: Default::default(),
+            snap: true,
+        })
+        .on_press(msg)
     };
 
     // Win8: contextual tab labels are colored blocks on the title bar,
@@ -613,9 +627,9 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
                 drag_gap,
                 ctx_blocks,
                 drag_title,
-                caption("minimize", Message::Minimize, Color::from_rgba(1.0, 1.0, 1.0, 0.18)),
-                caption("maximize", Message::Maximize, Color::from_rgba(1.0, 1.0, 1.0, 0.18)),
-                caption("close", Message::Close, skin.close_hover),
+                container(caption("minimize", Message::Minimize, Color::from_rgba(1.0, 1.0, 1.0, 0.18))).height(Length::Fill).align_y(iced::Alignment::Start),
+                container(caption("maximize", Message::Maximize, Color::from_rgba(1.0, 1.0, 1.0, 0.18))).height(Length::Fill).align_y(iced::Alignment::Start),
+                container(caption("close", Message::Close, skin.close_hover)).height(Length::Fill).align_y(iced::Alignment::Start),
             ]
             .height(Length::Fixed(30.0)),
         )
@@ -652,9 +666,9 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
             mouse_area(Space::new().width(Length::Fill).height(Length::Fixed(30.0)))
                 .on_press(Message::TitlebarPress)
                 .on_double_click(Message::TitlebarDoubleClick),
-            caption("minimize", Message::Minimize, Color::from_rgba(1.0, 1.0, 1.0, 0.18)),
-            caption("maximize", Message::Maximize, Color::from_rgba(1.0, 1.0, 1.0, 0.18)),
-            caption("close", Message::Close, skin.close_hover),
+            container(caption("minimize", Message::Minimize, Color::from_rgba(1.0, 1.0, 1.0, 0.18))).height(Length::Fill).align_y(iced::Alignment::Start),
+            container(caption("maximize", Message::Maximize, Color::from_rgba(1.0, 1.0, 1.0, 0.18))).height(Length::Fill).align_y(iced::Alignment::Start),
+            container(caption("close", Message::Close, skin.close_hover)).height(Length::Fill).align_y(iced::Alignment::Start),
         ]
         .height(Length::Fixed(30.0)),
     )
