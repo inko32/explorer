@@ -57,6 +57,7 @@ pub struct CmdRef {
     pub id: String,
     #[serde(default)]
     pub separator: Option<bool>,
+    #[serde(default)]
     pub label: String,
     #[serde(default)]
     pub icon: Option<String>,
