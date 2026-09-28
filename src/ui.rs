@@ -39,13 +39,13 @@ pub mod skin {
         toolbar_bg: color!(0xFFFFFF),
         status_bg: color!(0xFFFFFF),
         col_header_bg: color!(0xF7F7F7),
-        hover: color!(0xE5F1FB),
-        pressed: color!(0xCCE4F7),
-        sel: color!(0xCDE6F7),
+        hover: color!(0xE5F3FF),
+        pressed: color!(0xA4CEF9),
+        sel: color!(0xCCE8FF),
         sel_border: color!(0x0078D7),
-        sep: color!(0xDADADA),
-        text: color!(0x262626),
-        subtle: color!(0x666666),
+        sep: color!(0xDADBDC),
+        text: color!(0x1A1A1A),
+        subtle: color!(0x828282),
         disabled: color!(0xA0A0A0),
         folder: color!(0xF6C356),
         folder_edge: color!(0xC88E1E),
@@ -94,12 +94,11 @@ pub mod skin {
 use std::path::{Path, PathBuf};
 
 use iced::widget::{
-    button, column, container, mouse_area, row, scrollable, svg, text, text_input, Space,
+    button, column, container, mouse_area, row, scrollable, text, text_input, Space,
 };
 use iced::{Color, Element, Length};
 
 use crate::fs::{self, Entry};
-use crate::icons;
 use crate::model::{self, Explorer, Message, ViewMode};
 use crate::ribbon::{self, GroupDef, TabDef};
 
@@ -123,15 +122,15 @@ fn bg(color: Color) -> impl Fn(&iced::Theme) -> container::Style + 'static {
     }
 }
 
-fn icon(handle: svg::Handle, size: f32) -> Element<'static, Message> {
-    svg(handle).width(Length::Fixed(size)).height(Length::Fixed(size)).into()
+fn icon(name: &str, size: f32, skin: skin::Skin) -> Element<'static, Message> {
+    crate::icon::view(name, size, &skin)
 }
 
 // ---------------- title bar ----------------
 
 fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
-    let caption = |handle: svg::Handle, msg: Message, hover_bg: Color| {
-        button(svg(handle).width(Length::Fixed(15.0)).height(Length::Fixed(15.0)))
+    let caption = |icon_name: &'static str, msg: Message, hover_bg: Color| {
+        button(crate::icon::view(icon_name, 15.0, &skin))
             .width(Length::Fixed(46.0))
             .height(Length::Fill)
             .style(move |_t, status| button::Style {
@@ -146,12 +145,6 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
                 snap: true,
             })
             .on_press(msg)
-    };
-
-    let max_icon = if state.maximized {
-        icons::restore(&skin)
-    } else {
-        icons::maximize(&skin)
     };
 
     // Win8: contextual tab labels are colored blocks on the title bar,
@@ -206,19 +199,19 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
 
     container(
         row![
-            container(icon(icons::folder(&skin), 16.0))
+            container(icon("folder", 16.0, skin))
                 .width(Length::Fixed(28.0))
                 .height(Length::Fill)
                 .center_x(Length::Fixed(28.0))
                 .center_y(Length::Fill),
             drag_title,
             ctx_blocks,
-            mouse_area(Space::new().width(Length::Fill))
+            mouse_area(Space::new().width(Length::Fill).height(Length::Fixed(30.0)))
                 .on_press(Message::TitlebarPress)
                 .on_double_click(Message::TitlebarDoubleClick),
-            caption(icons::minimize(&skin), Message::Minimize, Color::from_rgba(1.0, 1.0, 1.0, 0.18)),
-            caption(max_icon, Message::Maximize, Color::from_rgba(1.0, 1.0, 1.0, 0.18)),
-            caption(icons::close(&skin), Message::Close, skin.close_hover),
+            caption("minimize", Message::Minimize, Color::from_rgba(1.0, 1.0, 1.0, 0.18)),
+            caption("maximize", Message::Maximize, Color::from_rgba(1.0, 1.0, 1.0, 0.18)),
+            caption("close", Message::Close, skin.close_hover),
         ]
         .height(Length::Fixed(30.0)),
     )
@@ -231,11 +224,15 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
 // ---------------- ribbon ----------------
 
 fn ribbon(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
-    container(column![tab_row(state, skin), ribbon_body(state, skin)])
-        .width(Length::Fill)
-        .height(Length::Fixed(122.0))
-        .style(bg(skin.ribbon_bg))
-        .into()
+    container(if state.ribbon_collapsed {
+        column![tab_row(state, skin)]
+    } else {
+        column![tab_row(state, skin), ribbon_body(state, skin)]
+    })
+    .width(Length::Fill)
+    .height(Length::Fixed(if state.ribbon_collapsed { 28.0 } else { 122.0 }))
+    .style(bg(skin.ribbon_bg))
+    .into()
 }
 
 fn tab_button(
@@ -343,7 +340,22 @@ fn visible_tabs(state: &Explorer) -> Vec<&TabDef> {
 }
 
 fn tab_row(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
-    let help = button(icon(icons::help(&skin), 16.0))
+    // ribbon minimize chevron (Win8: also double-click a tab)
+    let collapse = button(icon(if state.ribbon_collapsed { "chevron_down" } else { "up" }, 14.0, skin))
+        .width(Length::Fixed(24.0))
+        .height(Length::Fixed(24.0))
+        .style(move |_t, status| button::Style {
+            background: match status {
+                button::Status::Hovered => Some(skin.hover.into()),
+                _ => None,
+            },
+            text_color: skin.text,
+            border: Default::default(),
+            shadow: Default::default(),
+            snap: true,
+        })
+        .on_press(Message::ToggleRibbonCollapse);
+    let help = button(icon("help", 16.0, skin))
         .width(Length::Fixed(24.0))
         .height(Length::Fixed(24.0))
         .style(|_t, _status| button::Style {
@@ -401,6 +413,7 @@ fn tab_row(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         row![
             tabs_row,
             Space::new().width(Length::Fill),
+            container(collapse).height(Length::Fixed(28.0)).center_y(Length::Fixed(28.0)),
             container(help).height(Length::Fixed(28.0)).center_y(Length::Fixed(28.0)).padding([0.0, 6.0]),
         ]
         .height(Length::Fixed(28.0)),
@@ -435,14 +448,14 @@ fn cmd_style(
 }
 
 fn big_cmd(
-    handle: svg::Handle,
+    icon_el: Element<'static, Message>,
     label: &str,
     enabled: bool,
     msg: Option<Message>,
     skin: skin::Skin,
 ) -> Element<'static, Message> {
     let content = column![
-        svg(handle).width(Length::Fixed(42.0)).height(Length::Fixed(42.0)),
+        icon_el,
         text(label.to_string()).size(11.0).color(if enabled { skin.text } else { skin.disabled }),
     ]
     .spacing(2)
@@ -457,19 +470,9 @@ fn big_cmd(
     }
 }
 
-fn small_cmd(
-    handle: svg::Handle,
-    label: &str,
-    width: f32,
-    enabled: bool,
-    msg: Option<Message>,
-    skin: skin::Skin,
-) -> Element<'static, Message> {
-    small_cmd_active(handle, label, width, enabled, false, msg, skin)
-}
 
 fn small_cmd_active(
-    handle: svg::Handle,
+    icon_el: Element<'static, Message>,
     label: &str,
     width: f32,
     enabled: bool,
@@ -478,7 +481,7 @@ fn small_cmd_active(
     skin: skin::Skin,
 ) -> Element<'static, Message> {
     let content = row![
-        svg(handle).width(Length::Fixed(16.0)).height(Length::Fixed(16.0)),
+        icon_el,
         text(label.to_string()).size(11.0).color(if enabled { skin.text } else { skin.disabled }),
     ]
     .spacing(5)
@@ -550,12 +553,12 @@ fn group_from_config(g: &GroupDef, state: &Explorer, skin: skin::Skin) -> Elemen
             "toggle_hidden" => state.show_hidden,
             _ => false,
         };
-        let handle = ribbon::icon_by_name(cmd.icon.as_deref().unwrap_or("file"), &skin);
+        let icon_el = crate::icon::view(cmd.icon.as_deref().unwrap_or("file"), if cmd.size.as_deref() == Some("big") { 42.0 } else { 16.0 }, &skin);
         let msg = enabled.then(|| Message::RunCommand(cmd.id.clone()));
         let el = if cmd.size.as_deref() == Some("big") {
-            big_cmd(handle, &cmd.label, enabled, msg, skin)
+            big_cmd(icon_el, &cmd.label, enabled, msg, skin)
         } else {
-            small_cmd_active(handle, &cmd.label, 100.0, enabled, active, msg, skin)
+            small_cmd_active(icon_el, &cmd.label, 100.0, enabled, active, msg, skin)
         };
         if cmd.size.as_deref() == Some("big") {
             bigs.push(el);
@@ -584,8 +587,8 @@ fn group_from_config(g: &GroupDef, state: &Explorer, skin: skin::Skin) -> Elemen
 
 // ---------------- address bar ----------------
 
-fn nav_circle(handle: svg::Handle, enabled: bool, msg: Message, skin: skin::Skin) -> Element<'static, Message> {
-    let btn = button(svg(handle).width(Length::Fixed(16.0)).height(Length::Fixed(16.0)))
+fn nav_circle(icon_name: &'static str, enabled: bool, msg: Message, skin: skin::Skin) -> Element<'static, Message> {
+    let btn = button(crate::icon::view(icon_name, 16.0, &skin))
         .width(Length::Fixed(28.0))
         .height(Length::Fixed(28.0))
         .style(move |_t, status| button::Style {
@@ -611,7 +614,7 @@ fn nav_circle(handle: svg::Handle, enabled: bool, msg: Message, skin: skin::Skin
 }
 
 fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
-    let refresh = button(icon(icons::refresh(&skin), 16.0))
+    let refresh = button(icon("refresh", 16.0, skin))
         .width(Length::Fixed(24.0))
         .height(Length::Fixed(24.0))
         .style(move |_t, status| button::Style {
@@ -667,7 +670,7 @@ fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         };
         crumbs = crumbs.push(cell_el);
         if !is_last {
-            crumbs = crumbs.push(icon(icons::chevron_right(&skin), 9.0));
+            crumbs = crumbs.push(icon("chevron_right", 9.0, skin));
         }
     }
 
@@ -690,7 +693,7 @@ fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
 
     let search = container(
         row![
-            icon(icons::search(&skin), 14.0),
+            icon("search", 14.0, skin),
             text(format!("Search {}", state.title()))
                 .size(12.0)
                 .color(skin.disabled),
@@ -713,9 +716,9 @@ fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
 
     container(
         row![
-            nav_circle(icons::back(&skin), !state.back_is_empty(), Message::Back, skin),
-            nav_circle(icons::forward(&skin), !state.forward_is_empty(), Message::Forward, skin),
-            nav_circle(icons::up(&skin), state.cwd.parent().is_some(), Message::Up, skin),
+            nav_circle("back", !state.back_is_empty(), Message::Back, skin),
+            nav_circle("forward", !state.forward_is_empty(), Message::Forward, skin),
+            nav_circle("up", state.cwd.parent().is_some(), Message::Up, skin),
             crumb_bar,
             search,
         ]
@@ -733,7 +736,7 @@ fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
 
 fn nav_item(
     label: String,
-    handle: svg::Handle,
+    icon_name: &'static str,
     selected: bool,
     msg: Option<Message>,
     skin: skin::Skin,
@@ -742,7 +745,7 @@ fn nav_item(
     let border_color = if selected { skin.sel_border } else { Color::TRANSPARENT };
     let item: Element<Message> = container(
         row![
-            svg(handle).width(Length::Fixed(16.0)).height(Length::Fixed(16.0)),
+            crate::icon::view(icon_name, 16.0, &skin),
             text(label).size(12.0).color(skin.text),
         ]
         .spacing(8)
@@ -773,18 +776,18 @@ fn nav_pane(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
 
     list = list.push(
         row![
-            icon(icons::star(&skin), 14.0),
+            icon("star", 14.0, skin),
             text("Favorites").size(12.0).color(skin.subtle),
         ]
         .spacing(6)
         .padding([2.0, 6.0]),
     );
-    let mut favs: Vec<(&str, svg::Handle, Option<PathBuf>)> = vec![
-        ("Home", icons::home(&skin), home.clone()),
-        ("Desktop", icons::computer(&skin), home.as_ref().map(|h| h.join("Desktop"))),
-        ("Documents", icons::documents(&skin), home.as_ref().map(|h| h.join("Documents"))),
-        ("Downloads", icons::downloads(&skin), home.as_ref().map(|h| h.join("Downloads"))),
-        ("Recent places", icons::recent(&skin), None),
+    let mut favs: Vec<(&str, &'static str, Option<PathBuf>)> = vec![
+        ("Home", "home", home.clone()),
+        ("Desktop", "desktop", home.as_ref().map(|h| h.join("Desktop"))),
+        ("Documents", "documents", home.as_ref().map(|h| h.join("Documents"))),
+        ("Downloads", "downloads", home.as_ref().map(|h| h.join("Downloads"))),
+        ("Recent places", "recent", None),
     ];
     for (label, handle, target) in favs.drain(..) {
         let selected = target.as_deref() == Some(state.cwd.as_path());
@@ -794,7 +797,7 @@ fn nav_pane(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
 
     list = list.push(
         row![
-            icon(icons::computer(&skin), 14.0),
+            icon("computer", 14.0, skin),
             text("This PC").size(12.0).color(skin.subtle),
         ]
         .spacing(6)
@@ -802,7 +805,7 @@ fn nav_pane(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     );
     list = list.push(nav_item(
         "Computer".to_string(),
-        icons::computer(&skin),
+        "computer",
         state.cwd == Path::new("/"),
         Some(Message::Navigate(PathBuf::from("/"))),
         skin,
@@ -812,7 +815,7 @@ fn nav_pane(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         let mount = v.mount.clone();
         list = list.push(nav_item(
             v.name.clone(),
-            icons::drive(&skin),
+            "drive",
             selected,
             Some(Message::Navigate(mount)),
             skin,
@@ -821,13 +824,13 @@ fn nav_pane(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
 
     list = list.push(
         row![
-            icon(icons::network(&skin), 14.0),
+            icon("network", 14.0, skin),
             text("Network").size(12.0).color(skin.subtle),
         ]
         .spacing(6)
         .padding([4.0, 6.0]),
     );
-    list = list.push(nav_item("Network".to_string(), icons::network(&skin), false, None, skin));
+    list = list.push(nav_item("Network".to_string(), "network", false, None, skin));
 
     container(list)
         .width(Length::Fixed(210.0))
@@ -931,24 +934,6 @@ fn file_view(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         .into()
 }
 
-fn entry_icon(e: &Entry, skin: skin::Skin) -> svg::Handle {
-    if !e.is_dir() && fs::archive::is_archive_path(&e.path) {
-        return icons::archive(&skin);
-    }
-    match e.kind {
-        fs::EntryKind::Dir => icons::folder(&skin),
-        fs::EntryKind::File | fs::EntryKind::Other => {
-            if matches!(
-                e.name.rsplit_once('.').map(|(_, x)| x.to_lowercase()).unwrap_or_default().as_str(),
-                "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp"
-            ) {
-                icons::file_image(&skin)
-            } else {
-                icons::file(&skin)
-            }
-        }
-    }
-}
 
 fn file_row<'a>(i: usize, e: &Entry, state: &Explorer, skin: skin::Skin) -> Element<'a, Message> {
     let selected = state.selected.contains(&i);
@@ -975,7 +960,7 @@ fn file_row<'a>(i: usize, e: &Entry, state: &Explorer, skin: skin::Skin) -> Elem
     };
 
     let content = row![
-        container(icon(entry_icon(e, skin), 16.0))
+        container(crate::icon::for_entry(e, 16.0, &skin))
             .width(Length::Fixed(26.0))
             .center_y(Length::Fixed(16.0)),
         container(name_cell).width(Length::Fill).padding([2.0, 4.0]),
@@ -1021,7 +1006,7 @@ fn large_cell<'a>(i: usize, e: &Entry, state: &Explorer, skin: skin::Skin) -> El
     let bgc = if selected { skin.sel } else { Color::TRANSPARENT };
     let border_color = if selected { skin.sel_border } else { Color::TRANSPARENT };
     let content = column![
-        icon(entry_icon(e, skin), 64.0),
+        crate::icon::for_entry(e, 64.0, &skin),
         text(e.name.clone()).size(11.0).color(skin.text).width(Length::Fixed(96.0)),
     ]
     .spacing(6)
@@ -1061,8 +1046,8 @@ fn statusbar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         left += &format!("    {}", state.status);
     }
 
-    let view_btn = |handle: svg::Handle, active: bool, msg: Message| {
-        button(svg(handle).width(Length::Fixed(16.0)).height(Length::Fixed(16.0)))
+    let view_btn = |icon_name: &'static str, active: bool, msg: Message| {
+        button(crate::icon::view(icon_name, 16.0, &skin))
             .width(Length::Fixed(22.0))
             .height(Length::Fixed(22.0))
             .style(move |_t, status| button::Style {
@@ -1090,8 +1075,8 @@ fn statusbar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         row![
             text(left).size(11.0).color(skin.subtle),
             Space::new().width(Length::Fill),
-            view_btn(icons::view_details(&skin), state.view == ViewMode::Details, Message::SetView(ViewMode::Details)),
-            view_btn(icons::view_large(&skin), state.view == ViewMode::Large, Message::SetView(ViewMode::Large)),
+            view_btn("view_details", state.view == ViewMode::Details, Message::SetView(ViewMode::Details)),
+            view_btn("view_large", state.view == ViewMode::Large, Message::SetView(ViewMode::Large)),
         ]
         .spacing(2)
         .align_y(iced::Alignment::Center)

@@ -1,0 +1,74 @@
+# Icon registry — every icon in the app resolves through this file (D14).
+# `file` names a PNG under assets/icons/; sizes pick the nearest variant
+# >= the requested size (folder-16.png, folder-32.png, ...).
+# `svg` provides an inline fallback (theme-colored via {placeholders}:
+#   {fg} {bg} {accent} {folder} {folder_edge}).
+# A user file at ~/.config/explorer/icons.yaml overrides any entry.
+# Thumbnails will plug in here later (icon module stays the only seam).
+
+icons:
+  # items
+  folder:       { file: folder }
+  file:         { file: file }
+  file_image:   { file: file_image }
+  text:         { file: text }
+  zip:          { file: zip }
+  audio:        { file: audio }
+  video:        { file: video }
+  exe:          { file: exe }
+  disc:         { file: disc }
+  png:          { file: png }
+  archive:      { file: zip }
+  libraries:    { file: libraries }
+  computer:     { file: computer }
+  star:         { file: star }
+  # ribbon
+  paste:        { file: paste }
+  cut:          { file: cut }
+  copy:         { file: copy }
+  copy_path:    { svg: builtin }
+  paste_shortcut: { file: paste_shortcut }
+  move_to:      { file: move_to }
+  copy_to:      { file: copy_to }
+  delete:       { file: delete }
+  rename:       { file: rename }
+  new_folder:   { file: folder_new }
+  new_item:     { file: new_item }
+  easy_access:  { file: easy_access }
+  properties:   { file: properties }
+  open:         { svg: builtin }
+  edit:         { file: edit }
+  history:      { file: history }
+  select_all:   { file: select_all }
+  select_none:  { file: select_none }
+  invert_sel:   { file: invert_sel }
+  view_details: { file: view_details }
+  view_large:   { file: view_large }
+  view_list:    { file: view_list }
+  view_tiles:   { file: view_tiles }
+  share:        { file: share }
+  email:        { file: email }
+  gear:         { svg: builtin }
+  # nav/window placeholders (SVG until extracted)
+  home:         { svg: builtin }
+  desktop:      { svg: builtin }
+  documents:    { svg: builtin }
+  downloads:    { svg: builtin }
+  pictures:     { svg: builtin }
+  music:        { svg: builtin }
+  videos:       { svg: builtin }
+  recent:       { svg: builtin }
+  network:      { svg: builtin }
+  drive:        { svg: builtin }
+  back:         { svg: builtin }
+  forward:      { svg: builtin }
+  up:           { svg: builtin }
+  refresh:      { svg: builtin }
+  search:       { svg: builtin }
+  chevron_down: { svg: builtin }
+  chevron_right: { svg: builtin }
+  help:         { svg: builtin }
+  minimize:     { svg: builtin }
+  maximize:     { svg: builtin }
+  restore:      { svg: builtin }
+  close:        { svg: builtin }

@@ -9,6 +9,38 @@ use iced::Color;
 
 use crate::ui::skin::Skin;
 
+/// Builtin theme-colored SVG generator dispatch (registry `svg: builtin`).
+pub fn builtin_svg(name: &str, s: &Skin) -> svg::Handle {
+    match name {
+        "home" => home(s),
+        "desktop" => computer(s),
+        "documents" => documents(s),
+        "downloads" => downloads(s),
+        "pictures" => pictures(s),
+        "music" => music(s),
+        "videos" => videos(s),
+        "recent" => recent(s),
+        "network" => network(s),
+        "drive" => drive(s),
+        "back" => back(s),
+        "forward" => forward(s),
+        "up" => up(s),
+        "refresh" => refresh(s),
+        "search" => search(s),
+        "chevron_down" => chevron_down(s),
+        "chevron_right" => chevron_right(s),
+        "help" => help(s),
+        "minimize" => minimize(s),
+        "maximize" => maximize(s),
+        "restore" => restore(s),
+        "close" => close(s),
+        "gear" => gear(s),
+        "open" => open(s),
+        "copy_path" => copy_path(s),
+        _ => file(s),
+    }
+}
+
 fn hex(c: Color) -> String {
     format!("#{:02x}{:02x}{:02x}", (c.r * 255.0) as u8, (c.g * 255.0) as u8, (c.b * 255.0) as u8)
 }
