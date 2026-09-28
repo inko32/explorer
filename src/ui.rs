@@ -991,6 +991,7 @@ fn tab_row(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     )
     .width(Length::Fill)
     .height(Length::Fixed(28.0))
+    .style(bg(skin.window_bg)) // white strip - the accent frame must not bleed through
     .into()
 }
 
