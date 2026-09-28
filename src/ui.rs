@@ -315,7 +315,7 @@ fn menu_overlay(state: &Explorer, m: &crate::model::OpenMenu, skin: skin::Skin) 
     let w = labels
         .iter()
         .map(|(_, l, _)| l.chars().count() as f32 * 7.0 + 34.0)
-        .fold(120.0f32, f32::max);
+        .fold(m.source_w.max(120.0), f32::max);
     let mut items_col = column![].spacing(0);
     for (id, label, enabled) in labels {
         let item_label: iced::widget::Text<'_, iced::Theme, iced::Renderer> = text(label)
@@ -323,11 +323,11 @@ fn menu_overlay(state: &Explorer, m: &crate::model::OpenMenu, skin: skin::Skin) 
             .color(if enabled { skin.text } else { skin.disabled });
         let item = button(item_label)
         .width(Length::Fixed(w))
-        .height(Length::Fixed(23.0))
+        .height(Length::Fixed(22.0))
         .padding([0.0, 10.0])
         .style(move |_t: &iced::Theme, status: button::Status| button::Style {
             background: match (enabled, status) {
-                (true, button::Status::Hovered) => Some(skin.hover_btn.into()),
+                (true, button::Status::Hovered) => Some(skin.nav_hover.into()),
                 _ => None,
             },
             text_color: if enabled { skin.text } else { skin.disabled },
@@ -1120,7 +1120,9 @@ fn group_from_config(g: &GroupDef, state: &Explorer, skin: skin::Skin, x_base: f
     let enabled_of = |cmd: &ribbon::CmdRef| {
         cmd.enabled.unwrap_or(true) && ribbon::command_enabled(&cmd.id, has_sel, has_clip, has_items)
     };
+    let menu_source = state.open_menu.as_ref().map(|m| m.source.as_str());
     let active_of = |id: &str| match id {
+        _ if Some(id) == menu_source => true, // pressed while its menu is open
         "toggle_border" => state.self_border,
         "toggle_dark" => state.dark,
         "toggle_hidden" => state.show_hidden,
@@ -1147,6 +1149,8 @@ fn group_from_config(g: &GroupDef, state: &Explorer, skin: skin::Skin, x_base: f
                     enabled.then(|| Message::OpenMenu {
                         x: menu_anchor(state, x_base + 5.0 + bigs_w),
                         y: 30.0 + 28.0 + 1.0 + 6.0 + 76.0,
+                        source: cmd.id.clone(),
+                        source_w: w,
                         items: items.clone(),
                     }),
                     skin,
@@ -1201,6 +1205,8 @@ fn group_from_config(g: &GroupDef, state: &Explorer, skin: skin::Skin, x_base: f
             let menu_msg = enabled.then(|| Message::OpenMenu {
                 x: menu_anchor(state, ax),
                 y: ay,
+                source: cmd.id.clone(),
+                source_w: w,
                 items: items.clone(),
             });
             let arrow: Element<Message> = small_cmd_active(
@@ -1260,6 +1266,8 @@ fn group_from_config(g: &GroupDef, state: &Explorer, skin: skin::Skin, x_base: f
             .on_press(Message::OpenMenu {
                 x: menu_anchor(state, x_base + gw - 60.0),
                 y: 30.0 + 28.0 + 1.0 + 6.0 + 76.0,
+                source: g.label.clone(),
+                source_w: gw,
                 items,
             });
         let grid = container(content)
@@ -1344,9 +1352,9 @@ fn big_cmd_split(
                 .center_y(Length::Fixed(44.0)),
         )
         .width(Length::Fixed(width))
-        .height(Length::Fixed(52.0))
+        .height(Length::Fixed(46.0))
         .center_x(Length::Fixed(width))
-        .center_y(Length::Fixed(52.0)),
+        .center_y(Length::Fixed(46.0)),
     )
     .width(Length::Fixed(width))
     .height(Length::Fixed(46.0))

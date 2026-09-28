@@ -35,7 +35,7 @@ pub enum Message {
     SetView(ViewMode),
     SetSort(SortBy),
     /// Open a ribbon dropdown menu at (x, y content-relative).
-    OpenMenu { x: f32, y: f32, items: Vec<String> },
+    OpenMenu { x: f32, y: f32, source: String, source_w: f32, items: Vec<String> },
     CloseMenu,
     /// A dropdown menu item was picked.
     MenuPick(String),
@@ -90,6 +90,10 @@ pub struct OpenMenu {
     pub x: f32,
     /// Content-relative y (border inset is added at render time).
     pub y: f32,
+    /// Command id of the button that opened it (stays active while open).
+    pub source: String,
+    /// Width of the source button (menu is at least this wide).
+    pub source_w: f32,
     pub items: Vec<String>,
 }
 
@@ -208,6 +212,8 @@ impl Explorer {
             s.open_menu = Some(crate::model::OpenMenu {
                 x,
                 y: 59.0 + 6.0 + 23.0,
+                source: "sort_by".into(),
+                source_w: 140.0,
                 items: ["sort_name", "sort_size", "sort_modified"]
                     .iter()
                     .map(|s| s.to_string())
@@ -743,8 +749,8 @@ impl Explorer {
                 self.blocks_w = blocks;
                 iced::Task::none()
             }
-            Message::OpenMenu { x, y, items } => {
-                self.open_menu = Some(OpenMenu { x, y, items });
+            Message::OpenMenu { x, y, source, source_w, items } => {
+                self.open_menu = Some(OpenMenu { x, y, source, source_w, items });
                 iced::Task::none()
             }
             Message::CloseMenu | Message::CancelMenu => {
