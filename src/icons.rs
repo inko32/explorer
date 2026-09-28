@@ -555,13 +555,11 @@ pub fn gear(s: &Skin) -> svg::Handle {
 }
 
 pub fn minimize(_s: &Skin) -> svg::Handle {
-    // 60% of the X width (X spans 4..12 = 8px; the dash is 5.2..10.8 = 5.6)
-    doc(line(5.2, 8.0, 10.8, 8.0, Color::WHITE, 1.4))
+    doc(line(3.0, 8.0, 13.0, 8.0, Color::WHITE, 1.4))
 }
 
 pub fn maximize(_s: &Skin) -> svg::Handle {
-    // 60% of the X width: 5.6-wide box
-    doc(rect(5.2, 4.0, 5.6, 8.0, Color::TRANSPARENT, Some((Color::WHITE, 1.4))))
+    doc(rect(3.0, 3.0, 10.0, 10.0, Color::TRANSPARENT, Some((Color::WHITE, 1.4))))
 }
 
 pub fn restore(_s: &Skin) -> svg::Handle {
