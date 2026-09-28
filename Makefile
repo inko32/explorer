@@ -1,3 +1,7 @@
+# HARD RULE: every recipe sources ./env.sh so cargo's target dir and all
+# temporary artifacts stay in in-memory tmpfs (/tmp). Never build without it -
+# a ./target folder on the SSD is a bug; delete it and rebuild via this file.
+
 SHELL := /bin/bash
 ENV := source ./env.sh &&
 
