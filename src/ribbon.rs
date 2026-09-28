@@ -38,9 +38,10 @@ pub struct GroupDef {
     pub label: String,
     #[serde(default)]
     pub width: Option<f32>,
-    /// How many columns small commands stack into (default 1).
+    /// Vertical slots per small-command column (default 3, max 3 -
+    /// four buttons in one column are not allowed).
     #[serde(default)]
-    pub columns: Option<usize>,
+    pub rows: Option<usize>,
     #[serde(default)]
     pub commands: Vec<CmdRef>,
 }

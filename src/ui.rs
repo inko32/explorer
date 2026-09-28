@@ -306,8 +306,14 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     // right-aligned before the caption buttons. Title centers in the
     // space left of them (so it shifts when they appear).
     let mut ctx_blocks = row![].height(Length::Fixed(30.0));
+    let mut first_block = true;
     for tab in visible_tabs(state) {
         let Some(accent) = tab.color.as_deref().and_then(ribbon::color_by_name) else { continue };
+        if !first_block {
+            // space between two contextual blocks, aligning with the tab row
+            ctx_blocks = ctx_blocks.push(Space::new().width(Length::Fixed(5.0)));
+        }
+        first_block = false;
         let active = state.active_tab == tab.id;
         let width = tab_width(&tab.label);
         // Win8: pastel accent block at 90% of the title bar height, no edge
@@ -402,24 +408,18 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         visible_tabs(state)
             .iter()
             .filter(|t| t.color.is_some())
-            .map(|t| tab_width(&t.label) + 8.0)
+            .map(|t| tab_width(&t.label))
             .sum::<f32>()
-            + 8.0
+            + n_ctx.saturating_sub(1) as f32 * 5.0
     };
-    // Without a measured window width, approximate: the default layout is
-    // `icon | QAT | title  contextual  _^x`; when the title is too long to
-    // sit beside the blocks in a typical window it elides and recenters
-    // after them: `... contextual  title  _^x`.
+    // `icon | QAT | title  contextual  _^x`; the title lives in the zone
+    // above the main tabs. When it doesn't fit there it elides and moves
+    // AFTER the blocks: `icon | QAT | contextual  title  _^x`.
     let title_w = state.title().chars().count() as f32 * 7.5 + 8.0;
-    let typical_free = 1100.0f32.min(28.0 + qat_w + main_tabs_width(state) + 700.0)
-        - 28.0
-        - qat_w
-        - 138.0;
-    let tight = blocks_w > 1.0 && typical_free - blocks_w < title_w + 24.0;
-
     let title_zone = (main_tabs_width(state) - 28.0 - qat_w).max(60.0);
+    let tight = blocks_w > 1.0 && title_w > title_zone - 8.0;
     if tight {
-        let elide_w = (typical_free - blocks_w - 16.0).max(30.0);
+        let elide_w = (state.win_w - 28.0 - qat_w - 138.0 - blocks_w - 16.0).max(30.0);
         let title = container(
             text(elide(&state.title(), elide_w))
                 .size(12.0)
@@ -451,7 +451,7 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     }
 
     let title = container(
-        text(state.title())
+        text(elide(&state.title(), title_zone - 8.0))
             .size(12.0)
             .color(Color::WHITE)
             .width(Length::Shrink),
@@ -633,7 +633,8 @@ fn tab_button(
 /// Tabs visible right now: main tabs + contextual tabs whose `when` matches.
 
 fn tab_width(label: &str) -> f32 {
-    20.0 + label.chars().count() as f32 * 7.5
+    // Win8 tabs are roomy: 76px minimum, extending when the text is longer
+    (20.0 + label.chars().count() as f32 * 7.5).max(76.0)
 }
 
 /// Exact rendered width of a tab (File gets the wide Win8 block).
@@ -974,14 +975,11 @@ fn group_from_config(g: &GroupDef, state: &Explorer, skin: skin::Skin) -> Elemen
 
     let small_cmds: Vec<&ribbon::CmdRef> =
         g.commands.iter().filter(|c| c.size.as_deref() != Some("big")).collect();
-    // Win8: at most 3 commands per column - never four in one column.
-    let columns = g
-        .columns
-        .unwrap_or(1)
-        .max(1)
-        .max(small_cmds.len().div_ceil(3));
-    let rows = small_cmds.len().div_ceil(columns).max(1).min(3);
-    let row_h = ((76.0 - (rows.saturating_sub(1) as f32)) / rows as f32).clamp(15.0, 22.0);
+    // `rows` = vertical slots per column (Win8: max 3, never four).
+    // Buttons tile column-major; a column with fewer buttons stays compact.
+    let rows = g.rows.unwrap_or(3).clamp(1, 3) as usize;
+    let columns = small_cmds.len().div_ceil(rows).max(1);
+    let row_h = (76.0 - (rows.saturating_sub(1) as f32)) / rows as f32;
     let smalls: Vec<Element<Message>> = small_cmds
         .iter()
         .map(|cmd| {
@@ -1000,11 +998,10 @@ fn group_from_config(g: &GroupDef, state: &Explorer, skin: skin::Skin) -> Elemen
             )
         })
         .collect();
-    let per_col = smalls.len().div_ceil(columns).max(1);
     let mut it = smalls.into_iter();
     for _ in 0..columns {
         let mut col = column![].spacing(1);
-        for _ in 0..per_col {
+        for _ in 0..rows {
             if let Some(s) = it.next() {
                 col = col.push(s);
             }
