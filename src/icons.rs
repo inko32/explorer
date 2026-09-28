@@ -28,6 +28,8 @@ pub fn builtin_svg(name: &str, s: &Skin) -> svg::Handle {
         "refresh" => refresh(s),
         "search" => search(s),
         "chevron_down" => chevron_down(s),
+        "undo" => undo(s),
+        "redo" => redo(s),
         "chevron_right" => chevron_right(s),
         "help" => help(s),
         "minimize" => minimize(s),
@@ -282,6 +284,34 @@ pub fn search(s: &Skin) -> svg::Handle {
 
 pub fn chevron_down(s: &Skin) -> svg::Handle {
     doc(poly(&[(3.5, 5.5), (12.5, 5.5), (8.0, 11.0)], glyph(s)))
+}
+
+/// Win8 QAT undo: curved arrow sweeping back to the left.
+pub fn undo(s: &Skin) -> svg::Handle {
+    let c = Color::WHITE; // sits on the accent title bar
+    doc(format!(
+        "{}{}",
+        path(
+            "M12.4 11.8 a4.4 4.4 0 1 1 0.4 -5.4",
+            Color::TRANSPARENT,
+            Some((c, 1.6)),
+        ),
+        poly(&[(11.2, 1.6), (6.2, 4.4), (11.8, 6.6)], c),
+    ))
+}
+
+/// Win8 QAT redo: mirror of undo.
+pub fn redo(s: &Skin) -> svg::Handle {
+    let c = Color::WHITE;
+    doc(format!(
+        "{}{}",
+        path(
+            "M3.6 11.8 a4.4 4.4 0 1 0 -0.4 -5.4",
+            Color::TRANSPARENT,
+            Some((c, 1.6)),
+        ),
+        poly(&[(4.8, 1.6), (9.8, 4.4), (4.2, 6.6)], c),
+    ))
 }
 
 pub fn chevron_right(s: &Skin) -> svg::Handle {

@@ -56,6 +56,10 @@ pub enum Message {
     BlockPress(String),
     /// Switch between the Win8 (double) and Win10 (1px) window borders.
     ToggleFrameStyle,
+    /// Quick-access command invoked.
+    QuickAccess(String),
+    /// Title-bar layout measurement update.
+    TitleBarMetrics { tabs: f32, blocks_start: f32, blocks: f32 },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -92,6 +96,14 @@ pub struct Explorer {
     pub self_border: bool,
     /// Win8 double border vs Win10 1px border.
     pub frame_style: FrameStyle,
+    /// Quick-access commands (icon ids) shown right of the title-bar icon.
+    pub quick_access: Vec<String>,
+    /// Measured width of the tab row (for title-bar layout).
+    pub tabs_w: f32,
+    /// Start-x of the first contextual title-bar block.
+    pub blocks_start: f32,
+    /// Total width of the contextual blocks.
+    pub blocks_w: f32,
     /// Ribbon minimized to the tab row.
     pub ribbon_collapsed: bool,
     pub clipboard: Option<(ClipMode, Vec<PathBuf>)>,
@@ -132,6 +144,10 @@ impl Explorer {
             maximized: false,
             self_border: true,
             frame_style: FrameStyle::Win8,
+            quick_access: vec!["undo".into(), "redo".into()],
+            tabs_w: 0.0,
+            blocks_start: 0.0,
+            blocks_w: 0.0,
             ribbon_collapsed: false,
             clipboard: None,
             view: ViewMode::Details,
@@ -625,6 +641,19 @@ impl Explorer {
                 if let Some(id) = self.window {
                     return iced::window::drag(id);
                 }
+                iced::Task::none()
+            }
+            Message::QuickAccess(id) => {
+                match id.as_str() {
+                    "undo" | "redo" => {} // TODO: operation history
+                    _ => {}
+                }
+                iced::Task::none()
+            }
+            Message::TitleBarMetrics { tabs, blocks_start, blocks } => {
+                self.tabs_w = tabs;
+                self.blocks_start = blocks_start;
+                self.blocks_w = blocks;
                 iced::Task::none()
             }
             Message::ToggleFrameStyle => {
