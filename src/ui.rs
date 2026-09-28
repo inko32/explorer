@@ -94,13 +94,101 @@ pub mod skin {
 use std::path::{Path, PathBuf};
 
 use iced::widget::{
-    button, column, container, mouse_area, row, scrollable, text, text_input, Space,
+    button, column, container, mouse_area, row, scrollable, stack, text, text_input, Space,
 };
 use iced::{Color, Element, Length};
 
 use crate::fs::{self, Entry};
 use crate::model::{self, Explorer, Message, ViewMode};
 use crate::ribbon::{self, GroupDef, TabDef};
+
+/// Edge-resize directions for the self-drawn border.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ResizeDir {
+    N,
+    S,
+    E,
+    W,
+    Ne,
+    Nw,
+    Se,
+    Sw,
+}
+
+impl ResizeDir {
+    pub fn task(self, id: iced::window::Id) -> iced::Task<Message> {
+        use iced::window::Direction;
+        let d = match self {
+            ResizeDir::N => Direction::North,
+            ResizeDir::S => Direction::South,
+            ResizeDir::E => Direction::East,
+            ResizeDir::W => Direction::West,
+            ResizeDir::Ne => Direction::NorthEast,
+            ResizeDir::Nw => Direction::NorthWest,
+            ResizeDir::Se => Direction::SouthEast,
+            ResizeDir::Sw => Direction::SouthWest,
+        };
+        iced::window::drag_resize(id, d)
+    }
+
+    fn cursor(self) -> iced::mouse::Interaction {
+        use iced::mouse::Interaction;
+        match self {
+            ResizeDir::E | ResizeDir::W => Interaction::ResizingHorizontally,
+            ResizeDir::N | ResizeDir::S => Interaction::ResizingVertically,
+            ResizeDir::Ne | ResizeDir::Sw => Interaction::ResizingDiagonallyUp,
+            ResizeDir::Nw | ResizeDir::Se => Interaction::ResizingDiagonallyDown,
+        }
+    }
+}
+
+const MARGIN: f32 = 5.0;
+
+/// An invisible resize zone aligned to one window edge/corner. The outer
+/// container spans the whole window (transparent to events); only the inner
+/// strip/corner reacts.
+fn resize_zone(
+    dir: ResizeDir,
+    w: Length,
+    h: Length,
+    ax: Option<iced::Alignment>,
+    ay: Option<iced::Alignment>,
+) -> Element<'static, Message> {
+    let zone = mouse_area(
+        container(Space::new().width(w).height(h))
+            .style(|_: &iced::Theme| container::Style::default()),
+    )
+    .interaction(dir.cursor())
+    .on_press(Message::StartResize(dir));
+    let mut c = container(zone).width(Length::Fill).height(Length::Fill);
+    if let Some(x) = ax {
+        c = c.align_x(x);
+    }
+    if let Some(y) = ay {
+        c = c.align_y(y);
+    }
+    c.into()
+}
+
+/// Invisible resize ring around the window edges (custom border mode).
+fn resize_frame() -> Element<'static, Message> {
+    use iced::Alignment;
+    let m = Length::Fixed(MARGIN);
+    let c = Length::Fixed(MARGIN * 2.0);
+    let fill = Length::Fill;
+    stack![
+        resize_zone(ResizeDir::N, fill, m, None, None),
+        resize_zone(ResizeDir::S, fill, m, None, Some(Alignment::End)),
+        resize_zone(ResizeDir::W, m, fill, None, None),
+        resize_zone(ResizeDir::E, m, fill, Some(Alignment::End), None),
+        // corners on top (they overlap the edge strips)
+        resize_zone(ResizeDir::Nw, c, c, None, None),
+        resize_zone(ResizeDir::Ne, c, c, Some(Alignment::End), None),
+        resize_zone(ResizeDir::Sw, c, c, None, Some(Alignment::End)),
+        resize_zone(ResizeDir::Se, c, c, Some(Alignment::End), Some(Alignment::End)),
+    ]
+    .into()
+}
 
 pub fn view(state: &Explorer) -> Element<'_, Message> {
     let skin = if state.dark { skin::DARK } else { skin::LIGHT };
@@ -112,7 +200,11 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
     root = root.push(address_bar(state, skin));
     root = root.push(row![nav_pane(state, skin), file_view(state, skin)].height(Length::Fill));
     root = root.push(statusbar(state, skin));
-    root.into()
+    if state.self_border {
+        stack![root, resize_frame()].into()
+    } else {
+        root.into()
+    }
 }
 
 fn bg(color: Color) -> impl Fn(&iced::Theme) -> container::Style + 'static {
@@ -175,7 +267,7 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
             ..Default::default()
         });
         ctx_blocks = ctx_blocks.push(
-            mouse_area(block).on_press(Message::SetTab(tab.id.clone())),
+            mouse_area(block).on_press(Message::BlockPress(tab.id.clone())),
         );
     }
 
