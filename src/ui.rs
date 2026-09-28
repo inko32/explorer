@@ -226,9 +226,10 @@ fn frame_color(state: &Explorer, skin: skin::Skin) -> Color {
 /// Win8: min/max width = 60% of close width, short (20px), thin glyphs.
 /// Win10: uniform 46px, nearly full title-bar height.
 fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'static, Message> {
-    let (mw, cw, h, glyph, y) = match state.frame_style {
-        crate::model::FrameStyle::Win8 => (27.0, 45.0, 20.0, 12.0, 0.0),
-        crate::model::FrameStyle::Win10 => (46.0, 46.0, 29.0, 15.0, 1.0),
+    let (mw, cw, h, glyph, y, right_pad) = match state.frame_style {
+        // min/max = 75% of close; shifted left by the side-border width
+        crate::model::FrameStyle::Win8 => (36.0, 48.0, 22.0, 12.5, 0.0, 8.0),
+        crate::model::FrameStyle::Win10 => (46.0, 46.0, 29.0, 15.0, 1.0, 1.0),
     };
     let one = move |icon_name: &'static str,
                     w: f32,
@@ -249,12 +250,12 @@ fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'static, Messa
         .style(move |_t, status| button::Style {
             background: match (solid, status) {
                 (true, button::Status::Hovered) => {
-                    Some(Color::from_rgb8(0xF1, 0x70, 0x7A).into())
+                    Some(Color::from_rgb8(0xE8, 0x11, 0x23).into())
                 }
                 (true, button::Status::Pressed) => {
-                    Some(Color::from_rgb8(0xC5, 0x0E, 0x1F).into())
+                    Some(Color::from_rgb8(0x8F, 0x0A, 0x15).into())
                 }
-                (true, _) => Some(hover_bg.into()),
+                (true, _) => Some(Color::from_rgb8(0xC2, 0x0E, 0x1C).into()),
                 (false, button::Status::Hovered) => Some(hover_bg.into()),
                 (false, button::Status::Pressed) => Some(hover_bg.scale_alpha(0.7).into()),
                 _ => None,
@@ -280,6 +281,7 @@ fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'static, Messa
     .height(Length::Fill)
     .padding(iced::Padding {
         top: y,
+        right: right_pad,
         ..Default::default()
     })
     .align_x(iced::Alignment::End)
@@ -605,7 +607,7 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     // and recenters AFTER the blocks: `... contextual  title  _^x`.
     // Win8: min/max are 60% of the close button's width; Win10: uniform 46
     let captions_w = match state.frame_style {
-        crate::model::FrameStyle::Win8 => 27.0 + 27.0 + 45.0,
+        crate::model::FrameStyle::Win8 => 36.0 + 36.0 + 48.0 + 8.0,
         crate::model::FrameStyle::Win10 => 46.0 * 3.0,
     };
     let n_ctx = visible_tabs(state)
