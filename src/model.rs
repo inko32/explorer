@@ -33,6 +33,15 @@ pub enum Message {
     SelectNone,
     InvertSelection,
     SetView(ViewMode),
+    SetSort(SortBy),
+    /// Open a ribbon dropdown menu at x (items = command ids).
+    OpenMenu { x: f32, items: Vec<String> },
+    CloseMenu,
+    /// A dropdown menu item was picked.
+    MenuPick(String),
+    /// Permanently delete the selection (no trash).
+    DeletePermanent,
+    CancelMenu,
     ToggleHidden,
     SetTab(String),
     RenameInput(String),
@@ -66,6 +75,20 @@ pub enum Message {
 pub enum ViewMode {
     Details,
     Large,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SortBy {
+    Name,
+    Size,
+    Modified,
+}
+
+/// An open ribbon dropdown menu (anchored below the ribbon body).
+#[derive(Clone, Debug)]
+pub struct OpenMenu {
+    pub x: f32,
+    pub items: Vec<String>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -108,6 +131,9 @@ pub struct Explorer {
     pub ribbon_collapsed: bool,
     pub clipboard: Option<(ClipMode, Vec<PathBuf>)>,
     pub view: ViewMode,
+    pub sort: SortBy,
+    /// Currently open ribbon dropdown menu.
+    pub open_menu: Option<OpenMenu>,
     pub show_hidden: bool,
     pub active_tab: String,
     pub ribbon: crate::ribbon::RibbonConfig,
@@ -153,6 +179,8 @@ impl Explorer {
             ribbon_collapsed: false,
             clipboard: None,
             view: ViewMode::Details,
+            sort: SortBy::Name,
+            open_menu: None,
             show_hidden: false,
             active_tab: "home".into(),
             ribbon: crate::ribbon::load(),
@@ -170,6 +198,19 @@ impl Explorer {
         s.request_listing();
         s.sched.send(Job::Volumes);
         s.sync_active_tab();
+        if let Ok(t) = std::env::var("EXPLORER_DEBUG_TAB") {
+            s.active_tab = t;
+        }
+        if let Ok(x) = std::env::var("EXPLORER_DEBUG_MENU") {
+            let x: f32 = x.parse().unwrap_or(400.0);
+            s.open_menu = Some(crate::model::OpenMenu {
+                x,
+                items: ["sort_name", "sort_size", "sort_modified"]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
+            });
+        }
         s
     }
 
@@ -217,6 +258,23 @@ impl Explorer {
         self.scroll_y = 0.0;
         self.sync_active_tab();
         self.request_listing();
+    }
+
+    /// Sort entries: directories first, then by the active key.
+    pub fn apply_sort(&mut self) {
+        let sort = self.sort;
+        self.entries.sort_by(|a, b| {
+            let ad = a.kind == fs::EntryKind::Dir;
+            let bd = b.kind == fs::EntryKind::Dir;
+            if ad != bd {
+                return bd.cmp(&ad);
+            }
+            match sort {
+                SortBy::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+                SortBy::Size => a.size.cmp(&b.size),
+                SortBy::Modified => a.modified.cmp(&b.modified),
+            }
+        });
     }
 
     fn selected_paths(&self) -> Vec<PathBuf> {
@@ -286,6 +344,7 @@ impl Explorer {
                             let show_hidden = self.show_hidden;
                             self.entries =
                                 entries.into_iter().filter(|e| show_hidden || !e.is_hidden).collect();
+                            self.apply_sort();
                             self.selected.clear();
                             self.hovered = None;
                             self.renaming = None;
@@ -430,6 +489,10 @@ impl Explorer {
                 "toggle_dark" => Some(Message::ToggleDark),
                 "toggle_border" => Some(Message::ToggleSelfBorder),
                 "toggle_frame" => Some(Message::ToggleFrameStyle),
+                "delete_permanent" => Some(Message::DeletePermanent),
+                "sort_name" => Some(Message::SetSort(SortBy::Name)),
+                "sort_size" => Some(Message::SetSort(SortBy::Size)),
+                "sort_modified" => Some(Message::SetSort(SortBy::Modified)),
                 "open" => first.map(Message::Open),
                 other => {
                     self.status = format!("'{other}' is not implemented");
@@ -606,6 +669,10 @@ impl Explorer {
                 iced::Task::none()
             }
             Message::CancelRename => {
+                if self.open_menu.is_some() {
+                    self.open_menu = None;
+                    return iced::Task::none();
+                }
                 self.renaming = None;
                 iced::Task::none()
             }
@@ -671,6 +738,44 @@ impl Explorer {
                 self.tabs_w = tabs;
                 self.blocks_start = blocks_start;
                 self.blocks_w = blocks;
+                iced::Task::none()
+            }
+            Message::OpenMenu { x, items } => {
+                self.open_menu = Some(OpenMenu { x, items });
+                iced::Task::none()
+            }
+            Message::CloseMenu | Message::CancelMenu => {
+                self.open_menu = None;
+                iced::Task::none()
+            }
+            Message::MenuPick(id) => {
+                self.open_menu = None;
+                self.run_command(&id)
+            }
+            Message::SetSort(s) => {
+                self.sort = s;
+                self.apply_sort();
+                iced::Task::none()
+            }
+            Message::DeletePermanent => {
+                let paths = self.selected_paths();
+                if fs::archive::resolve(&self.cwd).is_some() {
+                    self.status = "delete inside archives is not supported yet".into();
+                } else {
+                    let mut ok = 0usize;
+                    for p in &paths {
+                        let r = if p.is_dir() {
+                            std::fs::remove_dir_all(p)
+                        } else {
+                            std::fs::remove_file(p)
+                        };
+                        if r.is_ok() {
+                            ok += 1;
+                        }
+                    }
+                    self.status = format!("permanently deleted {ok} item(s)");
+                    self.request_listing();
+                }
                 iced::Task::none()
             }
             Message::ToggleFrameStyle => {
