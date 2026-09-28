@@ -49,6 +49,11 @@ pub enum Message {
     ToggleSelfBorder,
     /// Minimize the ribbon to its tab row (Win8 collapse chevron).
     ToggleRibbonCollapse,
+    /// Begin a compositor-driven edge resize (custom border mode).
+    StartResize(crate::ui::ResizeDir),
+    /// Pressed a contextual title-bar block: activate the tab AND let the
+    /// band drag the window (a plain click without movement still switches).
+    BlockPress(String),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -590,6 +595,20 @@ impl Explorer {
             }
             Message::ToggleRibbonCollapse => {
                 self.ribbon_collapsed = !self.ribbon_collapsed;
+                iced::Task::none()
+            }
+            Message::StartResize(dir) => {
+                if let Some(id) = self.window {
+                    return dir.task(id);
+                }
+                iced::Task::none()
+            }
+            Message::BlockPress(tab_id) => {
+                self.active_tab = tab_id;
+                self.ribbon_collapsed = false;
+                if let Some(id) = self.window {
+                    return iced::window::drag(id);
+                }
                 iced::Task::none()
             }
             Message::RunCommand(id) => {
