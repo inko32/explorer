@@ -83,6 +83,7 @@ tabs:
         commands:
           - { id: toggle_dark, label: Dark mode, icon: gear, size: small, width: 108 }
           - { id: toggle_border, label: Custom border, icon: gear, size: small, width: 118 }
+          - { id: toggle_frame, label: Win8 frame, icon: gear, size: small, width: 108 }
           - { id: folder_options, label: Folder options, icon: gear, size: small, enabled: false, width: 118 }
 
 contextual_tabs:
@@ -132,6 +133,7 @@ commands:
   toggle_hidden: { internal: toggle_hidden }
   toggle_dark: { internal: toggle_dark }
   toggle_border: { internal: toggle_border }
+  toggle_frame: { internal: toggle_frame }
   open_picture: { internal: open }
   open_terminal:
     shell: "konsole --workdir {cwd}"

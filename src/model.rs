@@ -54,12 +54,22 @@ pub enum Message {
     /// Pressed a contextual title-bar block: activate the tab AND let the
     /// band drag the window (a plain click without movement still switches).
     BlockPress(String),
+    /// Switch between the Win8 (double) and Win10 (1px) window borders.
+    ToggleFrameStyle,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ViewMode {
     Details,
     Large,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FrameStyle {
+    /// Win8: 3px accent outer border + 1px darker inner border
+    Win8,
+    /// Win10: single 1px border
+    Win10,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -80,6 +90,8 @@ pub struct Explorer {
     pub maximized: bool,
     /// Self-rendered window border/title bar (off = native decorations).
     pub self_border: bool,
+    /// Win8 double border vs Win10 1px border.
+    pub frame_style: FrameStyle,
     /// Ribbon minimized to the tab row.
     pub ribbon_collapsed: bool,
     pub clipboard: Option<(ClipMode, Vec<PathBuf>)>,
@@ -119,6 +131,7 @@ impl Explorer {
             dark: false,
             maximized: false,
             self_border: true,
+            frame_style: FrameStyle::Win8,
             ribbon_collapsed: false,
             clipboard: None,
             view: ViewMode::Details,
@@ -383,6 +396,7 @@ impl Explorer {
                 "toggle_hidden" => Some(Message::ToggleHidden),
                 "toggle_dark" => Some(Message::ToggleDark),
                 "toggle_border" => Some(Message::ToggleSelfBorder),
+                "toggle_frame" => Some(Message::ToggleFrameStyle),
                 "open" => first.map(Message::Open),
                 other => {
                     self.status = format!("'{other}' is not implemented");
@@ -611,6 +625,13 @@ impl Explorer {
                 if let Some(id) = self.window {
                     return iced::window::drag(id);
                 }
+                iced::Task::none()
+            }
+            Message::ToggleFrameStyle => {
+                self.frame_style = match self.frame_style {
+                    FrameStyle::Win8 => FrameStyle::Win10,
+                    FrameStyle::Win10 => FrameStyle::Win8,
+                };
                 iced::Task::none()
             }
             Message::RunCommand(id) => {
