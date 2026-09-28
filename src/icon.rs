@@ -31,8 +31,9 @@ struct IconsFile {
 
 struct Icons {
     defs: HashMap<String, IconDef>,
-    /// name → sorted (size, png bytes)
-    pngs: HashMap<String, Vec<(u32, &'static [u8])>>,
+    /// name → sorted (size, decoded handle) - handles are cached: decoding
+    /// 245 PNGs on every view rebuild made dropdown menus blink.
+    pngs: HashMap<String, Vec<(u32, iced::widget::image::Handle)>>,
 }
 
 static ICONS: OnceLock<Icons> = OnceLock::new();
@@ -58,14 +59,14 @@ fn load() -> Icons {
         }
     }
 
-    // preload png variants
-    let mut pngs: HashMap<String, Vec<(u32, &'static [u8])>> = HashMap::new();
+    // preload png variants (decode once, reuse the handles forever)
+    let mut pngs: HashMap<String, Vec<(u32, iced::widget::image::Handle)>> = HashMap::new();
     for (name, def) in &defs {
         let Some(file) = &def.file else { continue };
         let mut variants = Vec::new();
         for size in [16u32, 20, 24, 32, 40, 48, 64] {
             if let Some(bytes) = asset_bytes(file, size) {
-                variants.push((size, bytes));
+                variants.push((size, iced::widget::image::Handle::from_bytes(bytes)));
             }
         }
         if !variants.is_empty() {
@@ -347,13 +348,13 @@ pub fn view<Message: 'static>(name: &str, size: f32, skin: &Skin) -> Element<'st
     if let Some(variants) = icons.pngs.get(name) {
         let want = size.round().max(1.0) as u32;
         // nearest variant >= requested, else the largest available
-        let bytes = variants
+        let handle = variants
             .iter()
             .find(|(s, _)| *s >= want)
             .or(variants.last())
-            .map(|(_, b)| *b)
+            .map(|(_, h)| h.clone())
             .unwrap();
-        return image(image::Handle::from_bytes(bytes))
+        return image(handle)
             .width(Length::Fixed(size))
             .height(Length::Fixed(size))
             .into();
