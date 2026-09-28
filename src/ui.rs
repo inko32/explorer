@@ -384,13 +384,15 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         .on_press(Message::ToggleRibbonCollapse),
     );
     qat = qat.push(
-        container(Space::new().width(Length::Fixed(1.0)).height(Length::Fixed(15.0)))
-            .width(Length::Fixed(6.0))
-            .center_x(Length::Fixed(6.0))
-            .style(|_| container::Style {
-                background: Some(Color::from_rgba(1.0, 1.0, 1.0, 0.35).into()),
-                ..Default::default()
-            }),
+        container(
+            container(Space::new().width(Length::Fixed(1.0)).height(Length::Fixed(15.0)))
+                .style(|_| container::Style {
+                    background: Some(Color::from_rgba(1.0, 1.0, 1.0, 0.35).into()),
+                    ..Default::default()
+                }),
+        )
+        .width(Length::Fixed(6.0))
+        .center_x(Length::Fixed(6.0)),
     );
     let qat_w: f32 = state.quick_access.len() as f32 * 24.0 + 22.0;
 
@@ -420,6 +422,15 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     let tight = blocks_w > 1.0 && title_w > title_zone - 8.0;
     if tight {
         let elide_w = (state.win_w - 28.0 - qat_w - 138.0 - blocks_w - 16.0).max(30.0);
+        // blocks keep their aligned position above the tab stubs; the title
+        // moves right of them. Every non-interactive strip drags the window.
+        let gap_w = (main_tabs_width(state) - 28.0 - qat_w).max(0.0);
+        let drag_gap: Element<Message> = mouse_area(
+            Space::new().width(Length::Fixed(gap_w)).height(Length::Fixed(30.0)),
+        )
+        .on_press(Message::TitlebarPress)
+        .on_double_click(Message::TitlebarDoubleClick)
+        .into();
         let title = container(
             text(elide(&state.title(), elide_w))
                 .size(12.0)
@@ -428,6 +439,12 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         )
         .height(Length::Fill)
         .center_y(Length::Fill);
+        let drag_title: Element<Message> = mouse_area(
+            container(title).width(Length::Fill).center_x(Length::Fill),
+        )
+        .on_press(Message::TitlebarPress)
+        .on_double_click(Message::TitlebarDoubleClick)
+        .into();
         return container(
             row![
                 container(icon("folder", 16.0, skin))
@@ -436,8 +453,9 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
                     .center_x(Length::Fixed(28.0))
                     .center_y(Length::Fill),
                 container(qat).height(Length::Fill).center_y(Length::Fill),
+                drag_gap,
                 ctx_blocks,
-                container(title).width(Length::Fill).center_x(Length::Fill),
+                drag_title,
                 caption("minimize", Message::Minimize, Color::from_rgba(1.0, 1.0, 1.0, 0.18)),
                 caption("maximize", Message::Maximize, Color::from_rgba(1.0, 1.0, 1.0, 0.18)),
                 caption("close", Message::Close, skin.close_hover),
