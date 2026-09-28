@@ -20,40 +20,40 @@ tabs:
     label: Home
     groups:
       - label: Clipboard
-        width: 160
+        width: 188
         commands:
-          - { id: paste, label: Paste, icon: paste, size: big }
-          - { id: cut, label: Cut, icon: cut, size: small }
-          - { id: copy, label: Copy, icon: copy, size: small }
-          - { id: copy_path, label: Copy path, icon: copy_path, size: small, enabled: false }
-          - { id: paste_shortcut, label: Paste shortcut, icon: paste_shortcut, size: small, enabled: false }
+          - { id: paste, label: Paste, icon: paste, size: big, width: 62 }
+          - { id: cut, label: Cut, icon: cut, size: small, width: 108 }
+          - { id: copy, label: Copy, icon: copy, size: small, width: 108 }
+          - { id: copy_path, label: Copy path, icon: copy_path, size: small, enabled: false, width: 108 }
+          - { id: paste_shortcut, label: Paste shortcut, icon: paste_shortcut, size: small, enabled: false, width: 116 }
       - label: Organize
-        width: 210
+        width: 216
         columns: 2
         commands:
-          - { id: move_to, label: Move to, icon: move_to, size: small, enabled: false }
-          - { id: copy_to, label: Copy to, icon: copy_to, size: small, enabled: false }
-          - { id: delete, label: Delete, icon: delete, size: small }
-          - { id: rename, label: Rename, icon: rename, size: small }
+          - { id: move_to, label: Move to, icon: move_to, size: small, enabled: false, width: 104 }
+          - { id: copy_to, label: Copy to, icon: copy_to, size: small, enabled: false, width: 104 }
+          - { id: delete, label: Delete, icon: delete, size: small, width: 104 }
+          - { id: rename, label: Rename, icon: rename, size: small, width: 104 }
       - label: New
+        width: 166
+        commands:
+          - { id: new_folder, label: New folder, icon: new_folder, size: big, width: 62 }
+          - { id: new_item, label: New item, icon: new_item, size: small, enabled: false, width: 92 }
+          - { id: easy_access, label: Easy access, icon: easy_access, size: small, enabled: false, width: 108 }
+      - label: Open
         width: 148
         commands:
-          - { id: new_folder, label: New folder, icon: new_folder, size: big }
-          - { id: new_item, label: New item, icon: new_item, size: small, enabled: false }
-          - { id: easy_access, label: Easy access, icon: easy_access, size: small, enabled: false }
-      - label: Open
-        width: 132
-        commands:
-          - { id: properties, label: Properties, icon: properties, size: big, enabled: false }
-          - { id: open, label: Open, icon: open, size: small, enabled: false }
-          - { id: edit, label: Edit, icon: edit, size: small, enabled: false }
-          - { id: history, label: History, icon: history, size: small, enabled: false }
+          - { id: properties, label: Properties, icon: properties, size: big, enabled: false, width: 62 }
+          - { id: open, label: Open, icon: open, size: small, enabled: false, width: 76 }
+          - { id: edit, label: Edit, icon: edit, size: small, enabled: false, width: 76 }
+          - { id: history, label: History, icon: history, size: small, enabled: false, width: 84 }
       - label: Select
-        width: 116
+        width: 126
         commands:
-          - { id: select_all, label: Select all, icon: select_all, size: small }
-          - { id: select_none, label: Select none, icon: select_none, size: small }
-          - { id: invert_selection, label: Invert selection, icon: invert_sel, size: small }
+          - { id: select_all, label: Select all, icon: select_all, size: small, width: 102 }
+          - { id: select_none, label: Select none, icon: select_none, size: small, width: 106 }
+          - { id: invert_selection, label: Invert selection, icon: invert_sel, size: small, width: 126 }
   - id: share
     label: Share
     groups:
@@ -69,21 +69,21 @@ tabs:
     label: View
     groups:
       - label: Layout
-        width: 100
+        width: 116
         commands:
-          - { id: view_large, label: Large icons, icon: view_large, size: small }
-          - { id: view_details, label: Details, icon: view_details, size: small }
+          - { id: view_large, label: Large icons, icon: view_large, size: small, width: 108 }
+          - { id: view_details, label: Details, icon: view_details, size: small, width: 108 }
       - label: Show/hide
-        width: 110
+        width: 136
         commands:
-          - { id: toggle_nav, label: Navigation pane, icon: computer, size: small, enabled: false }
-          - { id: toggle_hidden, label: Hidden items, icon: file, size: small }
+          - { id: toggle_nav, label: Navigation pane, icon: computer, size: small, enabled: false, width: 130 }
+          - { id: toggle_hidden, label: Hidden items, icon: file, size: small, width: 108 }
       - label: Options
-        width: 118
+        width: 124
         commands:
-          - { id: toggle_dark, label: Dark mode, icon: gear, size: small }
-          - { id: toggle_border, label: Custom border, icon: gear, size: small }
-          - { id: folder_options, label: Folder options, icon: gear, size: small, enabled: false }
+          - { id: toggle_dark, label: Dark mode, icon: gear, size: small, width: 108 }
+          - { id: toggle_border, label: Custom border, icon: gear, size: small, width: 118 }
+          - { id: folder_options, label: Folder options, icon: gear, size: small, enabled: false, width: 118 }
 
 contextual_tabs:
   - id: drive_tools
@@ -92,17 +92,17 @@ contextual_tabs:
     when: "is_drive"
     groups:
       - label: Drive
-        width: 110
+        width: 124
         commands:
           - { id: drive_properties, label: Properties, icon: properties, size: small, enabled: false }
-          - { id: open_terminal, label: Open terminal, icon: gear, size: small }
+          - { id: open_terminal, label: Open terminal, icon: gear, size: small, width: 124 }
   - id: picture_tools
     label: Picture Tools
     color: gold
     when: "has_image"
     groups:
       - label: Manage
-        width: 110
+        width: 120
         commands:
           - { id: open_picture, label: Open, icon: open, size: small }
           - { id: set_wallpaper, label: Set as wallpaper, icon: pictures, size: small, enabled: false }
@@ -112,10 +112,10 @@ contextual_tabs:
     when: "inside_archive or has_archive"
     groups:
       - label: Archive
-        width: 110
+        width: 132
         commands:
-          - { id: extract_here, label: Extract here, icon: copy_to, size: small, enabled: false }
-          - { id: open_terminal, label: Open terminal, icon: gear, size: small }
+          - { id: extract_here, label: Extract here, icon: copy_to, size: small, enabled: false, width: 112 }
+          - { id: open_terminal, label: Open terminal, icon: gear, size: small, width: 124 }
 
 commands:
   paste: { internal: paste }
