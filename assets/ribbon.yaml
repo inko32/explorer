@@ -29,13 +29,13 @@ tabs:
           - { id: copy_path, label: Copy path, icon: copy_path, size: small, enabled: false, width: 108 }
           - { id: paste_shortcut, label: Paste shortcut, icon: paste_shortcut, size: small, enabled: false, width: 116 }
       - label: Organize
-        width: 216
-        rows: 2
+        width: 300
         commands:
-          - { id: move_to, label: Move to, icon: move_to, size: small, enabled: false, width: 104 }
-          - { id: copy_to, label: Copy to, icon: copy_to, size: small, enabled: false, width: 104 }
-          - { id: delete, label: Delete, icon: delete, size: small, width: 104 }
-          - { id: rename, label: Rename, icon: rename, size: small, width: 104 }
+          - { id: move_to, label: Move to, icon: move_to, size: big, width: 66, dropdown: [move_to_home, move_to_desktop] }
+          - { id: copy_to, label: Copy to, icon: copy_to, size: big, width: 66, dropdown: [copy_to_home, copy_to_desktop] }
+          - { separator: true }
+          - { id: delete, label: Delete, icon: delete, size: big, width: 66, dropdown: [delete_permanently] }
+          - { id: rename, label: Rename, icon: rename, size: big, width: 66 }
       - label: New
         width: 166
         commands:
@@ -69,24 +69,48 @@ tabs:
   - id: view
     label: View
     groups:
-      - label: Layout
-        width: 116
-        commands:
-          - { id: view_large, label: Large icons, icon: view_large, size: small, width: 108 }
-          - { id: view_details, label: Details, icon: view_details, size: small, width: 108 }
-      - label: Show/hide
-        width: 136
-        commands:
-          - { id: toggle_nav, label: Navigation pane, icon: computer, size: small, enabled: false, width: 130 }
-          - { id: toggle_hidden, label: Hidden items, icon: file, size: small, width: 108 }
-      - label: Options
-        width: 250
+      - label: Panes
+        width: 212
         rows: 2
         commands:
-          - { id: toggle_dark, label: Dark mode, icon: gear, size: small, width: 108 }
-          - { id: toggle_border, label: Custom border, icon: gear, size: small, width: 118 }
-          - { id: toggle_frame, label: Win8 frame, icon: gear, size: small, width: 108 }
-          - { id: folder_options, label: Folder options, icon: gear, size: small, enabled: false, width: 118 }
+          - { id: toggle_nav, label: Navigation pane, icon: nav_pane, size: big, width: 92, enabled: false, dropdown: [toggle_preview, toggle_details_pane] }
+          - { id: toggle_preview, label: Preview pane, icon: preview_pane, size: small, enabled: false, width: 110 }
+          - { id: toggle_details_pane, label: Details pane, icon: details_pane, size: small, enabled: false, width: 110 }
+      - label: Layout
+        kind: gallery
+        rows: 3
+        width: 316
+        commands:
+          - { id: view_xl, label: Extra large icons, icon: view_large, size: small, enabled: false, width: 120 }
+          - { id: view_large, label: Large icons, icon: view_large, size: small, width: 96 }
+          - { id: view_medium, label: Medium icons, icon: view_large, size: small, enabled: false, width: 108 }
+          - { id: view_small, label: Small icons, icon: view_details, size: small, enabled: false, width: 96 }
+          - { id: view_list, label: List, icon: view_details, size: small, enabled: false, width: 96 }
+          - { id: view_details, label: Details, icon: view_details, size: small, width: 96 }
+          - { id: view_tiles, label: Tiles, icon: view_large, size: small, enabled: false, width: 96 }
+          - { id: view_content, label: Content, icon: view_details, size: small, enabled: false, width: 96 }
+      - label: Current view
+        width: 230
+        rows: 3
+        commands:
+          - { id: sort_by, label: Sort by, icon: sort_by, size: big, width: 60, dropdown: [sort_name, sort_size, sort_modified] }
+          - { id: group_by, label: Group by, icon: sort_by, size: small, enabled: false, width: 130 }
+          - { id: size_columns, label: Size columns to fit, icon: view_details, size: small, enabled: false, width: 150 }
+      - label: Show/hide
+        width: 176
+        rows: 3
+        commands:
+          - { id: toggle_checkboxes, label: Item check boxes, kind: checkbox, enabled: false, width: 138 }
+          - { id: toggle_extensions, label: File name extensions, kind: checkbox, enabled: false, width: 152 }
+          - { id: toggle_hidden, label: Hidden items, kind: checkbox, width: 118 }
+      - label: Options
+        width: 240
+        rows: 2
+        commands:
+          - { id: toggle_dark, label: Dark mode, kind: checkbox, width: 104 }
+          - { id: toggle_border, label: Custom border, kind: checkbox, width: 112 }
+          - { id: toggle_frame, label: Win8 frame, icon: gear, size: small, width: 104 }
+          - { id: folder_options, label: Folder options, icon: gear, size: small, enabled: false, width: 112 }
 
 contextual_tabs:
   - id: drive_tools
@@ -126,6 +150,14 @@ commands:
   cut: { internal: cut }
   copy: { internal: copy }
   delete: { internal: delete }
+  delete_permanently: { label: Delete permanently, internal: delete_permanent }
+  move_to_home: { label: Home, internal: "move_to:~/" }
+  move_to_desktop: { label: Desktop, internal: "move_to:~/Desktop" }
+  copy_to_home: { label: Home, internal: "copy_to:~/" }
+  copy_to_desktop: { label: Desktop, internal: "copy_to:~/Desktop" }
+  sort_name: { label: Name, internal: sort_name }
+  sort_size: { label: Size, internal: sort_size }
+  sort_modified: { label: Date modified, internal: sort_modified }
   rename: { internal: rename }
   new_folder: { internal: new_folder }
   select_all: { internal: select_all }
