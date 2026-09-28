@@ -443,7 +443,8 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         crate::model::FrameStyle::Win8 => (40.0, 24.0, 13.0),
         crate::model::FrameStyle::Win10 => (46.0, 30.0, 15.0),
     };
-    let caption = |icon_name: &'static str, msg: Message, hover_bg: Color| {
+    // close is ALWAYS red (Win8); hover brightens, press darkens
+    let caption = |icon_name: &'static str, msg: Message, hover_bg: Color, solid: bool| {
         button(
             container(crate::icon::view(icon_name, glyph, &skin))
                 .width(Length::Fixed(cap_w))
@@ -455,9 +456,16 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         .height(Length::Fixed(cap_h))
         .padding(0)
         .style(move |_t, status| button::Style {
-            background: match status {
-                button::Status::Hovered => Some(hover_bg.into()),
-                button::Status::Pressed => Some(hover_bg.scale_alpha(0.7).into()),
+            background: match (solid, status) {
+                (true, button::Status::Hovered) => {
+                    Some(Color::from_rgb8(0xF1, 0x70, 0x7A).into())
+                }
+                (true, button::Status::Pressed) => {
+                    Some(Color::from_rgb8(0xC5, 0x0E, 0x1F).into())
+                }
+                (true, _) => Some(hover_bg.into()),
+                (false, button::Status::Hovered) => Some(hover_bg.into()),
+                (false, button::Status::Pressed) => Some(hover_bg.scale_alpha(0.7).into()),
                 _ => None,
             },
             text_color: Color::WHITE,
@@ -627,9 +635,9 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
                 drag_gap,
                 ctx_blocks,
                 drag_title,
-                container(caption("minimize", Message::Minimize, Color::from_rgba(1.0, 1.0, 1.0, 0.18))).height(Length::Fill).align_y(iced::Alignment::Start),
-                container(caption("maximize", Message::Maximize, Color::from_rgba(1.0, 1.0, 1.0, 0.18))).height(Length::Fill).align_y(iced::Alignment::Start),
-                container(caption("close", Message::Close, skin.close_hover)).height(Length::Fill).align_y(iced::Alignment::Start),
+                container(caption("minimize", Message::Minimize, Color::from_rgba(1.0, 1.0, 1.0, 0.18), false)).height(Length::Fill).align_y(iced::Alignment::Start),
+                container(caption("maximize", Message::Maximize, Color::from_rgba(1.0, 1.0, 1.0, 0.18), false)).height(Length::Fill).align_y(iced::Alignment::Start),
+                container(caption("close", Message::Close, skin.close_hover, true)).height(Length::Fill).align_y(iced::Alignment::Start),
             ]
             .height(Length::Fixed(30.0)),
         )
@@ -666,9 +674,9 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
             mouse_area(Space::new().width(Length::Fill).height(Length::Fixed(30.0)))
                 .on_press(Message::TitlebarPress)
                 .on_double_click(Message::TitlebarDoubleClick),
-            container(caption("minimize", Message::Minimize, Color::from_rgba(1.0, 1.0, 1.0, 0.18))).height(Length::Fill).align_y(iced::Alignment::Start),
-            container(caption("maximize", Message::Maximize, Color::from_rgba(1.0, 1.0, 1.0, 0.18))).height(Length::Fill).align_y(iced::Alignment::Start),
-            container(caption("close", Message::Close, skin.close_hover)).height(Length::Fill).align_y(iced::Alignment::Start),
+            container(caption("minimize", Message::Minimize, Color::from_rgba(1.0, 1.0, 1.0, 0.18), false)).height(Length::Fill).align_y(iced::Alignment::Start),
+            container(caption("maximize", Message::Maximize, Color::from_rgba(1.0, 1.0, 1.0, 0.18), false)).height(Length::Fill).align_y(iced::Alignment::Start),
+            container(caption("close", Message::Close, skin.close_hover, true)).height(Length::Fill).align_y(iced::Alignment::Start),
         ]
         .height(Length::Fixed(30.0)),
     )
