@@ -320,10 +320,9 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         }
         let label_color =
             Color::from_rgb(accent.r * 0.75, accent.g * 0.75, accent.b * 0.75);
-        // 80% of the title bar (24px), vertically centered: y = 3..27; the
-        // bottom edge lands 3px above the tab row, but the stub top border
-        // rises those 3px to meet it (see tab_row), so block bottom connects
-        // to the tab top.
+        // 80% of the title bar (24px), vertically centered. Active: solid
+        // pastel reaching the title-bar bottom (connects to the tab top).
+        // Idle: plain colored text (the fade belongs to the tab, not here).
         let label = container(
             text(tab.label.clone())
                 .size(12.0)
@@ -333,8 +332,6 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         .width(Length::Fixed(width))
         .center_x(Length::Fixed(width));
         let block: Element<Message> = if active {
-            // solid pastel block: fill reaches the title-bar bottom so its
-            // bottom edge connects to the top of the tab stub
             container(label)
                 .width(Length::Fixed(width))
                 .height(Length::Fixed(30.0))
@@ -345,44 +342,11 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
                 })
                 .into()
         } else {
-            // idle: the BORDER fades - solid top line, sides fading down
-            let side = |left: bool| {
-                container(Space::new().width(Length::Fixed(1.0)).height(Length::Fill))
-                    .width(Length::Fixed(1.0))
-                    .height(Length::Fill)
-                    .style(move |_| container::Style {
-                        background: Some(iced::Background::Gradient(iced::Gradient::Linear(
-                            iced::gradient::Linear::new(iced::Radians(std::f32::consts::FRAC_PI_2))
-                                .add_stop(0.0, tint(accent, 0.2))
-                                .add_stop(0.6, tint(accent, 0.5).scale_alpha(0.6))
-                                .add_stop(1.0, Color::TRANSPARENT),
-                        ))),
-                        ..Default::default()
-                    })
-            };
-            let top = container(Space::new().width(Length::Fill).height(Length::Fixed(1.0)))
-                .width(Length::Fill)
-                .height(Length::Fixed(1.0))
-                .style(move |_| container::Style {
-                    background: Some(tint(accent, 0.2).into()),
-                    ..Default::default()
-                });
-            column![
-                top,
-                row![
-                    side(true),
-                    container(label)
-                        .width(Length::Fixed(width - 2.0))
-                        .height(Length::Fill)
-                        .center_x(Length::Fixed(width - 2.0))
-                        .center_y(Length::Fill),
-                    side(false),
-                ]
-                .height(Length::Fill),
-            ]
-            .width(Length::Fixed(width))
-            .height(Length::Fixed(24.0))
-            .into()
+            container(label)
+                .width(Length::Fixed(width))
+                .height(Length::Fixed(24.0))
+                .center_y(Length::Fixed(24.0))
+                .into()
         };
         ctx_blocks = ctx_blocks.push(
             mouse_area(block).on_press(Message::BlockPress(tab.id.clone())),
@@ -415,11 +379,11 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         .on_press(Message::ToggleRibbonCollapse),
     );
     qat = qat.push(
-        container(Space::new().width(Length::Fixed(1.0)).height(Length::Fixed(16.0)))
-            .width(Length::Fixed(8.0))
-            .center_x(Length::Fixed(8.0))
+        container(Space::new().width(Length::Fixed(1.0)).height(Length::Fixed(15.0)))
+            .width(Length::Fixed(6.0))
+            .center_x(Length::Fixed(6.0))
             .style(|_| container::Style {
-                background: Some(Color::from_rgba(1.0, 1.0, 1.0, 0.4).into()),
+                background: Some(Color::from_rgba(1.0, 1.0, 1.0, 0.35).into()),
                 ..Default::default()
             }),
     );
@@ -681,19 +645,25 @@ fn tab_row_w(tab: &ribbon::TabDef) -> f32 {
 /// Width of the main tabs region in the tab row — contextual title-bar
 /// blocks align directly above their stubs.
 fn main_tabs_width(state: &Explorer) -> f32 {
-    let tabs: Vec<f32> = state.ribbon.tabs.iter().map(tab_row_w).collect();
-    tabs.iter().sum::<f32>() + tabs.len().saturating_sub(1) as f32 * 5.0
+    // main tabs: no spacing between them
+    state.ribbon.tabs.iter().map(tab_row_w).sum()
 }
 
 /// x offset + width of the currently active tab within the tab row.
 fn active_tab_geometry(state: &Explorer) -> Option<(f32, f32)> {
     let mut x = 0.0f32;
+    let mut prev_ctx = false;
     for tab in visible_tabs(state) {
+        let ctx = tab.color.is_some();
+        if ctx && prev_ctx {
+            x += 5.0; // space only between two contextual tabs
+        }
         let w = tab_row_w(tab);
         if tab.id == state.active_tab {
             return Some((x, w));
         }
-        x += w + 5.0;
+        x += w;
+        prev_ctx = ctx;
     }
     None
 }
@@ -741,38 +711,80 @@ fn tab_row(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
             snap: true,
         });
     let mut tabs_row = row![].height(Length::Fixed(28.0));
-    let mut tab_gap = 0.0f32;
+    let mut prev_ctx = false;
     for tab in visible_tabs(state) {
         let width = tab_row_w(tab);
         let accent = tab.color.as_deref().and_then(ribbon::color_by_name);
-        if tab_gap > 0.0 {
-            tabs_row = tabs_row.push(Space::new().width(Length::Fixed(tab_gap)));
+        let ctx = accent.is_some();
+        if ctx && prev_ctx {
+            // space only between two contextual tabs (Win8 reference)
+            tabs_row = tabs_row.push(Space::new().width(Length::Fixed(5.0)));
         }
-        tab_gap = 5.0; // tabs & tabs are spaced (Win8 reference)
+        prev_ctx = ctx;
         if let Some(accent) = accent.filter(|_| state.self_border) {
             // Win8: connecting stub under the title-bar block, labeled with
             // the first group's caption.
             let active = state.active_tab == tab.id;
             let stub_label = tab.groups.first().map(|g| g.label.clone()).unwrap_or_default();
-            let stub = container(
+            let label = container(
                 text(stub_label)
                     .size(12.0)
                     .color(accent.scale_alpha(0.9))
                     .width(Length::Shrink),
             )
-            .width(Length::Fixed(width))
-            .height(Length::Fixed(28.0))
-            .center_x(Length::Fixed(width))
-            .center_y(Length::Fixed(28.0))
-            .style(move |_| container::Style {
-                background: Some(skin.ribbon_bg.into()),
-                border: iced::Border {
-                    color: accent.scale_alpha(if active { 1.0 } else { 0.55 }),
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            });
+            .width(Length::Fixed(width - 2.0))
+            .height(Length::Fill)
+            .center_x(Length::Fixed(width - 2.0))
+            .center_y(Length::Fill);
+            // idle contextual tab: its BORDER fades - solid top, sides fading
+            let stub: Element<Message> = if active {
+                container(label)
+                    .width(Length::Fixed(width))
+                    .height(Length::Fixed(28.0))
+                    .style(move |_| container::Style {
+                        background: Some(skin.ribbon_bg.into()),
+                        border: iced::Border {
+                            color: accent,
+                            width: 1.0,
+                            radius: 0.0.into(),
+                        },
+                        ..Default::default()
+                    })
+                    .into()
+            } else {
+                let side = move || {
+                    container(Space::new().width(Length::Fixed(1.0)).height(Length::Fill))
+                        .width(Length::Fixed(1.0))
+                        .height(Length::Fill)
+                        .style(move |_| container::Style {
+                            background: Some(iced::Background::Gradient(
+                                iced::Gradient::Linear(
+                                    iced::gradient::Linear::new(iced::Radians(
+                                        std::f32::consts::FRAC_PI_2,
+                                    ))
+                                    .add_stop(0.0, accent)
+                                    .add_stop(0.55, accent.scale_alpha(0.5))
+                                    .add_stop(1.0, Color::TRANSPARENT),
+                                ),
+                            )),
+                            ..Default::default()
+                        })
+                };
+                let top = container(Space::new().width(Length::Fill).height(Length::Fixed(1.0)))
+                    .width(Length::Fill)
+                    .height(Length::Fixed(1.0))
+                    .style(move |_| container::Style {
+                        background: Some(accent.into()),
+                        ..Default::default()
+                    });
+                column![
+                    top,
+                    row![side(), label, side(),].height(Length::Fill),
+                ]
+                .width(Length::Fixed(width))
+                .height(Length::Fixed(28.0))
+                .into()
+            };
             tabs_row = tabs_row.push(
                 mouse_area(stub).on_press(Message::SetTab(tab.id.clone())),
             );
