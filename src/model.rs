@@ -47,6 +47,8 @@ pub enum Message {
     WindowResized(f32),
     /// Switch between the self-rendered border and native decorations.
     ToggleSelfBorder,
+    /// Minimize the ribbon to its tab row (Win8 collapse chevron).
+    ToggleRibbonCollapse,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -73,6 +75,8 @@ pub struct Explorer {
     pub maximized: bool,
     /// Self-rendered window border/title bar (off = native decorations).
     pub self_border: bool,
+    /// Ribbon minimized to the tab row.
+    pub ribbon_collapsed: bool,
     pub clipboard: Option<(ClipMode, Vec<PathBuf>)>,
     pub view: ViewMode,
     pub show_hidden: bool,
@@ -110,6 +114,7 @@ impl Explorer {
             dark: false,
             maximized: false,
             self_border: true,
+            ribbon_collapsed: false,
             clipboard: None,
             view: ViewMode::Details,
             show_hidden: false,
@@ -580,6 +585,11 @@ impl Explorer {
             }
             Message::SetTab(t) => {
                 self.active_tab = t;
+                self.ribbon_collapsed = false; // Win8: choosing a tab shows it
+                iced::Task::none()
+            }
+            Message::ToggleRibbonCollapse => {
+                self.ribbon_collapsed = !self.ribbon_collapsed;
                 iced::Task::none()
             }
             Message::RunCommand(id) => {
