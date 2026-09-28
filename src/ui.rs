@@ -269,23 +269,26 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         let Some(accent) = tab.color.as_deref().and_then(ribbon::color_by_name) else { continue };
         let active = state.active_tab == tab.id;
         let width = tab_width(&tab.label);
+        // Win8: pastel accent block at 90% of the title bar height, no edge
+        fn tint(accent: Color, t: f32) -> Color {
+            Color::from_rgb(
+                accent.r + (1.0 - accent.r) * t,
+                accent.g + (1.0 - accent.g) * t,
+                accent.b + (1.0 - accent.b) * t,
+            )
+        }
         let block = container(
             text(tab.label.clone())
                 .size(12.0)
-                .color(accent.scale_alpha(0.9))
+                .color(Color::from_rgb(accent.r * 0.75, accent.g * 0.75, accent.b * 0.75))
                 .width(Length::Shrink),
         )
         .width(Length::Fixed(width))
-        .height(Length::Fixed(30.0))
+        .height(Length::Fixed(27.0))
         .center_x(Length::Fixed(width))
-        .center_y(Length::Fixed(30.0))
+        .center_y(Length::Fixed(27.0))
         .style(move |_| container::Style {
-            background: Some(accent.scale_alpha(if active { 0.5 } else { 0.3 }).into()),
-            border: iced::Border {
-                color: accent.scale_alpha(if active { 1.0 } else { 0.7 }),
-                width: 1.0,
-                radius: 0.0.into(),
-            },
+            background: Some(tint(accent, if active { 0.45 } else { 0.62 }).into()),
             ..Default::default()
         });
         ctx_blocks = ctx_blocks.push(
@@ -338,36 +341,59 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
 // ---------------- ribbon ----------------
 
 fn ribbon(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
-    // clone: body has 1px #DADBDC top+bottom borders, bg #F5F6F7
-    container(if state.ribbon_collapsed {
-        column![
-            tab_row(state, skin),
-            container(Space::new().width(Length::Fill).height(Length::Fixed(1.0)))
-                .style(move |_| container::Style {
-                    background: Some(skin.sep.into()),
-                    ..Default::default()
-                }),
-        ]
-    } else {
-        column![
-            tab_row(state, skin),
-            container(ribbon_body(state, skin))
-                .width(Length::Fill)
-                .height(Length::Fixed(94.0))
-                .style(move |_| container::Style {
-                    background: Some(skin.ribbon_bg.into()),
-                    border: iced::Border {
-                        color: skin.sep,
-                        width: 1.0,
-                        radius: 0.0.into(),
-                    },
-                    ..Default::default()
-                }),
-        ]
+    // clone/Win8: a 1px line under the tab row; the body has NO top border
+    // (the active tab merges into the body - a same-color bridge covers the
+    // line beneath it, so no bottom edge on the focused tab).
+    let line: Element<Message> = container(
+        Space::new().width(Length::Fill).height(Length::Fixed(1.0)),
+    )
+    .style(move |_t: &iced::Theme| container::Style {
+        background: Some(skin.sep.into()),
+        ..Default::default()
     })
-    .width(Length::Fill)
-    .height(Length::Fixed(if state.ribbon_collapsed { 29.0 } else { 123.0 }))
-    .into()
+    .into();
+    let body = container(ribbon_body(state, skin))
+        .width(Length::Fill)
+        .height(Length::Fixed(94.0))
+        .style(move |_| container::Style {
+            background: Some(skin.ribbon_bg.into()),
+            border: iced::Border {
+                color: skin.sep,
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        });
+    if state.ribbon_collapsed {
+        return column![tab_row(state, skin), line].into();
+    }
+    let col = column![tab_row(state, skin), line, body];
+    match active_tab_geometry(state) {
+        Some((x, w)) => {
+            let bridge = container(
+                column![
+                    Space::new().width(Length::Fill).height(Length::Fixed(26.0)),
+                    container(
+                        row![
+                            Space::new().width(Length::Fixed(x)),
+                            container(Space::new().width(Length::Fixed(w)).height(Length::Fixed(3.0)))
+                                .style(move |_| container::Style {
+                                    background: Some(skin.ribbon_bg.into()),
+                                    ..Default::default()
+                                }),
+                        ]
+                        .width(Length::Fill),
+                    )
+                    .height(Length::Fixed(3.0)),
+                ]
+                .height(Length::Fill),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill);
+            stack![col, bridge].into()
+        }
+        None => col.into(),
+    }
 }
 
 fn tab_button(
@@ -391,15 +417,7 @@ fn tab_button(
         skin.subtle
     };
     let text_color = accent.map(|a| if active { a } else { a.scale_alpha(0.75) }).unwrap_or(text_color);
-    let font = if active && accent.is_none() {
-        iced::Font {
-            weight: iced::font::Weight::Bold,
-            ..Default::default()
-        }
-    } else {
-        iced::Font::default()
-    };
-    let btn = button(text(label.to_string()).size(12.0).color(text_color).font(font))
+    let btn = button(text(label.to_string()).size(12.0).color(text_color))
         .width(Length::Fixed(width))
         .height(Length::Fixed(28.0))
         .style(move |_t, status| {
@@ -463,6 +481,23 @@ fn main_tabs_width(state: &Explorer) -> f32 {
     state.ribbon.tabs.iter().map(|t| tab_width(&t.label)).sum()
 }
 
+/// x offset + width of the currently active tab within the tab row.
+fn active_tab_geometry(state: &Explorer) -> Option<(f32, f32)> {
+    let mut x = 0.0f32;
+    for tab in visible_tabs(state) {
+        let w = if tab.kind.as_deref() == Some("file") {
+            62.0
+        } else {
+            tab_width(&tab.label)
+        };
+        if tab.id == state.active_tab {
+            return Some((x, w));
+        }
+        x += w;
+    }
+    None
+}
+
 fn visible_tabs(state: &Explorer) -> Vec<&TabDef> {
     let ctx = state.context();
     state
@@ -507,7 +542,11 @@ fn tab_row(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         });
     let mut tabs_row = row![].height(Length::Fixed(28.0));
     for tab in visible_tabs(state) {
-        let width = tab_width(&tab.label);
+        let width = if tab.kind.as_deref() == Some("file") {
+            62.0 // Win8 File block is wider
+        } else {
+            tab_width(&tab.label)
+        };
         let accent = tab.color.as_deref().and_then(ribbon::color_by_name);
         if let Some(accent) = accent.filter(|_| state.self_border) {
             // Win8: connecting stub under the title-bar block, labeled with
