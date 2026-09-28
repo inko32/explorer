@@ -291,15 +291,3 @@ pub fn command_enabled(id: &str, has_selection: bool, has_clipboard: bool, has_i
     }
 }
 
-
-/// True when the single selection is an archive file (by extension the 7z
-/// CLI backend can list).
-pub fn archive_path_selected(names: &[&str]) -> bool {
-    if names.len() != 1 {
-        return false;
-    }
-    let n = names[0].to_ascii_lowercase();
-    ["7z", "zip", "rar", "tar", "gz", "bz2", "xz", "zst", "iso", "cab", "wim"]
-        .iter()
-        .any(|e| n.ends_with(&format!(".{e}")))
-}

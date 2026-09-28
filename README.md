@@ -2,11 +2,14 @@
 
 A Windows 8 style file explorer for POSIX and Windows — POSIX/Wayland first.
 
-**Status: iced spike validated on branch `iced`.** iced 0.14 + tiny-skia
-(CPU renderer): borderless window with self-drawn title bar, details file
-list with hover/selection, breadcrumb address bar, nav pane, status bar,
-light/dark theme, ~0% idle CPU, crisp text at fractional DPI. Next: port the
-GIO backend and ops from `master`, then rebuild the ribbon.
+**Status: branch `iced` — Ribbon milestone "90% complete" (commit `040351a`).**
+iced 0.14 + tiny-skia (CPU renderer): borderless window with self-drawn
+frame (Win8 double border / Win10 1px, toggleable), QAT title bar with
+contextual tab blocks, YAML-configurable ribbon (tabs, groups, small/big/
+split/checkbox/gallery commands, menus, contextual rules), breadcrumb
+address bar, nav pane, details/large-icon file view with inline rename,
+sorting, file ops + internal clipboard, status bar, archives open as
+folders via 7-Zip, light/dark theme, ~0% idle CPU.
 
 The egui implementation is preserved on `master` (docs/DECISIONS.md D11
 explains the switch).

@@ -328,7 +328,7 @@ pub fn sort_by(s: &Skin) -> svg::Handle {
 }
 
 /// Win8 QAT undo: curved arrow sweeping back to the left.
-pub fn undo(s: &Skin) -> svg::Handle {
+pub fn undo(_s: &Skin) -> svg::Handle {
     let c = Color::WHITE; // sits on the accent title bar
     doc(format!(
         "{}{}",
@@ -342,7 +342,7 @@ pub fn undo(s: &Skin) -> svg::Handle {
 }
 
 /// Win8 QAT redo: mirror of undo.
-pub fn redo(s: &Skin) -> svg::Handle {
+pub fn redo(_s: &Skin) -> svg::Handle {
     let c = Color::WHITE;
     doc(format!(
         "{}{}",

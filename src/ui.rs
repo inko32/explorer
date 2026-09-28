@@ -168,7 +168,6 @@ impl ResizeDir {
     }
 }
 
-const MARGIN: f32 = 5.0;
 
 /// An invisible resize zone aligned to one window edge/corner. The outer
 /// container spans the whole window (transparent to events); only the inner
