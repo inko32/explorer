@@ -320,9 +320,10 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         }
         let label_color =
             Color::from_rgb(accent.r * 0.75, accent.g * 0.75, accent.b * 0.75);
-        // 80% of the title bar (24px), vertically centered. Active: solid
-        // pastel reaching the title-bar bottom (connects to the tab top).
-        // Idle: plain colored text (the fade belongs to the tab, not here).
+        // The title-bar block is ALWAYS solid pastel (idle or active); the
+        // fade belongs to the contextual tab, never to this block. 80% of
+        // the 30px title bar (24px), lowered so its bottom edge is flush
+        // with the title-bar bottom = connects to the tab top.
         let label = container(
             text(tab.label.clone())
                 .size(12.0)
@@ -331,23 +332,21 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         )
         .width(Length::Fixed(width))
         .center_x(Length::Fixed(width));
-        let block: Element<Message> = if active {
-            container(label)
-                .width(Length::Fixed(width))
-                .height(Length::Fixed(30.0))
-                .center_y(Length::Fixed(30.0))
-                .style(move |_| container::Style {
-                    background: Some(tint(accent, 0.45).into()),
-                    ..Default::default()
-                })
-                .into()
-        } else {
-            container(label)
-                .width(Length::Fixed(width))
-                .height(Length::Fixed(24.0))
-                .center_y(Length::Fixed(24.0))
-                .into()
-        };
+        let solid = container(label)
+            .width(Length::Fixed(width))
+            .height(Length::Fixed(24.0))
+            .center_x(Length::Fixed(width))
+            .center_y(Length::Fixed(24.0))
+            .style(move |_| container::Style {
+                background: Some(tint(accent, if active { 0.45 } else { 0.62 }).into()),
+                ..Default::default()
+            });
+        // lowered: 24px solid block bottom-aligned in the 30px title bar
+        let block: Element<Message> = container(solid)
+            .width(Length::Fixed(width))
+            .height(Length::Fixed(30.0))
+            .align_y(iced::Alignment::End)
+            .into();
         ctx_blocks = ctx_blocks.push(
             mouse_area(block).on_press(Message::BlockPress(tab.id.clone())),
         );
@@ -509,17 +508,21 @@ fn ribbon(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         .height(Length::Fixed(94.0))
         .style(move |_| container::Style {
             background: Some(skin.ribbon_bg.into()),
-            border: iced::Border {
-                color: skin.sep,
-                width: 1.0,
-                radius: 0.0.into(),
-            },
             ..Default::default()
         });
+    // bottom edge of the ribbon body (the top edge is `line` above)
+    let bottom_line: Element<Message> = container(
+        Space::new().width(Length::Fill).height(Length::Fixed(1.0)),
+    )
+    .style(move |_t: &iced::Theme| container::Style {
+        background: Some(skin.sep.into()),
+        ..Default::default()
+    })
+    .into();
     if state.ribbon_collapsed {
         return column![tab_row(state, skin), line].into();
     }
-    let col = column![tab_row(state, skin), line, body];
+    let col = column![tab_row(state, skin), line, body, bottom_line];
     match active_tab_geometry(state) {
         Some((x, w)) => {
             let bridge = container(
