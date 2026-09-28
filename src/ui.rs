@@ -200,28 +200,32 @@ fn resize_zone(
 ///  - Win8: 3px accent border at the window edge; content is inset 3px
 ///    (internal calculation follows the exposed outer border).
 ///  - Win10: single 1px dark border; content inset 1px.
-fn window_frame(style: crate::model::FrameStyle, skin: skin::Skin) -> Element<'static, Message> {
-    let (width, color) = match style {
-        crate::model::FrameStyle::Win8 => (3.0, skin.accent),
-        crate::model::FrameStyle::Win10 => (1.0, skin.accent_dark),
-    };
-    container(Space::new().width(Length::Fill).height(Length::Fill))
-        .style(move |_t: &iced::Theme| container::Style {
-            border: iced::Border {
-                color,
-                width,
-                radius: 0.0.into(),
-            },
-            ..Default::default()
-        })
-        .into()
+/// Frame thickness (top, right, bottom, left). Win8: thin top, THICK
+/// sides+bottom (the classic sizing border); Win10: 1px all around.
+/// The internal content is inset by exactly these amounts - the "virtual
+/// window" shrinks, the frame never covers content.
+fn frame_insets(state: &Explorer) -> (f32, f32, f32, f32) {
+    if !state.self_border {
+        return (0.0, 0.0, 0.0, 0.0);
+    }
+    match state.frame_style {
+        crate::model::FrameStyle::Win8 => (3.0, 8.0, 8.0, 8.0),
+        crate::model::FrameStyle::Win10 => (1.0, 1.0, 1.0, 1.0),
+    }
+}
+
+fn frame_color(state: &Explorer, skin: skin::Skin) -> Color {
+    match state.frame_style {
+        crate::model::FrameStyle::Win8 => skin.accent,
+        crate::model::FrameStyle::Win10 => skin.accent_dark,
+    }
 }
 
 /// Invisible resize ring around the window edges (custom border mode).
-fn resize_frame() -> Element<'static, Message> {
+fn resize_frame(margin: f32) -> Element<'static, Message> {
     use iced::Alignment;
-    let m = Length::Fixed(MARGIN);
-    let c = Length::Fixed(MARGIN * 2.0);
+    let m = Length::Fixed(margin);
+    let c = Length::Fixed(margin * 2.0);
     let fill = Length::Fill;
     stack![
         resize_zone(ResizeDir::N, fill, m, None, None),
@@ -265,16 +269,36 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
         let _ = menu_w;
         menu_overlay(state, m, skin)
     });
+    let (ft, fr, fb, fl) = frame_insets(state);
+    let framed: Element<Message> = if state.self_border {
+        container(root)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(iced::Padding {
+                top: ft,
+                right: fr,
+                bottom: fb,
+                left: fl,
+            })
+            .style(move |_: &iced::Theme| container::Style {
+                background: Some(frame_color(state, skin).into()),
+                ..Default::default()
+            })
+            .into()
+    } else {
+        root.into()
+    };
     if state.self_border {
-        let mut s = stack![root, window_frame(state.frame_style, skin), resize_frame()];
+        let grab = if state.frame_style == crate::model::FrameStyle::Win8 { 8.0 } else { 5.0 };
+        let mut s = stack![framed, resize_frame(grab)];
         if let Some(l) = menu_layer {
             s = s.push(l);
         }
         s.into()
     } else {
         match menu_layer {
-            Some(l) => stack![root, l].into(),
-            None => root.into(),
+            Some(l) => stack![framed, l].into(),
+            None => framed,
         }
     }
 }
@@ -358,9 +382,9 @@ fn menu_overlay(state: &Explorer, m: &crate::model::OpenMenu, skin: skin::Skin) 
             },
             ..Default::default()
         });
-    // overlay stack == content coordinate space (the border draws over the
-    // content, it does not offset coordinates): use the sender's y as-is
-    let menu_y = m.y;
+    // anchors are content-relative; the content is inset by the frame
+    let (ft, _, _, fl) = frame_insets(state);
+    let menu_y = ft + m.y;
     let backdrop = mouse_area(
         container(Space::new().width(Length::Fill).height(Length::Fill)),
     )
@@ -370,7 +394,7 @@ fn menu_overlay(state: &Explorer, m: &crate::model::OpenMenu, skin: skin::Skin) 
         .height(Length::Fill)
         .padding(iced::Padding {
             top: menu_y,
-            left: m.x,
+            left: fl + m.x,
             ..Default::default()
         })
         .align_x(iced::Alignment::Start)
@@ -551,8 +575,10 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     let title_w = state.title().chars().count() as f32 * 7.5 + 8.0;
     let title_zone = (main_tabs_width(state) - 28.0 - qat_w).max(60.0);
     let tight = blocks_w > 1.0 && title_w > title_zone - 8.0;
+    let (_, fr, _, fl) = frame_insets(state);
+    let content_w = state.win_w - fr - fl;
     if tight {
-        let elide_w = (state.win_w - 28.0 - qat_w - 138.0 - blocks_w - 16.0).max(30.0);
+        let elide_w = (content_w - 28.0 - qat_w - 138.0 - blocks_w - 16.0).max(30.0);
         // blocks keep their aligned position above the tab stubs; the title
         // moves right of them. Every non-interactive strip drags the window.
         let gap_w = (main_tabs_width(state) - 28.0 - qat_w).max(0.0);
@@ -965,6 +991,7 @@ fn tab_row(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     )
     .width(Length::Fill)
     .height(Length::Fixed(28.0))
+    .style(bg(skin.window_bg)) // white strip - the accent frame must not bleed through
     .into()
 }
 
@@ -1424,7 +1451,8 @@ fn big_cmd_split(
 
 /// Clamp a dropdown menu anchor x so the menu stays inside the window.
 fn menu_anchor(state: &Explorer, x: f32) -> f32 {
-    x.clamp(4.0, (state.win_w - 220.0).max(4.0))
+    let (_, fr, _, fl) = frame_insets(state);
+    x.clamp(4.0, (state.win_w - fl - fr - 220.0).max(4.0))
 }
 
 // ---------------- address bar ----------------
