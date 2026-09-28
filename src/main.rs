@@ -62,6 +62,7 @@ pub fn handle_key(event: iced::Event, renaming: bool) -> Option<Message> {
         return (key == Key::Named(Named::Escape)).then_some(Message::CancelRename);
     }
     match key {
+        Key::Named(Named::Escape) => Some(Message::CancelMenu),
         Key::Named(Named::F2) => Some(Message::RenameSelected),
         Key::Named(Named::Delete) => Some(Message::DeleteSelection),
         Key::Named(Named::Backspace) => Some(Message::Up),

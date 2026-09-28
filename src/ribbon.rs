@@ -42,6 +42,10 @@ pub struct GroupDef {
     /// four buttons in one column are not allowed).
     #[serde(default)]
     pub rows: Option<usize>,
+    /// "gallery": tile the commands as an in-ribbon gallery grid with an
+    /// expand button opening the full list as a dropdown.
+    #[serde(default)]
+    pub kind: Option<String>,
     #[serde(default)]
     pub commands: Vec<CmdRef>,
 }
@@ -59,11 +63,20 @@ pub struct CmdRef {
     /// Button width in px (default 100) — sized to the label.
     #[serde(default)]
     pub width: Option<f32>,
+    /// "checkbox": renders a check box + label (active state = checked).
+    #[serde(default)]
+    pub kind: Option<String>,
+    /// Dropdown menu items (command ids) — renders a split button with an
+    /// arrow that opens the menu below the ribbon.
+    #[serde(default)]
+    pub dropdown: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CommandDef {
+    /// Menu-item label when the command never appears as a ribbon button.
     #[serde(default)]
+    pub label: Option<String>,
     pub internal: Option<String>,
     #[serde(default)]
     pub shell: Option<String>,
@@ -263,7 +276,9 @@ pub fn color_by_name(name: &str) -> Option<iced::Color> {
 /// Dynamic enablement: static `enabled: false` wins; then per-command rules.
 pub fn command_enabled(id: &str, has_selection: bool, has_clipboard: bool, has_items: bool) -> bool {
     match id {
-        "cut" | "copy" | "delete" | "rename" | "open_picture" => has_selection,
+        "cut" | "copy" | "delete" | "delete_permanently" | "rename" | "open_picture" => {
+            has_selection
+        }
         "paste" => has_clipboard,
         "select_all" | "invert_selection" => has_items,
         "select_none" => has_selection,

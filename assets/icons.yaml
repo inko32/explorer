@@ -33,6 +33,10 @@ icons:
   delete:       { file: delete }
   rename:       { svg: builtin }
   undo:         { svg: builtin }
+  nav_pane:     { svg: builtin }
+  preview_pane: { svg: builtin }
+  details_pane: { svg: builtin }
+  sort_by:      { svg: builtin }
   redo:         { svg: builtin }
   new_folder:   { file: folder_new }
   new_item:     { file: new_item }
