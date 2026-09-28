@@ -320,40 +320,69 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         }
         let label_color =
             Color::from_rgb(accent.r * 0.75, accent.g * 0.75, accent.b * 0.75);
-        // 80% of the title bar, vertically centered: y = 3..27 (titlebar 30).
-        let block = container(
+        // 80% of the title bar (24px), vertically centered: y = 3..27; the
+        // bottom edge lands 3px above the tab row, but the stub top border
+        // rises those 3px to meet it (see tab_row), so block bottom connects
+        // to the tab top.
+        let label = container(
             text(tab.label.clone())
                 .size(12.0)
                 .color(label_color)
                 .width(Length::Shrink),
         )
         .width(Length::Fixed(width))
-        .height(Length::Fixed(24.0))
-        .center_x(Length::Fixed(width))
-        .center_y(Length::Fixed(24.0));
-        let block = if active {
-            // solid pastel block, bottom edge connects to the tab stub
-            block
+        .center_x(Length::Fixed(width));
+        let block: Element<Message> = if active {
+            // solid pastel block: fill reaches the title-bar bottom so its
+            // bottom edge connects to the top of the tab stub
+            container(label)
+                .width(Length::Fixed(width))
+                .height(Length::Fixed(30.0))
+                .center_y(Length::Fixed(30.0))
                 .style(move |_| container::Style {
                     background: Some(tint(accent, 0.45).into()),
                     ..Default::default()
                 })
+                .into()
         } else {
-            // idle: a line, solid at the top, fading to the bottom
-            block.style(move |_| container::Style {
-                border: iced::Border {
-                    color: tint(accent, 0.15),
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                background: Some(iced::Background::Gradient(iced::Gradient::Linear(
-                    iced::gradient::Linear::new(iced::Radians(std::f32::consts::FRAC_PI_2))
-                        .add_stop(0.0, tint(accent, 0.55))
-                        .add_stop(0.55, tint(accent, 0.85))
-                        .add_stop(1.0, Color::TRANSPARENT),
-                ))),
-                ..Default::default()
-            })
+            // idle: the BORDER fades - solid top line, sides fading down
+            let side = |left: bool| {
+                container(Space::new().width(Length::Fixed(1.0)).height(Length::Fill))
+                    .width(Length::Fixed(1.0))
+                    .height(Length::Fill)
+                    .style(move |_| container::Style {
+                        background: Some(iced::Background::Gradient(iced::Gradient::Linear(
+                            iced::gradient::Linear::new(iced::Radians(std::f32::consts::FRAC_PI_2))
+                                .add_stop(0.0, tint(accent, 0.2))
+                                .add_stop(0.6, tint(accent, 0.5).scale_alpha(0.6))
+                                .add_stop(1.0, Color::TRANSPARENT),
+                        ))),
+                        ..Default::default()
+                    })
+            };
+            let top = container(Space::new().width(Length::Fill).height(Length::Fixed(1.0)))
+                .width(Length::Fill)
+                .height(Length::Fixed(1.0))
+                .style(move |_| container::Style {
+                    background: Some(tint(accent, 0.2).into()),
+                    ..Default::default()
+                });
+            column![
+                top,
+                row![
+                    side(true),
+                    container(label)
+                        .width(Length::Fixed(width - 2.0))
+                        .height(Length::Fill)
+                        .center_x(Length::Fixed(width - 2.0))
+                        .center_y(Length::Fill),
+                    side(false),
+                ]
+                .height(Length::Fill),
+            ]
+            .width(Length::Fixed(width))
+            .height(Length::Fixed(24.0))
+            .into()
         };
         ctx_blocks = ctx_blocks.push(
             mouse_area(block).on_press(Message::BlockPress(tab.id.clone())),

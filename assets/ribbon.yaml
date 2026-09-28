@@ -113,6 +113,7 @@ contextual_tabs:
     label: Archive Tools
     color: orange
     when: "inside_archive or has_archive"
+    activate_when: "inside_archive"
     groups:
       - label: Archive
         width: 132
