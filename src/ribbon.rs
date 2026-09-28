@@ -50,6 +50,9 @@ pub struct CmdRef {
     pub size: Option<String>,
     #[serde(default)]
     pub enabled: Option<bool>,
+    /// Button width in px (default 100) — sized to the label.
+    #[serde(default)]
+    pub width: Option<f32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

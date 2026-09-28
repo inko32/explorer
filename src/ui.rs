@@ -17,6 +17,15 @@ pub mod skin {
         pub col_header_bg: iced::Color,
         pub hover: iced::Color,
         pub pressed: iced::Color,
+        /// ribbon command hover: fill + border (clone: E8EFF7/A4CEF9)
+        pub hover_btn: iced::Color,
+        pub hover_btn_border: iced::Color,
+        /// circular nav-button hover (clone: E5F3FB/70C0E7)
+        pub nav_hover: iced::Color,
+        pub nav_hover_border: iced::Color,
+        /// File tab (clone: 0066B4, hover 007DDD)
+        pub file_tab: iced::Color,
+        pub file_tab_hover: iced::Color,
         pub sel: iced::Color,
         pub sel_border: iced::Color,
         pub sep: iced::Color,
@@ -34,18 +43,25 @@ pub mod skin {
         accent_dark: color!(0x00559B),
         titlebar_inactive: color!(0xC8C8C8),
         window_bg: color!(0xFFFFFF),
-        ribbon_bg: color!(0xFFFFFF),
+        ribbon_bg: color!(0xF5F6F7),
         nav_bg: color!(0xFFFFFF),
         toolbar_bg: color!(0xFFFFFF),
         status_bg: color!(0xFFFFFF),
         col_header_bg: color!(0xF7F7F7),
         hover: color!(0xE5F3FF),
         pressed: color!(0xA4CEF9),
+        hover_btn: color!(0xE8EFF7),
+        hover_btn_border: color!(0xA4CEF9),
+        nav_hover: color!(0xE5F3FB),
+        nav_hover_border: color!(0x70C0E7),
+        file_tab: color!(0x0066B4),
+        file_tab_hover: color!(0x007DDD),
         sel: color!(0xCCE8FF),
         sel_border: color!(0x0078D7),
         sep: color!(0xDADBDC),
+        // note: separators DADBDC outer / E2E3E4 inner (clone)
         text: color!(0x1A1A1A),
-        subtle: color!(0x828282),
+        subtle: color!(0x494949),
         disabled: color!(0xA0A0A0),
         folder: color!(0xF6C356),
         folder_edge: color!(0xC88E1E),
@@ -65,6 +81,12 @@ pub mod skin {
         col_header_bg: color!(0x2B2B2C),
         hover: color!(0x3A4046),
         pressed: color!(0x4A525A),
+        hover_btn: color!(0x3A4046),
+        hover_btn_border: color!(0x0078D7),
+        nav_hover: color!(0x3A4046),
+        nav_hover_border: color!(0x0078D7),
+        file_tab: color!(0x0066B4),
+        file_tab_hover: color!(0x007DDD),
         sel: color!(0x2F5480),
         sel_border: color!(0x0078D7),
         sep: color!(0x454545),
@@ -316,14 +338,35 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
 // ---------------- ribbon ----------------
 
 fn ribbon(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
+    // clone: body has 1px #DADBDC top+bottom borders, bg #F5F6F7
     container(if state.ribbon_collapsed {
-        column![tab_row(state, skin)]
+        column![
+            tab_row(state, skin),
+            container(Space::new().width(Length::Fill).height(Length::Fixed(1.0)))
+                .style(move |_| container::Style {
+                    background: Some(skin.sep.into()),
+                    ..Default::default()
+                }),
+        ]
     } else {
-        column![tab_row(state, skin), ribbon_body(state, skin)]
+        column![
+            tab_row(state, skin),
+            container(ribbon_body(state, skin))
+                .width(Length::Fill)
+                .height(Length::Fixed(94.0))
+                .style(move |_| container::Style {
+                    background: Some(skin.ribbon_bg.into()),
+                    border: iced::Border {
+                        color: skin.sep,
+                        width: 1.0,
+                        radius: 0.0.into(),
+                    },
+                    ..Default::default()
+                }),
+        ]
     })
     .width(Length::Fill)
-    .height(Length::Fixed(if state.ribbon_collapsed { 28.0 } else { 122.0 }))
-    .style(bg(skin.ribbon_bg))
+    .height(Length::Fixed(if state.ribbon_collapsed { 29.0 } else { 123.0 }))
     .into()
 }
 
@@ -360,25 +403,30 @@ fn tab_button(
         .width(Length::Fixed(width))
         .height(Length::Fixed(28.0))
         .style(move |_t, status| {
-            let bg = if is_file {
-                Some(skin.accent)
+            // clone: File tab solid brand color; main tabs transparent with a
+            // 1px #EBECEC outline on hover; active tab fills the body color
+            // and borders top/sides #DADBDC, bottom merges into the body.
+            let outline = Color::from_rgb8(0xEB, 0xEC, 0xEC);
+            let frame = skin.sep;
+            let (bg, border_color, border_w) = if is_file {
+                let c = match status {
+                    button::Status::Hovered => skin.file_tab_hover,
+                    _ => skin.file_tab,
+                };
+                (Some(c), c, 0.0)
             } else {
-                match status {
-                    button::Status::Active if active => Some(skin.ribbon_bg),
-                    button::Status::Hovered if !active => Some(skin.hover),
-                    _ => None,
+                match (active, status) {
+                    (true, _) => (Some(skin.ribbon_bg), frame, 1.0),
+                    (false, button::Status::Hovered) => (None, outline, 1.0),
+                    _ => (None, Color::TRANSPARENT, 0.0),
                 }
-            };
-            let border_color = match accent {
-                Some(a) if active => a,
-                _ => Color::TRANSPARENT,
             };
             button::Style {
                 background: bg.map(Into::into),
                 text_color,
                 border: iced::Border {
-                    color: border_color,
-                    width: if border_color == Color::TRANSPARENT { 0.0 } else { 1.0 },
+                    color: if is_file { Color::TRANSPARENT } else { accent.filter(|_| active && highlight_bar).unwrap_or(border_color) },
+                    width: if is_file { 0.0 } else { border_w },
                     radius: 0.0.into(),
                 },
                 shadow: Default::default(),
@@ -520,28 +568,34 @@ fn cmd_style(
     skin: skin::Skin,
 ) -> impl Fn(&iced::Theme, button::Status) -> button::Style + 'static {
     move |_t, status| {
-        let (bgc, tc) = if !enabled {
-            (None, skin.disabled)
+        let (bgc, border_c, tc) = if !enabled {
+            (None, Color::TRANSPARENT, skin.disabled)
         } else {
             match status {
-                button::Status::Hovered => (Some(skin.hover), skin.text),
-                button::Status::Pressed => (Some(skin.pressed), skin.text),
-                _ => (None, skin.text),
+                button::Status::Hovered => (Some(skin.hover_btn), skin.hover_btn_border, skin.text),
+                button::Status::Pressed => (Some(skin.pressed), skin.hover_btn_border, skin.text),
+                _ => (None, Color::TRANSPARENT, skin.text),
             }
         };
         button::Style {
             background: bgc.map(Into::into),
             text_color: tc,
-            border: Default::default(),
+            border: iced::Border {
+                color: border_c,
+                width: if border_c == Color::TRANSPARENT { 0.0 } else { 1.0 },
+                radius: 0.0.into(),
+            },
             shadow: Default::default(),
             snap: true,
         }
     }
 }
 
-fn big_cmd(
+
+fn big_cmd_w(
     icon_el: Element<'static, Message>,
     label: &str,
+    width: f32,
     enabled: bool,
     msg: Option<Message>,
     skin: skin::Skin,
@@ -552,9 +606,10 @@ fn big_cmd(
     ]
     .spacing(2)
     .align_x(iced::Alignment::Center)
-    .width(Length::Fixed(56.0));
+    .width(Length::Fixed(width));
     let btn = button(content)
-        .height(Length::Fixed(77.0))
+        .width(Length::Fixed(width))
+        .height(Length::Fixed(76.0))
         .style(cmd_style(enabled, skin));
     match (enabled, msg) {
         (true, Some(m)) => btn.on_press(m).into(),
@@ -567,6 +622,7 @@ fn small_cmd_active(
     icon_el: Element<'static, Message>,
     label: &str,
     width: f32,
+    height: f32,
     enabled: bool,
     active: bool,
     msg: Option<Message>,
@@ -580,7 +636,8 @@ fn small_cmd_active(
     .align_y(iced::Alignment::Center);
     let btn = button(content)
         .width(Length::Fixed(width))
-        .height(Length::Fixed(22.0))
+        .height(Length::Fixed(height))
+        .padding([0.0, 4.0])
         .style(move |_t, status| {
             let mut style = cmd_style(enabled, skin)(_t, status);
             if active {
@@ -600,19 +657,23 @@ fn small_cmd_active(
 }
 
 fn group(caption: &str, width: f32, content: Element<'static, Message>, skin: skin::Skin) -> Element<'static, Message> {
-    let sep = container(Space::new().width(Length::Fixed(1.0)).height(Length::Fixed(76.0)))
+    // clone: groups pad 5px, separator line on the RIGHT, caption #494949
+    let strip = container(Space::new().width(Length::Fixed(1.0)).height(Length::Fixed(84.0)))
         .style(bg(skin.sep))
-        .height(Length::Fixed(76.0))
-        .center_y(Length::Fixed(79.0));
+        .height(Length::Fill)
+        .center_y(Length::Fill);
     row![
-        sep,
         column![
-            container(content).width(Length::Fixed(width)).height(Length::Fixed(79.0)).padding([4.0, 3.0]),
+            container(content)
+                .width(Length::Fixed(width))
+                .height(Length::Fixed(78.0))
+                .padding(iced::Padding { top: 2.0, right: 5.0, bottom: 0.0, left: 5.0 }),
             container(text(caption.to_string()).size(11.0).color(skin.subtle))
-                .width(Length::Fixed(width + 4.0))
+                .width(Length::Fixed(width))
                 .height(Length::Fixed(15.0))
-                .center_x(Length::Fixed(width + 4.0)),
+                .center_x(Length::Fixed(width)),
         ],
+        strip,
     ]
     .into()
 }
@@ -634,36 +695,51 @@ fn group_from_config(g: &GroupDef, state: &Explorer, skin: skin::Skin) -> Elemen
     let has_sel = !state.selected.is_empty();
     let has_clip = state.clipboard.is_some();
     let has_items = !state.entries.is_empty();
-    let mut bigs: Vec<Element<Message>> = Vec::new();
-    let mut smalls: Vec<Element<Message>> = Vec::new();
+    let enabled_of = |cmd: &ribbon::CmdRef| {
+        cmd.enabled.unwrap_or(true) && ribbon::command_enabled(&cmd.id, has_sel, has_clip, has_items)
+    };
+    let active_of = |id: &str| match id {
+        "toggle_border" => state.self_border,
+        "toggle_dark" => state.dark,
+        "toggle_hidden" => state.show_hidden,
+        _ => false,
+    };
+
+    let mut content = row![].spacing(2);
     for cmd in &g.commands {
-        let enabled = cmd.enabled.unwrap_or(true)
-            && ribbon::command_enabled(&cmd.id, has_sel, has_clip, has_items);
-        let active = match cmd.id.as_str() {
-            "toggle_border" => state.self_border,
-            "toggle_dark" => state.dark,
-            "toggle_hidden" => state.show_hidden,
-            _ => false,
-        };
-        let icon_el = crate::icon::view(cmd.icon.as_deref().unwrap_or("file"), if cmd.size.as_deref() == Some("big") { 42.0 } else { 16.0 }, &skin);
-        let msg = enabled.then(|| Message::RunCommand(cmd.id.clone()));
-        let el = if cmd.size.as_deref() == Some("big") {
-            big_cmd(icon_el, &cmd.label, enabled, msg, skin)
-        } else {
-            small_cmd_active(icon_el, &cmd.label, 100.0, enabled, active, msg, skin)
-        };
         if cmd.size.as_deref() == Some("big") {
-            bigs.push(el);
-        } else {
-            smalls.push(el);
+            let enabled = enabled_of(cmd);
+            let icon_el = crate::icon::view(cmd.icon.as_deref().unwrap_or("file"), 42.0, &skin);
+            let msg = enabled.then(|| Message::RunCommand(cmd.id.clone()));
+            content = content.push(big_cmd_w(icon_el, &cmd.label, cmd.width.unwrap_or(62.0), enabled, msg, skin));
         }
     }
+
+    let small_cmds: Vec<&ribbon::CmdRef> =
+        g.commands.iter().filter(|c| c.size.as_deref() != Some("big")).collect();
     let columns = g.columns.unwrap_or(1).max(1);
+    let rows = small_cmds.len().div_ceil(columns).max(1);
+    // clone: small rows share the group content height evenly (4 rows fit)
+    let row_h = ((76.0 - (rows.saturating_sub(1) as f32)) / rows as f32).clamp(15.0, 22.0);
+    let smalls: Vec<Element<Message>> = small_cmds
+        .iter()
+        .map(|cmd| {
+            let enabled = enabled_of(cmd);
+            let icon_el = crate::icon::view(cmd.icon.as_deref().unwrap_or("file"), 16.0, &skin);
+            let msg = enabled.then(|| Message::RunCommand(cmd.id.clone()));
+            small_cmd_active(
+                icon_el,
+                &cmd.label,
+                cmd.width.unwrap_or(100.0),
+                row_h,
+                enabled,
+                active_of(&cmd.id),
+                msg,
+                skin,
+            )
+        })
+        .collect();
     let per_col = smalls.len().div_ceil(columns).max(1);
-    let mut content = row![].spacing(2);
-    for b in bigs {
-        content = content.push(b);
-    }
     let mut it = smalls.into_iter();
     for _ in 0..columns {
         let mut col = column![].spacing(1);
@@ -685,13 +761,18 @@ fn nav_circle(icon_name: &'static str, enabled: bool, msg: Message, skin: skin::
         .height(Length::Fixed(28.0))
         .style(move |_t, status| button::Style {
             background: match (enabled, status) {
-                (true, button::Status::Hovered) => Some(skin.hover.into()),
+                (true, button::Status::Hovered) => Some(skin.nav_hover.into()),
                 (true, button::Status::Pressed) => Some(skin.pressed.into()),
                 _ => None,
             },
             text_color: if enabled { skin.accent } else { skin.disabled },
             border: iced::Border {
-                color: if enabled { skin.accent } else { skin.sep },
+                color: match (enabled, status) {
+                    (true, button::Status::Hovered) => skin.nav_hover_border,
+                    (true, button::Status::Pressed) => skin.nav_hover_border,
+                    (true, _) => skin.accent,
+                    _ => skin.sep,
+                },
                 width: 1.0,
                 radius: 14.0.into(),
             },
@@ -772,13 +853,13 @@ fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
             .padding([0.0, 4.0]),
     )
     .width(Length::Fill)
-    .height(Length::Fixed(26.0))
+    .height(Length::Fixed(28.0))
     .style(move |_t: &iced::Theme| container::Style {
         background: Some(skin.window_bg.into()),
         border: iced::Border {
-            color: skin.address_border,
+            color: Color::from_rgb8(0xD9, 0xD9, 0xD9),
             width: 1.0,
-            radius: 3.0.into(),
+            radius: 0.0.into(),
         },
         ..Default::default()
     });
@@ -794,14 +875,14 @@ fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         .align_y(iced::Alignment::Center),
     )
     .width(Length::Fixed(200.0))
-    .height(Length::Fixed(26.0))
+    .height(Length::Fixed(28.0))
     .padding([0.0, 8.0])
     .style(move |_t: &iced::Theme| container::Style {
         background: Some(skin.window_bg.into()),
         border: iced::Border {
-            color: skin.address_border,
+            color: Color::from_rgb8(0xD9, 0xD9, 0xD9),
             width: 1.0,
-            radius: 3.0.into(),
+            radius: 0.0.into(),
         },
         ..Default::default()
     });
@@ -978,7 +1059,7 @@ fn file_view(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         ViewMode::Details => {
             // Virtualized: build only the rows in view (+overscan), with
             // spacers preserving total scroll height (D13).
-            const ROW_H: f32 = 22.0;
+            const ROW_H: f32 = 24.0;
             let total = state.entries.len();
             let view_rows = (state.viewport_h / ROW_H).ceil() as usize + 4;
             let first = ((state.scroll_y / ROW_H).floor() as usize).saturating_sub(2);
@@ -1070,7 +1151,7 @@ fn file_row<'a>(i: usize, e: &Entry, state: &Explorer, skin: skin::Skin) -> Elem
         .width(Length::Fixed(90.0))
         .padding([2.0, 4.0]),
     ]
-    .height(Length::Fixed(22.0))
+    .height(Length::Fixed(24.0))
     .align_y(iced::Alignment::Center);
 
     let styled = container(content)
@@ -1172,10 +1253,10 @@ fn statusbar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         ]
         .spacing(2)
         .align_y(iced::Alignment::Center)
-        .padding([0.0, 8.0]),
+        .padding(iced::Padding { top: 0.0, right: 8.0, bottom: 0.0, left: 15.0 }),
     )
     .width(Length::Fill)
-    .height(Length::Fixed(23.0))
+    .height(Length::Fixed(24.0))
     .style(bg(skin.status_bg))
     .into()
 }

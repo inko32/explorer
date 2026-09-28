@@ -251,7 +251,9 @@ impl Explorer {
                     self.loading = false;
                     match result {
                         Ok(entries) => {
-                            self.entries = entries;
+                            let show_hidden = self.show_hidden;
+                            self.entries =
+                                entries.into_iter().filter(|e| show_hidden || !e.is_hidden).collect();
                             self.selected.clear();
                             self.hovered = None;
                             self.renaming = None;
