@@ -30,6 +30,10 @@ pub fn builtin_svg(name: &str, s: &Skin) -> svg::Handle {
         "chevron_down" => chevron_down(s),
         "undo" => undo(s),
         "redo" => redo(s),
+        "nav_pane" => nav_pane(s),
+        "preview_pane" => preview_pane(s),
+        "details_pane" => details_pane(s),
+        "sort_by" => sort_by(s),
         "chevron_right" => chevron_right(s),
         "help" => help(s),
         "minimize" => minimize(s),
@@ -284,6 +288,43 @@ pub fn search(s: &Skin) -> svg::Handle {
 
 pub fn chevron_down(s: &Skin) -> svg::Handle {
     doc(poly(&[(3.5, 5.5), (12.5, 5.5), (8.0, 11.0)], glyph(s)))
+}
+
+/// Navigation pane: window with a filled left panel.
+pub fn nav_pane(s: &Skin) -> svg::Handle {
+    doc(format!(
+        "{}{}",
+        rect(1.0, 2.0, 14.0, 12.0, Color::TRANSPARENT, Some((glyph(s), 1.2))),
+        rect(2.5, 3.5, 4.0, 9.0, glyph(s), None),
+    ))
+}
+
+/// Preview pane: filled right panel.
+pub fn preview_pane(s: &Skin) -> svg::Handle {
+    doc(format!(
+        "{}{}",
+        rect(1.0, 2.0, 14.0, 12.0, Color::TRANSPARENT, Some((glyph(s), 1.2))),
+        rect(9.5, 3.5, 4.0, 9.0, glyph(s), None),
+    ))
+}
+
+/// Details pane: filled bottom strip.
+pub fn details_pane(s: &Skin) -> svg::Handle {
+    doc(format!(
+        "{}{}",
+        rect(1.0, 2.0, 14.0, 12.0, Color::TRANSPARENT, Some((glyph(s), 1.2))),
+        rect(2.5, 9.5, 11.0, 3.0, glyph(s), None),
+    ))
+}
+
+/// Sort: A over Z with a down arrow.
+pub fn sort_by(s: &Skin) -> svg::Handle {
+    doc(format!(
+        "{}{}{}",
+        path("M2 6 L4.2 1.5 L6.4 6 M2.8 4.6 H5.6", Color::TRANSPARENT, Some((glyph(s), 1.1))),
+        path("M2.5 12 H6 L4.2 15.5", Color::TRANSPARENT, Some((glyph(s), 1.1))),
+        path("M10 1.5 V14 M7.8 11.5 L10 14.2 L12.2 11.5", Color::TRANSPARENT, Some((glyph(s), 1.2))),
+    ))
 }
 
 /// Win8 QAT undo: curved arrow sweeping back to the left.
