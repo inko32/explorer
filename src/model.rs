@@ -157,6 +157,34 @@ pub struct Explorer {
     pending_rename: Option<String>,
 }
 
+/// `~/` expansion for command targets.
+fn shellexpand_home(s: &str) -> String {
+    if let Some(rest) = s.strip_prefix("~/") {
+        if let Some(h) = std::env::var_os("HOME") {
+            return format!("{}/{rest}", h.to_string_lossy());
+        }
+    }
+    s.to_string()
+}
+
+/// Recursive copy (files + dirs); true on success.
+fn copy_rec(src: &Path, dst: &Path) -> bool {
+    if src.is_dir() {
+        if std::fs::create_dir_all(dst).is_err() {
+            return false;
+        }
+        let Ok(rd) = std::fs::read_dir(src) else { return false };
+        for e in rd.flatten() {
+            if !copy_rec(&e.path(), &dst.join(e.file_name())) {
+                return false;
+            }
+        }
+        true
+    } else {
+        std::fs::copy(src, dst).is_ok()
+    }
+}
+
 impl Explorer {
     pub fn new() -> Self {
         let (sched, ev_rx) = fs::spawn();
@@ -503,6 +531,31 @@ impl Explorer {
                 "sort_size" => Some(Message::SetSort(SortBy::Size)),
                 "sort_modified" => Some(Message::SetSort(SortBy::Modified)),
                 "open" => first.map(Message::Open),
+                other if other.starts_with("move_to:") || other.starts_with("copy_to:") => {
+                    let (mv, target) = other.split_at(if other.starts_with("move") { 8 } else { 8 });
+                    let target = shellexpand_home(target.trim());
+                    if fs::archive::resolve(&self.cwd).is_some() {
+                        self.status = "move/copy inside archives is not supported yet".into();
+                    } else {
+                        let dir = PathBuf::from(target);
+                        let mut ok = 0usize;
+                        for p in self.selected_paths() {
+                            let Some(name) = p.file_name() else { continue };
+                            let dst = dir.join(name);
+                            let r = if mv.starts_with("move") {
+                                std::fs::rename(&p, &dst).is_ok()
+                            } else {
+                                copy_rec(&p, &dst)
+                            };
+                            if r {
+                                ok += 1;
+                            }
+                        }
+                        self.status = format!("{ok} item(s) {} {dir:?}", if mv.starts_with("move") { "moved to" } else { "copied to" });
+                        self.request_listing();
+                    }
+                    None
+                }
                 other => {
                     self.status = format!("'{other}' is not implemented");
                     None

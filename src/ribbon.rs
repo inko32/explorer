@@ -52,7 +52,11 @@ pub struct GroupDef {
 
 #[derive(Debug, Deserialize)]
 pub struct CmdRef {
+    /// Empty + `separator: true` renders a vertical separator INSIDE a group.
+    #[serde(default)]
     pub id: String,
+    #[serde(default)]
+    pub separator: Option<bool>,
     pub label: String,
     #[serde(default)]
     pub icon: Option<String>,
