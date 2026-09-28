@@ -1133,6 +1133,20 @@ fn group_from_config(g: &GroupDef, state: &Explorer, skin: skin::Skin, x_base: f
     let mut content = row![].spacing(2);
     let mut bigs_w = 0.0f32;
     for cmd in &g.commands {
+        if cmd.separator == Some(true) {
+            // internal | separator inside the group (inset top+bottom)
+            let strip = container(
+                container(Space::new().width(Length::Fixed(1.0)).height(Length::Fixed(62.0)))
+                    .style(bg(skin.group_sep)),
+            )
+            .width(Length::Fixed(11.0))
+            .height(Length::Fixed(76.0))
+            .center_x(Length::Fixed(11.0))
+            .center_y(Length::Fixed(76.0));
+            content = content.push(strip);
+            bigs_w += 13.0;
+            continue;
+        }
         if cmd.size.as_deref() == Some("big") {
             let enabled = enabled_of(cmd);
             let w = cmd.width.unwrap_or(62.0);
@@ -1364,15 +1378,36 @@ fn big_cmd_split(
         (true, Some(m)) => top.on_press(m).into(),
         _ => top.into(),
     };
-    // label on line 1, the dropdown arrow on the NEXT line
-    let bottom = button(
-        column![
-            text(label.to_string()).size(11.0).color(tc),
+    // one word: `Delete` / `v`; two words: `Navigation` / `Pane v`
+    let words: Vec<&str> = label.split_whitespace().collect();
+    let (line1, line2): (String, Option<String>) = if words.len() > 1 {
+        (
+            words[..words.len() - 1].join(" "),
+            Some(words[words.len() - 1].to_string()),
+        )
+    } else {
+        (label.to_string(), None)
+    };
+    let line2_row: Element<Message> = match line2 {
+        Some(last) => row![
+            text(last).size(11.0).color(tc),
             text("\u{25BC}").size(8.0).color(tc),
         ]
-        .spacing(1)
-        .align_x(iced::Alignment::Center),
-    )
+        .spacing(2)
+        .align_y(iced::Alignment::Center)
+        .into(),
+        None => text("\u{25BC}").size(8.0).color(tc).into(),
+    };
+    let bottom_col = column![
+        container(text(line1).size(11.0).color(tc))
+            .width(Length::Fixed(width))
+            .center_x(Length::Fixed(width)),
+        container(line2_row)
+            .width(Length::Fixed(width))
+            .center_x(Length::Fixed(width)),
+    ]
+    .width(Length::Fixed(width));
+    let bottom = button(bottom_col)
     .width(Length::Fixed(width))
     .height(Length::Fixed(30.0))
     .padding(0)

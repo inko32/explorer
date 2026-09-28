@@ -30,12 +30,12 @@ tabs:
           - { id: paste_shortcut, label: Paste shortcut, icon: paste_shortcut, size: small, enabled: false, width: 116 }
       - label: Organize
         width: 300
-        rows: 3
         commands:
-          - { id: delete, label: Delete, icon: delete, size: big, width: 64, dropdown: [delete_permanently] }
-          - { id: move_to, label: Move to, icon: move_to, size: small, enabled: false, width: 104 }
-          - { id: copy_to, label: Copy to, icon: copy_to, size: small, enabled: false, width: 104 }
-          - { id: rename, label: Rename, icon: rename, size: small, width: 104 }
+          - { id: move_to, label: Move to, icon: move_to, size: big, width: 66, dropdown: [move_to_home, move_to_desktop] }
+          - { id: copy_to, label: Copy to, icon: copy_to, size: big, width: 66, dropdown: [copy_to_home, copy_to_desktop] }
+          - { separator: true }
+          - { id: delete, label: Delete, icon: delete, size: big, width: 66, dropdown: [delete_permanently] }
+          - { id: rename, label: Rename, icon: rename, size: big, width: 66 }
       - label: New
         width: 166
         commands:
@@ -90,12 +90,12 @@ tabs:
           - { id: view_tiles, label: Tiles, icon: view_large, size: small, enabled: false, width: 96 }
           - { id: view_content, label: Content, icon: view_details, size: small, enabled: false, width: 96 }
       - label: Current view
-        width: 152
+        width: 230
         rows: 3
         commands:
-          - { id: sort_by, label: Sort by, icon: sort_by, size: small, width: 122, dropdown: [sort_name, sort_size, sort_modified] }
-          - { id: group_by, label: Group by, icon: sort_by, size: small, enabled: false, width: 122 }
-          - { id: size_columns, label: Size columns to fit, icon: view_details, size: small, enabled: false, width: 140 }
+          - { id: sort_by, label: Sort by, icon: sort_by, size: big, width: 60, dropdown: [sort_name, sort_size, sort_modified] }
+          - { id: group_by, label: Group by, icon: sort_by, size: small, enabled: false, width: 130 }
+          - { id: size_columns, label: Size columns to fit, icon: view_details, size: small, enabled: false, width: 150 }
       - label: Show/hide
         width: 176
         rows: 3
@@ -151,6 +151,10 @@ commands:
   copy: { internal: copy }
   delete: { internal: delete }
   delete_permanently: { label: Delete permanently, internal: delete_permanent }
+  move_to_home: { label: Home, internal: "move_to:~/" }
+  move_to_desktop: { label: Desktop, internal: "move_to:~/Desktop" }
+  copy_to_home: { label: Home, internal: "copy_to:~/" }
+  copy_to_desktop: { label: Desktop, internal: "copy_to:~/Desktop" }
   sort_name: { label: Name, internal: sort_name }
   sort_size: { label: Size, internal: sort_size }
   sort_modified: { label: Date modified, internal: sort_modified }
