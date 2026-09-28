@@ -130,20 +130,6 @@ fn icon(handle: svg::Handle, size: f32) -> Element<'static, Message> {
 // ---------------- title bar ----------------
 
 fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
-    let title_text = text(state.title())
-        .size(12.0)
-        .color(Color::WHITE)
-        .width(Length::Shrink);
-    let drag_zone = mouse_area(
-        container(title_text)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .center_x(Length::Fill)
-            .center_y(Length::Fill),
-    )
-    .on_press(Message::TitlebarPress)
-    .on_double_click(Message::TitlebarDoubleClick);
-
     let caption = |handle: svg::Handle, msg: Message, hover_bg: Color| {
         button(svg(handle).width(Length::Fixed(15.0)).height(Length::Fixed(15.0)))
             .width(Length::Fixed(46.0))
@@ -175,7 +161,7 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     for tab in visible_tabs(state) {
         let Some(accent) = tab.color.as_deref().and_then(ribbon::color_by_name) else { continue };
         let active = state.active_tab == tab.id;
-        let width = 28.0 + tab.label.chars().count() as f32 * 7.5;
+        let width = tab_width(&tab.label);
         let block = container(
             text(tab.label.clone())
                 .size(12.0)
@@ -200,6 +186,24 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         );
     }
 
+    // Win8: the contextual blocks sit exactly above their tab-row stubs
+    // (which start right after the main tabs); the title centers between
+    // the icon and the blocks.
+    let title_zone = (main_tabs_width(state) - 28.0).max(60.0);
+    let title = container(
+        text(state.title())
+            .size(12.0)
+            .color(Color::WHITE)
+            .width(Length::Shrink),
+    )
+    .width(Length::Fixed(title_zone))
+    .height(Length::Fill)
+    .center_x(Length::Fixed(title_zone))
+    .center_y(Length::Fill);
+    let drag_title = mouse_area(title)
+        .on_press(Message::TitlebarPress)
+        .on_double_click(Message::TitlebarDoubleClick);
+
     container(
         row![
             container(icon(icons::folder(&skin), 16.0))
@@ -207,8 +211,11 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
                 .height(Length::Fill)
                 .center_x(Length::Fixed(28.0))
                 .center_y(Length::Fill),
-            drag_zone,
+            drag_title,
             ctx_blocks,
+            mouse_area(Space::new().width(Length::Fill))
+                .on_press(Message::TitlebarPress)
+                .on_double_click(Message::TitlebarDoubleClick),
             caption(icons::minimize(&skin), Message::Minimize, Color::from_rgba(1.0, 1.0, 1.0, 0.18)),
             caption(max_icon, Message::Maximize, Color::from_rgba(1.0, 1.0, 1.0, 0.18)),
             caption(icons::close(&skin), Message::Close, skin.close_hover),
@@ -309,6 +316,16 @@ fn tab_button(
 
 /// Tabs visible right now: main tabs + contextual tabs whose `when` matches.
 
+fn tab_width(label: &str) -> f32 {
+    20.0 + label.chars().count() as f32 * 7.5
+}
+
+/// Width of the main tabs region in the tab row — contextual title-bar
+/// blocks align directly above their stubs.
+fn main_tabs_width(state: &Explorer) -> f32 {
+    state.ribbon.tabs.iter().map(|t| tab_width(&t.label)).sum()
+}
+
 fn visible_tabs(state: &Explorer) -> Vec<&TabDef> {
     let ctx = state.context();
     state
@@ -338,7 +355,7 @@ fn tab_row(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         });
     let mut tabs_row = row![].height(Length::Fixed(28.0));
     for tab in visible_tabs(state) {
-        let width = 20.0 + tab.label.chars().count() as f32 * 7.5;
+        let width = tab_width(&tab.label);
         let accent = tab.color.as_deref().and_then(ribbon::color_by_name);
         if let Some(accent) = accent.filter(|_| state.self_border) {
             // Win8: connecting stub under the title-bar block, labeled with
