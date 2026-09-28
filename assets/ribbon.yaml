@@ -21,7 +21,7 @@ tabs:
     groups:
       - label: Clipboard
         width: 296
-        columns: 2
+        rows: 3
         commands:
           - { id: paste, label: Paste, icon: paste, size: big, width: 62 }
           - { id: cut, label: Cut, icon: cut, size: small, width: 108 }
@@ -30,7 +30,7 @@ tabs:
           - { id: paste_shortcut, label: Paste shortcut, icon: paste_shortcut, size: small, enabled: false, width: 116 }
       - label: Organize
         width: 216
-        columns: 2
+        rows: 2
         commands:
           - { id: move_to, label: Move to, icon: move_to, size: small, enabled: false, width: 104 }
           - { id: copy_to, label: Copy to, icon: copy_to, size: small, enabled: false, width: 104 }
@@ -81,7 +81,7 @@ tabs:
           - { id: toggle_hidden, label: Hidden items, icon: file, size: small, width: 108 }
       - label: Options
         width: 250
-        columns: 2
+        rows: 2
         commands:
           - { id: toggle_dark, label: Dark mode, icon: gear, size: small, width: 108 }
           - { id: toggle_border, label: Custom border, icon: gear, size: small, width: 118 }

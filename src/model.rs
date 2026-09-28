@@ -43,8 +43,8 @@ pub enum Message {
     RunCommand(String),
     /// Scroll offset + viewport height from the file list scrollable.
     Scrolled { y: f32, height: f32 },
-    /// Window resized (for list virtualization viewport).
-    WindowResized(f32),
+    /// Window resized (for list virtualization viewport + title-bar layout).
+    WindowResized(f32, f32),
     /// Switch between the self-rendered border and native decorations.
     ToggleSelfBorder,
     /// Minimize the ribbon to its tab row (Win8 collapse chevron).
@@ -113,6 +113,8 @@ pub struct Explorer {
     pub ribbon: crate::ribbon::RibbonConfig,
     pub scroll_y: f32,
     pub viewport_h: f32,
+    /// Measured window width (resize events) for title-bar layout.
+    pub win_w: f32,
     /// Inline rename: (row index, text buffer).
     pub renaming: Option<(usize, String)>,
     pub status: String,
@@ -156,6 +158,7 @@ impl Explorer {
             ribbon: crate::ribbon::load(),
             scroll_y: 0.0,
             viewport_h: 600.0,
+            win_w: 1152.0,
             renaming: None,
             status: String::new(),
             last_click: None,
@@ -286,6 +289,14 @@ impl Explorer {
                             self.selected.clear();
                             self.hovered = None;
                             self.renaming = None;
+                            if let Ok(pat) = std::env::var("EXPLORER_DEBUG_SELECT") {
+                                for (i, e) in self.entries.iter().enumerate() {
+                                    if e.name.contains(&pat) {
+                                        self.selected.insert(i);
+                                    }
+                                }
+                                self.sync_active_tab();
+                            }
                             if let Some(name) = self.pending_rename.take() {
                                 if let Some(i) = self.entries.iter().position(|e| e.name == name) {
                                     self.selected.insert(i);
@@ -677,8 +688,9 @@ impl Explorer {
                 self.viewport_h = height;
                 iced::Task::none()
             }
-            Message::WindowResized(h) => {
+            Message::WindowResized(w, h) => {
                 self.viewport_h = h;
+                self.win_w = w;
                 iced::Task::none()
             }
             Message::ToggleSelfBorder => {
