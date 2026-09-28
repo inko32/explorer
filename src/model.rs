@@ -378,6 +378,9 @@ impl Explorer {
                 let w = t.activate_when.as_deref().or(t.when.as_deref());
                 w.map(|w| crate::ribbon::eval_when(w, ctx)).unwrap_or(true)
             });
+        if std::env::var("EXPLORER_DEBUG").is_ok() {
+            eprintln!("sync_active_tab: inside_archive={} matching={:?}", ctx.inside_archive, matching.map(|t| t.id.clone()));
+        }
         match matching {
             Some(t) => self.active_tab = t.id.clone(),
             None => {
