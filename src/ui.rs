@@ -358,18 +358,9 @@ fn menu_overlay(state: &Explorer, m: &crate::model::OpenMenu, skin: skin::Skin) 
             },
             ..Default::default()
         });
-    // menu hangs below the ribbon body (titlebar 30 + tabs 28 + line 1 + 94)
-    let inset = if state.self_border {
-        match state.frame_style {
-            crate::model::FrameStyle::Win8 => 3.0,
-            crate::model::FrameStyle::Win10 => 1.0,
-        }
-    } else {
-        0.0
-    };
-    // hugs the button: just below the command area (Win8 menus overlap the
-    // ribbon's bottom edge), not way down at the window chrome
-    let menu_y = inset + 30.0 + 28.0 + 1.0 + 82.0;
+    // overlay stack == content coordinate space (the border draws over the
+    // content, it does not offset coordinates): use the sender's y as-is
+    let menu_y = m.y;
     let backdrop = mouse_area(
         container(Space::new().width(Length::Fill).height(Length::Fill)),
     )
@@ -1154,7 +1145,8 @@ fn group_from_config(g: &GroupDef, state: &Explorer, skin: skin::Skin, x_base: f
                     enabled,
                     if has_action { msg } else { None },
                     enabled.then(|| Message::OpenMenu {
-                        x: menu_anchor(state, x_base + 5.0 + bigs_w + w * 0.5),
+                        x: menu_anchor(state, x_base + 5.0 + bigs_w),
+                        y: 30.0 + 28.0 + 1.0 + 6.0 + 76.0,
                         items: items.clone(),
                     }),
                     skin,
@@ -1187,7 +1179,7 @@ fn group_from_config(g: &GroupDef, state: &Explorer, skin: skin::Skin, x_base: f
         .map(|c| c.width.unwrap_or(100.0))
         .fold(0.0f32, f32::max);
     let mut smalls: Vec<Element<Message>> = Vec::new();
-    for cmd in &small_cmds {
+    for (j, cmd) in small_cmds.iter().enumerate() {
         let enabled = enabled_of(cmd);
         let active = active_of(&cmd.id);
         let w = cmd.width.unwrap_or(100.0);
@@ -1199,8 +1191,16 @@ fn group_from_config(g: &GroupDef, state: &Explorer, skin: skin::Skin, x_base: f
             // split small: label runs the command (or opens the menu when it
             // has no action); the arrow always opens the menu
             let label_msg = if has_action { msg.clone() } else { None };
+            // menu directly under this button: left edge of its column,
+            // y = the button's bottom (titlebar 30 + tabs 28 + line 1 +
+            // group pad 6 + row*(23+1) + 23)
+            let col = (j / rows) as f32;
+            let row_i = (j % rows) as f32;
+            let ax = x_base + 5.0 + bigs_w + col * (col_w + 2.0);
+            let ay = 30.0 + 28.0 + 1.0 + 6.0 + row_i * 24.0 + 23.0;
             let menu_msg = enabled.then(|| Message::OpenMenu {
-                x: menu_anchor(state, x_base + 5.0 + bigs_w + col_w * 0.5),
+                x: menu_anchor(state, ax),
+                y: ay,
                 items: items.clone(),
             });
             let arrow: Element<Message> = small_cmd_active(
@@ -1259,6 +1259,7 @@ fn group_from_config(g: &GroupDef, state: &Explorer, skin: skin::Skin, x_base: f
             .style(cmd_style(true, skin))
             .on_press(Message::OpenMenu {
                 x: menu_anchor(state, x_base + gw - 60.0),
+                y: 30.0 + 28.0 + 1.0 + 6.0 + 76.0,
                 items,
             });
         let grid = container(content)

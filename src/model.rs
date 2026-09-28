@@ -34,8 +34,8 @@ pub enum Message {
     InvertSelection,
     SetView(ViewMode),
     SetSort(SortBy),
-    /// Open a ribbon dropdown menu at x (items = command ids).
-    OpenMenu { x: f32, items: Vec<String> },
+    /// Open a ribbon dropdown menu at (x, y content-relative).
+    OpenMenu { x: f32, y: f32, items: Vec<String> },
     CloseMenu,
     /// A dropdown menu item was picked.
     MenuPick(String),
@@ -88,6 +88,8 @@ pub enum SortBy {
 #[derive(Clone, Debug)]
 pub struct OpenMenu {
     pub x: f32,
+    /// Content-relative y (border inset is added at render time).
+    pub y: f32,
     pub items: Vec<String>,
 }
 
@@ -205,6 +207,7 @@ impl Explorer {
             let x: f32 = x.parse().unwrap_or(400.0);
             s.open_menu = Some(crate::model::OpenMenu {
                 x,
+                y: 59.0 + 6.0 + 23.0,
                 items: ["sort_name", "sort_size", "sort_modified"]
                     .iter()
                     .map(|s| s.to_string())
@@ -740,8 +743,8 @@ impl Explorer {
                 self.blocks_w = blocks;
                 iced::Task::none()
             }
-            Message::OpenMenu { x, items } => {
-                self.open_menu = Some(OpenMenu { x, items });
+            Message::OpenMenu { x, y, items } => {
+                self.open_menu = Some(OpenMenu { x, y, items });
                 iced::Task::none()
             }
             Message::CloseMenu | Message::CancelMenu => {
