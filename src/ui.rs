@@ -358,8 +358,20 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         );
     }
 
-    // Quick-access buttons (Undo / Redo) + dropdown, then a thin separator
+    // Quick-access buttons (Undo / Redo) framed by thin separators
+    let vline = || {
+        container(
+            container(Space::new().width(Length::Fixed(1.0)).height(Length::Fixed(15.0)))
+                .style(|_| container::Style {
+                    background: Some(Color::from_rgba(1.0, 1.0, 1.0, 0.35).into()),
+                    ..Default::default()
+                }),
+        )
+        .width(Length::Fixed(6.0))
+        .center_x(Length::Fixed(6.0))
+    };
     let mut qat = row![].spacing(2).align_y(iced::Alignment::Center);
+    qat = qat.push(vline());
     for q in &state.quick_access {
         let id = q.clone();
         qat = qat.push(
@@ -383,18 +395,8 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         )
         .on_press(Message::ToggleRibbonCollapse),
     );
-    qat = qat.push(
-        container(
-            container(Space::new().width(Length::Fixed(1.0)).height(Length::Fixed(15.0)))
-                .style(|_| container::Style {
-                    background: Some(Color::from_rgba(1.0, 1.0, 1.0, 0.35).into()),
-                    ..Default::default()
-                }),
-        )
-        .width(Length::Fixed(6.0))
-        .center_x(Length::Fixed(6.0)),
-    );
-    let qat_w: f32 = state.quick_access.len() as f32 * 24.0 + 22.0;
+    qat = qat.push(vline());
+    let qat_w: f32 = state.quick_access.len() as f32 * 24.0 + 28.0;
 
     // Win8: the contextual blocks sit exactly above their tab-row stubs
     // (which start right after the main tabs); the title centers between
