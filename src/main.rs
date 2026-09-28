@@ -1,6 +1,7 @@
 //! Explorer — iced. Windows 8 style file explorer for POSIX (Wayland first).
 
 mod fs;
+mod icon;
 mod icons;
 mod model;
 mod ribbon;

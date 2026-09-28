@@ -262,36 +262,3 @@ pub fn command_enabled(id: &str, has_selection: bool, has_clipboard: bool, has_i
     }
 }
 
-// ---------------- icon mapping ----------------
-
-pub fn icon_by_name(name: &str, skin: &crate::ui::skin::Skin) -> iced::widget::svg::Handle {
-    use crate::icons;
-    match name {
-        "paste" => icons::paste(skin),
-        "cut" => icons::cut(skin),
-        "copy" => icons::copy(skin),
-        "copy_path" => icons::copy_path(skin),
-        "paste_shortcut" => icons::paste_shortcut(skin),
-        "move_to" => icons::move_to(skin),
-        "copy_to" => icons::copy_to(skin),
-        "delete" => icons::delete(skin),
-        "rename" => icons::rename(skin),
-        "new_folder" => icons::new_folder(skin),
-        "new_item" => icons::new_item(skin),
-        "easy_access" => icons::easy_access(skin),
-        "properties" => icons::properties(skin),
-        "open" => icons::open(skin),
-        "edit" => icons::edit(skin),
-        "history" => icons::history(skin),
-        "select_all" => icons::select_all(skin),
-        "select_none" => icons::select_none(skin),
-        "invert_sel" => icons::invert_sel(skin),
-        "view_large" => icons::view_large(skin),
-        "view_details" => icons::view_details(skin),
-        "computer" => icons::computer(skin),
-        "file" => icons::file(skin),
-        "gear" => icons::gear(skin),
-        "pictures" => icons::pictures(skin),
-        _ => icons::file(skin),
-    }
-}
