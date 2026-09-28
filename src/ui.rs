@@ -192,6 +192,46 @@ fn resize_zone(
     c.into()
 }
 
+/// Window frame: Win8 = 3px accent outer border (the exposed title-bar
+/// border) + 1px darker inner border at 3px inset (the layout edge);
+/// Win10 = single 1px border.
+fn window_frame(style: crate::model::FrameStyle, skin: skin::Skin) -> Element<'static, Message> {
+    let inner: Element<Message> = container(
+        container(Space::new().width(Length::Fill).height(Length::Fill))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(3.0)
+            .style(move |_t: &iced::Theme| container::Style {
+                border: iced::Border {
+                    color: skin.accent_dark,
+                    width: 1.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            }),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .style(|_t: &iced::Theme| container::Style::default())
+    .into();
+    match style {
+        crate::model::FrameStyle::Win8 => {
+            let outer: Element<Message> = container(Space::new().width(Length::Fill).height(Length::Fill))
+                .style(move |_t: &iced::Theme| container::Style {
+                    border: iced::Border {
+                        color: skin.accent,
+                        width: 3.0,
+                        radius: 0.0.into(),
+                    },
+                    ..Default::default()
+                })
+                .into();
+            stack![outer, inner].into()
+        }
+        crate::model::FrameStyle::Win10 => inner,
+    }
+}
+
 /// Invisible resize ring around the window edges (custom border mode).
 fn resize_frame() -> Element<'static, Message> {
     use iced::Alignment;
@@ -223,7 +263,7 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
     root = root.push(row![nav_pane(state, skin), file_view(state, skin)].height(Length::Fill));
     root = root.push(statusbar(state, skin));
     if state.self_border {
-        stack![root, resize_frame()].into()
+        stack![root, window_frame(state.frame_style, skin), resize_frame()].into()
     } else {
         root.into()
     }
@@ -278,15 +318,21 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
             )
         }
         let block = container(
-            text(tab.label.clone())
-                .size(12.0)
-                .color(Color::from_rgb(accent.r * 0.75, accent.g * 0.75, accent.b * 0.75))
-                .width(Length::Shrink),
+            container(
+                text(tab.label.clone())
+                    .size(12.0)
+                    .color(Color::from_rgb(accent.r * 0.75, accent.g * 0.75, accent.b * 0.75))
+                    .width(Length::Shrink),
+            )
+            .width(Length::Fixed(width))
+            .height(Length::Fixed(30.0))
+            .center_x(Length::Fixed(width))
+            .align_y(iced::Alignment::End),
         )
         .width(Length::Fixed(width))
-        .height(Length::Fixed(27.0))
+        .height(Length::Fixed(24.0))
         .center_x(Length::Fixed(width))
-        .center_y(Length::Fixed(27.0))
+        .center_y(Length::Fixed(24.0))
         .style(move |_| container::Style {
             background: Some(tint(accent, if active { 0.45 } else { 0.62 }).into()),
             ..Default::default()
@@ -417,9 +463,15 @@ fn tab_button(
         skin.subtle
     };
     let text_color = accent.map(|a| if active { a } else { a.scale_alpha(0.75) }).unwrap_or(text_color);
-    let btn = button(text(label.to_string()).size(12.0).color(text_color))
-        .width(Length::Fixed(width))
-        .height(Length::Fixed(28.0))
+    let btn = button(
+        container(text(label.to_string()).size(12.0).color(text_color))
+            .width(Length::Fill)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill),
+    )
+    .width(Length::Fixed(width))
+    .height(Length::Fixed(28.0))
+    .padding(0)
         .style(move |_t, status| {
             // clone: File tab solid brand color; main tabs transparent with a
             // 1px #EBECEC outline on hover; active tab fills the body color
@@ -475,21 +527,26 @@ fn tab_width(label: &str) -> f32 {
     20.0 + label.chars().count() as f32 * 7.5
 }
 
+/// Exact rendered width of a tab (File gets the wide Win8 block).
+fn tab_row_w(tab: &ribbon::TabDef) -> f32 {
+    if tab.kind.as_deref() == Some("file") {
+        62.0
+    } else {
+        tab_width(&tab.label)
+    }
+}
+
 /// Width of the main tabs region in the tab row — contextual title-bar
 /// blocks align directly above their stubs.
 fn main_tabs_width(state: &Explorer) -> f32 {
-    state.ribbon.tabs.iter().map(|t| tab_width(&t.label)).sum()
+    state.ribbon.tabs.iter().map(tab_row_w).sum()
 }
 
 /// x offset + width of the currently active tab within the tab row.
 fn active_tab_geometry(state: &Explorer) -> Option<(f32, f32)> {
     let mut x = 0.0f32;
     for tab in visible_tabs(state) {
-        let w = if tab.kind.as_deref() == Some("file") {
-            62.0
-        } else {
-            tab_width(&tab.label)
-        };
+        let w = tab_row_w(tab);
         if tab.id == state.active_tab {
             return Some((x, w));
         }
@@ -542,11 +599,7 @@ fn tab_row(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         });
     let mut tabs_row = row![].height(Length::Fixed(28.0));
     for tab in visible_tabs(state) {
-        let width = if tab.kind.as_deref() == Some("file") {
-            62.0 // Win8 File block is wider
-        } else {
-            tab_width(&tab.label)
-        };
+        let width = tab_row_w(tab);
         let accent = tab.color.as_deref().and_then(ribbon::color_by_name);
         if let Some(accent) = accent.filter(|_| state.self_border) {
             // Win8: connecting stub under the title-bar block, labeled with
@@ -741,6 +794,7 @@ fn group_from_config(g: &GroupDef, state: &Explorer, skin: skin::Skin) -> Elemen
         "toggle_border" => state.self_border,
         "toggle_dark" => state.dark,
         "toggle_hidden" => state.show_hidden,
+        "toggle_frame" => state.frame_style == crate::model::FrameStyle::Win8,
         _ => false,
     };
 
