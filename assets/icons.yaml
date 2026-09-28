@@ -31,7 +31,9 @@ icons:
   move_to:      { file: move_to }
   copy_to:      { file: copy_to }
   delete:       { file: delete }
-  rename:       { file: rename }
+  rename:       { svg: builtin }
+  undo:         { svg: builtin }
+  redo:         { svg: builtin }
   new_folder:   { file: folder_new }
   new_item:     { file: new_item }
   easy_access:  { file: easy_access }

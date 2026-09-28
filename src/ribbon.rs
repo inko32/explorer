@@ -24,6 +24,11 @@ pub struct TabDef {
     pub color: Option<String>,
     #[serde(default)]
     pub when: Option<String>,
+    /// When to AUTO-activate the tab (defaults to `when`). Use a stricter
+    /// expression to show the tab idle on weaker contexts: e.g. the Archive
+    /// tab shows when an archive is selected but only activates inside one.
+    #[serde(default)]
+    pub activate_when: Option<String>,
     #[serde(default)]
     pub groups: Vec<GroupDef>,
 }
@@ -33,9 +38,10 @@ pub struct GroupDef {
     pub label: String,
     #[serde(default)]
     pub width: Option<f32>,
-    /// How many columns small commands stack into (default 1).
+    /// Vertical slots per small-command column (default 3, max 3 -
+    /// four buttons in one column are not allowed).
     #[serde(default)]
-    pub columns: Option<usize>,
+    pub rows: Option<usize>,
     #[serde(default)]
     pub commands: Vec<CmdRef>,
 }
@@ -50,6 +56,9 @@ pub struct CmdRef {
     pub size: Option<String>,
     #[serde(default)]
     pub enabled: Option<bool>,
+    /// Button width in px (default 100) — sized to the label.
+    #[serde(default)]
+    pub width: Option<f32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -262,3 +271,15 @@ pub fn command_enabled(id: &str, has_selection: bool, has_clipboard: bool, has_i
     }
 }
 
+
+/// True when the single selection is an archive file (by extension the 7z
+/// CLI backend can list).
+pub fn archive_path_selected(names: &[&str]) -> bool {
+    if names.len() != 1 {
+        return false;
+    }
+    let n = names[0].to_ascii_lowercase();
+    ["7z", "zip", "rar", "tar", "gz", "bz2", "xz", "zst", "iso", "cab", "wim"]
+        .iter()
+        .any(|e| n.ends_with(&format!(".{e}")))
+}

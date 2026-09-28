@@ -43,8 +43,8 @@ pub enum Message {
     RunCommand(String),
     /// Scroll offset + viewport height from the file list scrollable.
     Scrolled { y: f32, height: f32 },
-    /// Window resized (for list virtualization viewport).
-    WindowResized(f32),
+    /// Window resized (for list virtualization viewport + title-bar layout).
+    WindowResized(f32, f32),
     /// Switch between the self-rendered border and native decorations.
     ToggleSelfBorder,
     /// Minimize the ribbon to its tab row (Win8 collapse chevron).
@@ -54,12 +54,26 @@ pub enum Message {
     /// Pressed a contextual title-bar block: activate the tab AND let the
     /// band drag the window (a plain click without movement still switches).
     BlockPress(String),
+    /// Switch between the Win8 (double) and Win10 (1px) window borders.
+    ToggleFrameStyle,
+    /// Quick-access command invoked.
+    QuickAccess(String),
+    /// Title-bar layout measurement update.
+    TitleBarMetrics { tabs: f32, blocks_start: f32, blocks: f32 },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ViewMode {
     Details,
     Large,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FrameStyle {
+    /// Win8: 3px accent outer border + 1px darker inner border
+    Win8,
+    /// Win10: single 1px border
+    Win10,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -80,6 +94,16 @@ pub struct Explorer {
     pub maximized: bool,
     /// Self-rendered window border/title bar (off = native decorations).
     pub self_border: bool,
+    /// Win8 double border vs Win10 1px border.
+    pub frame_style: FrameStyle,
+    /// Quick-access commands (icon ids) shown right of the title-bar icon.
+    pub quick_access: Vec<String>,
+    /// Measured width of the tab row (for title-bar layout).
+    pub tabs_w: f32,
+    /// Start-x of the first contextual title-bar block.
+    pub blocks_start: f32,
+    /// Total width of the contextual blocks.
+    pub blocks_w: f32,
     /// Ribbon minimized to the tab row.
     pub ribbon_collapsed: bool,
     pub clipboard: Option<(ClipMode, Vec<PathBuf>)>,
@@ -89,6 +113,8 @@ pub struct Explorer {
     pub ribbon: crate::ribbon::RibbonConfig,
     pub scroll_y: f32,
     pub viewport_h: f32,
+    /// Measured window width (resize events) for title-bar layout.
+    pub win_w: f32,
     /// Inline rename: (row index, text buffer).
     pub renaming: Option<(usize, String)>,
     pub status: String,
@@ -119,6 +145,11 @@ impl Explorer {
             dark: false,
             maximized: false,
             self_border: true,
+            frame_style: FrameStyle::Win8,
+            quick_access: vec!["undo".into(), "redo".into()],
+            tabs_w: 0.0,
+            blocks_start: 0.0,
+            blocks_w: 0.0,
             ribbon_collapsed: false,
             clipboard: None,
             view: ViewMode::Details,
@@ -127,6 +158,7 @@ impl Explorer {
             ribbon: crate::ribbon::load(),
             scroll_y: 0.0,
             viewport_h: 600.0,
+            win_w: 1152.0,
             renaming: None,
             status: String::new(),
             last_click: None,
@@ -251,10 +283,20 @@ impl Explorer {
                     self.loading = false;
                     match result {
                         Ok(entries) => {
-                            self.entries = entries;
+                            let show_hidden = self.show_hidden;
+                            self.entries =
+                                entries.into_iter().filter(|e| show_hidden || !e.is_hidden).collect();
                             self.selected.clear();
                             self.hovered = None;
                             self.renaming = None;
+                            if let Ok(pat) = std::env::var("EXPLORER_DEBUG_SELECT") {
+                                for (i, e) in self.entries.iter().enumerate() {
+                                    if e.name.contains(&pat) {
+                                        self.selected.insert(i);
+                                    }
+                                }
+                                self.sync_active_tab();
+                            }
                             if let Some(name) = self.pending_rename.take() {
                                 if let Some(i) = self.entries.iter().position(|e| e.name == name) {
                                     self.selected.insert(i);
@@ -343,7 +385,13 @@ impl Explorer {
             .ribbon
             .contextual_tabs
             .iter()
-            .find(|t| t.when.as_deref().map(|w| crate::ribbon::eval_when(w, ctx)).unwrap_or(true));
+            .find(|t| {
+                let w = t.activate_when.as_deref().or(t.when.as_deref());
+                w.map(|w| crate::ribbon::eval_when(w, ctx)).unwrap_or(true)
+            });
+        if std::env::var("EXPLORER_DEBUG").is_ok() {
+            eprintln!("sync_active_tab: inside_archive={} matching={:?}", ctx.inside_archive, matching.map(|t| t.id.clone()));
+        }
         match matching {
             Some(t) => self.active_tab = t.id.clone(),
             None => {
@@ -381,6 +429,7 @@ impl Explorer {
                 "toggle_hidden" => Some(Message::ToggleHidden),
                 "toggle_dark" => Some(Message::ToggleDark),
                 "toggle_border" => Some(Message::ToggleSelfBorder),
+                "toggle_frame" => Some(Message::ToggleFrameStyle),
                 "open" => first.map(Message::Open),
                 other => {
                     self.status = format!("'{other}' is not implemented");
@@ -611,6 +660,26 @@ impl Explorer {
                 }
                 iced::Task::none()
             }
+            Message::QuickAccess(id) => {
+                match id.as_str() {
+                    "undo" | "redo" => {} // TODO: operation history
+                    _ => {}
+                }
+                iced::Task::none()
+            }
+            Message::TitleBarMetrics { tabs, blocks_start, blocks } => {
+                self.tabs_w = tabs;
+                self.blocks_start = blocks_start;
+                self.blocks_w = blocks;
+                iced::Task::none()
+            }
+            Message::ToggleFrameStyle => {
+                self.frame_style = match self.frame_style {
+                    FrameStyle::Win8 => FrameStyle::Win10,
+                    FrameStyle::Win10 => FrameStyle::Win8,
+                };
+                iced::Task::none()
+            }
             Message::RunCommand(id) => {
                 return self.run_command(&id);
             }
@@ -619,8 +688,9 @@ impl Explorer {
                 self.viewport_h = height;
                 iced::Task::none()
             }
-            Message::WindowResized(h) => {
+            Message::WindowResized(w, h) => {
                 self.viewport_h = h;
+                self.win_w = w;
                 iced::Task::none()
             }
             Message::ToggleSelfBorder => {
