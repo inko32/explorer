@@ -221,6 +221,72 @@ fn frame_color(state: &Explorer, skin: skin::Skin) -> Color {
     }
 }
 
+/// Caption buttons (_ [] X) as an overlay at the window's top-right corner:
+/// they contact the top edge (Win8: over the frame) and the right edge.
+/// Win8: min/max width = 60% of close width, short (20px), thin glyphs.
+/// Win10: uniform 46px, nearly full title-bar height.
+fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'static, Message> {
+    let (mw, cw, h, glyph, y) = match state.frame_style {
+        crate::model::FrameStyle::Win8 => (27.0, 45.0, 20.0, 12.0, 0.0),
+        crate::model::FrameStyle::Win10 => (46.0, 46.0, 29.0, 15.0, 1.0),
+    };
+    let one = move |icon_name: &'static str,
+                    w: f32,
+                    msg: Message,
+                    hover_bg: Color,
+                    solid: bool|
+          -> Element<'static, Message> {
+        button(
+            container(crate::icon::view(icon_name, glyph, &skin))
+                .width(Length::Fixed(w))
+                .height(Length::Fixed(h))
+                .center_x(Length::Fixed(w))
+                .center_y(Length::Fixed(h)),
+        )
+        .width(Length::Fixed(w))
+        .height(Length::Fixed(h))
+        .padding(0)
+        .style(move |_t, status| button::Style {
+            background: match (solid, status) {
+                (true, button::Status::Hovered) => {
+                    Some(Color::from_rgb8(0xF1, 0x70, 0x7A).into())
+                }
+                (true, button::Status::Pressed) => {
+                    Some(Color::from_rgb8(0xC5, 0x0E, 0x1F).into())
+                }
+                (true, _) => Some(hover_bg.into()),
+                (false, button::Status::Hovered) => Some(hover_bg.into()),
+                (false, button::Status::Pressed) => Some(hover_bg.scale_alpha(0.7).into()),
+                _ => None,
+            },
+            text_color: Color::WHITE,
+            border: Default::default(),
+            shadow: Default::default(),
+            snap: true,
+        })
+        .on_press(msg)
+        .into()
+    };
+    let ghost = Color::from_rgba(1.0, 1.0, 1.0, 0.18);
+    container(
+        row![
+            one("minimize", mw, Message::Minimize, ghost, false),
+            one("maximize", mw, Message::Maximize, ghost, false),
+            one("close", cw, Message::Close, skin.close_hover, true),
+        ]
+        .height(Length::Fixed(h)),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .padding(iced::Padding {
+        top: y,
+        ..Default::default()
+    })
+    .align_x(iced::Alignment::End)
+    .align_y(iced::Alignment::Start)
+    .into()
+}
+
 /// Invisible resize ring around the window edges (custom border mode).
 fn resize_frame(margin: f32) -> Element<'static, Message> {
     use iced::Alignment;
@@ -290,7 +356,7 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
     };
     if state.self_border {
         let grab = if state.frame_style == crate::model::FrameStyle::Win8 { 8.0 } else { 5.0 };
-        let mut s = stack![framed, resize_frame(grab)];
+        let mut s = stack![framed, resize_frame(grab), caption_overlay(state, skin)];
         if let Some(l) = menu_layer {
             s = s.push(l);
         }
@@ -436,46 +502,6 @@ fn elide(s: &str, max_w: f32) -> String {
 }
 
 fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
-    // caption glyphs per frame scheme: Win10 = 46x30 full-height with a 15px
-    // glyph; Win8 = narrower + shorter (hangs from the title-bar top) with a
-    // thinner 13px glyph
-    let (cap_w, cap_h, glyph) = match state.frame_style {
-        crate::model::FrameStyle::Win8 => (40.0, 24.0, 13.0),
-        crate::model::FrameStyle::Win10 => (46.0, 30.0, 15.0),
-    };
-    // close is ALWAYS red (Win8); hover brightens, press darkens
-    let caption = |icon_name: &'static str, msg: Message, hover_bg: Color, solid: bool| {
-        button(
-            container(crate::icon::view(icon_name, glyph, &skin))
-                .width(Length::Fixed(cap_w))
-                .height(Length::Fixed(cap_h))
-                .center_x(Length::Fixed(cap_w))
-                .center_y(Length::Fixed(cap_h)),
-        )
-        .width(Length::Fixed(cap_w))
-        .height(Length::Fixed(cap_h))
-        .padding(0)
-        .style(move |_t, status| button::Style {
-            background: match (solid, status) {
-                (true, button::Status::Hovered) => {
-                    Some(Color::from_rgb8(0xF1, 0x70, 0x7A).into())
-                }
-                (true, button::Status::Pressed) => {
-                    Some(Color::from_rgb8(0xC5, 0x0E, 0x1F).into())
-                }
-                (true, _) => Some(hover_bg.into()),
-                (false, button::Status::Hovered) => Some(hover_bg.into()),
-                (false, button::Status::Pressed) => Some(hover_bg.scale_alpha(0.7).into()),
-                _ => None,
-            },
-            text_color: Color::WHITE,
-            border: Default::default(),
-            shadow: Default::default(),
-            snap: true,
-        })
-        .on_press(msg)
-    };
-
     // Win8: contextual tab labels are colored blocks on the title bar,
     // right-aligned before the caption buttons. Title centers in the
     // space left of them (so it shifts when they appear).
@@ -577,6 +603,11 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     // (which start right after the main tabs); the title centers between
     // the icon+QAT and the blocks. When the title is too long it elides
     // and recenters AFTER the blocks: `... contextual  title  _^x`.
+    // Win8: min/max are 60% of the close button's width; Win10: uniform 46
+    let captions_w = match state.frame_style {
+        crate::model::FrameStyle::Win8 => 27.0 + 27.0 + 45.0,
+        crate::model::FrameStyle::Win10 => 46.0 * 3.0,
+    };
     let n_ctx = visible_tabs(state)
         .iter()
         .filter(|t| t.color.is_some())
@@ -635,9 +666,7 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
                 drag_gap,
                 ctx_blocks,
                 drag_title,
-                container(caption("minimize", Message::Minimize, Color::from_rgba(1.0, 1.0, 1.0, 0.18), false)).height(Length::Fill).align_y(iced::Alignment::Start),
-                container(caption("maximize", Message::Maximize, Color::from_rgba(1.0, 1.0, 1.0, 0.18), false)).height(Length::Fill).align_y(iced::Alignment::Start),
-                container(caption("close", Message::Close, skin.close_hover, true)).height(Length::Fill).align_y(iced::Alignment::Start),
+                Space::new().width(Length::Fixed(captions_w)),
             ]
             .height(Length::Fixed(30.0)),
         )
@@ -674,9 +703,7 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
             mouse_area(Space::new().width(Length::Fill).height(Length::Fixed(30.0)))
                 .on_press(Message::TitlebarPress)
                 .on_double_click(Message::TitlebarDoubleClick),
-            container(caption("minimize", Message::Minimize, Color::from_rgba(1.0, 1.0, 1.0, 0.18), false)).height(Length::Fill).align_y(iced::Alignment::Start),
-            container(caption("maximize", Message::Maximize, Color::from_rgba(1.0, 1.0, 1.0, 0.18), false)).height(Length::Fill).align_y(iced::Alignment::Start),
-            container(caption("close", Message::Close, skin.close_hover, true)).height(Length::Fill).align_y(iced::Alignment::Start),
+            Space::new().width(Length::Fixed(captions_w)),
         ]
         .height(Length::Fixed(30.0)),
     )
