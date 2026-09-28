@@ -374,7 +374,10 @@ impl Explorer {
             .ribbon
             .contextual_tabs
             .iter()
-            .find(|t| t.when.as_deref().map(|w| crate::ribbon::eval_when(w, ctx)).unwrap_or(true));
+            .find(|t| {
+                let w = t.activate_when.as_deref().or(t.when.as_deref());
+                w.map(|w| crate::ribbon::eval_when(w, ctx)).unwrap_or(true)
+            });
         match matching {
             Some(t) => self.active_tab = t.id.clone(),
             None => {
