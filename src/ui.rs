@@ -215,7 +215,7 @@ pub fn frame_insets_pub(self_border: bool, style: crate::model::FrameStyle) -> (
         return (0.0, 0.0, 0.0, 0.0);
     }
     match style {
-        crate::model::FrameStyle::Win8 => (2.0, 6.0, 6.0, 6.0),
+        crate::model::FrameStyle::Win8 => (1.0, 6.0, 6.0, 6.0),
         crate::model::FrameStyle::Win10 => (1.0, 1.0, 1.0, 1.0),
     }
 }
@@ -225,7 +225,7 @@ fn frame_insets(state: &Explorer) -> (f32, f32, f32, f32) {
         return (0.0, 0.0, 0.0, 0.0);
     }
     match state.frame_style {
-        crate::model::FrameStyle::Win8 => (2.0, 6.0, 6.0, 6.0),
+        crate::model::FrameStyle::Win8 => (1.0, 6.0, 6.0, 6.0),
         crate::model::FrameStyle::Win10 => (1.0, 1.0, 1.0, 1.0),
     }
 }
@@ -248,7 +248,7 @@ fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'static, Messa
     // glyph baseline at ~70% of the button height.
     let (mw, cw, h, glyph, y, right_pad, names) = match state.frame_style {
         crate::model::FrameStyle::Win8 => (
-            28.0, 47.0, 21.0, 13.0, 0.0, 6.0,
+            28.0, 47.0, 21.0, 13.0, 1.0, 6.0,
             ("minimize8", "maximize8", "close8"),
         ),
         crate::model::FrameStyle::Win10 => (46.0, 46.0, 29.0, 15.0, 1.0, 1.0,
