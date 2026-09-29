@@ -33,8 +33,9 @@ fn main() -> iced::Result {
     for arg in std::env::args().skip(1) {
         match arg.as_str() {
             "--render" => {}
+            "--ui-debug" => std::env::set_var("EXPLORER_UI_DEBUG", "1"),
             "--help" | "-h" => {
-                eprintln!("Windows 8 style file explorer\n\nUSAGE:\n    explorer [--render <gpu|cpu>]\n\nOPTIONS:\n    --render gpu    GPU rendering (wgpu); fails at startup if unavailable\n    --render cpu    CPU rendering (tiny-skia); always works\n    (no flag)       GPU with automatic CPU fallback");
+                eprintln!("Windows 8 style file explorer\n\nUSAGE:\n    explorer [--render <gpu|cpu>] [--ui-debug] [path]\n\nOPTIONS:\n    --render gpu    GPU rendering (wgpu); fails at startup if unavailable\n    --render cpu    CPU rendering (tiny-skia); always works\n    --ui-debug      outline every UI element with colored 1px borders\n    (no flag)       GPU with automatic CPU fallback");
                 return Ok(());
             }
             v if v.starts_with("--render=") => set_renderer(&v["--render=".len()..]),
