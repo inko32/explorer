@@ -208,7 +208,7 @@ fn frame_insets(state: &Explorer) -> (f32, f32, f32, f32) {
         return (0.0, 0.0, 0.0, 0.0);
     }
     match state.frame_style {
-        crate::model::FrameStyle::Win8 => (3.0, 8.0, 8.0, 8.0),
+        crate::model::FrameStyle::Win8 => (2.0, 6.0, 6.0, 6.0),
         crate::model::FrameStyle::Win10 => (1.0, 1.0, 1.0, 1.0),
     }
 }
@@ -227,7 +227,7 @@ fn frame_color(state: &Explorer, skin: skin::Skin) -> Color {
 fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'static, Message> {
     let (mw, cw, h, glyph, y, right_pad) = match state.frame_style {
         // min/max = 75% of close; shifted left by the side-border width
-        crate::model::FrameStyle::Win8 => (36.0, 48.0, 22.0, 12.5, 0.0, 8.0),
+        crate::model::FrameStyle::Win8 => (39.0, 52.0, 23.0, 13.0, 0.0, 6.0),
         crate::model::FrameStyle::Win10 => (46.0, 46.0, 29.0, 15.0, 1.0, 1.0),
     };
     let one = move |icon_name: &'static str,
@@ -308,16 +308,72 @@ fn resize_frame(margin: f32) -> Element<'static, Message> {
     .into()
 }
 
+// ---------------- --ui-debug element outlines ----------------
+
+static UI_DEBUG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn ui_debug() -> bool {
+    UI_DEBUG.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Deterministic distinct color per element name (FNV-1a hash -> palette).
+fn debug_color(name: &str) -> Color {
+    const PALETTE: [[f32; 3]; 12] = [
+        [0.90, 0.15, 0.15], // red
+        [0.95, 0.50, 0.05], // orange
+        [0.85, 0.75, 0.05], // yellow
+        [0.35, 0.75, 0.10], // lime
+        [0.05, 0.65, 0.35], // green
+        [0.05, 0.75, 0.70], // teal
+        [0.10, 0.55, 0.95], // blue
+        [0.25, 0.30, 0.95], // indigo
+        [0.60, 0.25, 0.90], // purple
+        [0.90, 0.20, 0.70], // magenta
+        [0.65, 0.35, 0.20], // brown
+        [0.10, 0.10, 0.10], // black
+    ];
+    let mut h: u32 = 0x811c_9dc5;
+    for b in name.bytes() {
+        h ^= b as u32;
+        h = h.wrapping_mul(0x0100_0193);
+    }
+    let c = PALETTE[(h as usize) % PALETTE.len()];
+    Color::from_rgb(c[0], c[1], c[2])
+}
+
+/// Wrap an element in a 1px outline (drawn inside — no layout shift).
+/// No-op unless `--ui-debug` was passed. Same name = same color.
+fn dbg<'a>(name: &'static str, e: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+    let e = e.into();
+    if !ui_debug() {
+        return e;
+    }
+    let color = debug_color(name);
+    container(e)
+        .style(move |_t: &iced::Theme| container::Style {
+            border: iced::Border {
+                color,
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        })
+        .into()
+}
+
 pub fn view(state: &Explorer) -> Element<'_, Message> {
+    UI_DEBUG.store(state.ui_debug, std::sync::atomic::Ordering::Relaxed);
     let skin = if state.dark { skin::DARK } else { skin::LIGHT };
     let mut root = column![];
     if state.self_border {
-        root = root.push(titlebar(state, skin));
+        root = root.push(dbg("titlebar", titlebar(state, skin)));
     }
-    root = root.push(ribbon(state, skin));
-    root = root.push(address_bar(state, skin));
-    root = root.push(row![nav_pane(state, skin), file_view(state, skin)].height(Length::Fill));
-    root = root.push(statusbar(state, skin));
+    root = root.push(dbg("ribbon", ribbon(state, skin)));
+    root = root.push(dbg("address_bar", address_bar(state, skin)));
+    let nav = dbg("nav_pane", nav_pane(state, skin));
+    let fv = dbg("file_view", file_view(state, skin));
+    root = root.push(dbg("main_row", row![nav, fv].height(Length::Fill)));
+    root = root.push(dbg("statusbar", statusbar(state, skin)));
     // ribbon dropdown menu (above everything; backdrop click closes)
     let menu_layer: Option<Element<Message>> = state.open_menu.as_ref().map(|m| {
         let menu_w = m
@@ -357,9 +413,10 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
     };
     if state.self_border {
         let grab = if state.frame_style == crate::model::FrameStyle::Win8 { 8.0 } else { 5.0 };
-        let mut s = stack![framed, resize_frame(grab), caption_overlay(state, skin)];
+        let mut s = stack![dbg("frame", framed), dbg("resize_ring", resize_frame(grab)),
+                           dbg("captions", caption_overlay(state, skin))];
         if let Some(l) = menu_layer {
-            s = s.push(l);
+            s = s.push(dbg("menu", l));
         }
         s.into()
     } else {
@@ -555,7 +612,10 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
             .align_y(iced::Alignment::End)
             .into();
         ctx_blocks = ctx_blocks.push(
-            mouse_area(block).on_press(Message::BlockPress(tab.id.clone())),
+            dbg(
+                Box::leak(format!("ctx_block:{}", tab.label).into_boxed_str()),
+                mouse_area(block).on_press(Message::BlockPress(tab.id.clone())),
+            ),
         );
     }
 
@@ -606,7 +666,7 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     // and recenters AFTER the blocks: `... contextual  title  _^x`.
     // Win8: min/max are 60% of the close button's width; Win10: uniform 46
     let captions_w = match state.frame_style {
-        crate::model::FrameStyle::Win8 => 36.0 + 36.0 + 48.0 + 8.0,
+        crate::model::FrameStyle::Win8 => 39.0 + 39.0 + 52.0 + 6.0,
         crate::model::FrameStyle::Win10 => 46.0 * 3.0,
     };
     let n_ctx = visible_tabs(state)
@@ -1014,11 +1074,12 @@ fn tab_row(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
                 .height(Length::Fixed(28.0))
                 .into()
             };
-            tabs_row = tabs_row.push(
+            tabs_row = tabs_row.push(dbg(
+                Box::leak(format!("tab_stub:{}", tab.id).into_boxed_str()),
                 mouse_area(stub).on_press(Message::SetTab(tab.id.clone())),
-            );
+            ));
         } else {
-            tabs_row = tabs_row.push(tab_button(
+            let t = tab_button(
                 &tab.label,
                 width,
                 state.active_tab == tab.id,
@@ -1027,6 +1088,10 @@ fn tab_row(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
                 state.self_border,
                 Message::SetTab(tab.id.clone()),
                 skin,
+            );
+            tabs_row = tabs_row.push(dbg(
+                Box::leak(format!("tab:{}", tab.id).into_boxed_str()),
+                t,
             ));
         }
     }
@@ -1161,7 +1226,7 @@ fn group(caption: &str, width: f32, content: Element<'static, Message>, skin: sk
         .center_y(Length::Fill);
     row![
         column![
-            container(content)
+            container(dbg(Box::leak(format!("group_body:{caption}").into_boxed_str()), content))
                 .width(Length::Fixed(width))
                 .height(Length::Fixed(78.0))
                 .padding(iced::Padding { top: 6.0, right: 5.0, bottom: 0.0, left: 5.0 }),
@@ -1182,7 +1247,8 @@ fn ribbon_body(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     let mut groups_row = row![];
     let mut x = 0.0f32;
     for g in &tab.groups {
-        groups_row = groups_row.push(group_from_config(g, state, skin, x));
+        let name: &'static str = Box::leak(format!("group:{}", g.label).into_boxed_str());
+        groups_row = groups_row.push(dbg(name, group_from_config(g, state, skin, x)));
         x += g.width.unwrap_or(110.0) + 1.0; // group + separator strip
     }
     groups_row.into()
@@ -1918,12 +1984,12 @@ fn file_row<'a>(i: usize, e: &Entry, state: &Explorer, skin: skin::Skin) -> Elem
             ..Default::default()
         });
 
-    mouse_area(styled)
+    let ma = mouse_area(styled)
         .on_press(Message::Select(i))
         .on_double_click(Message::Open(i))
         .on_enter(Message::Hover(Some(i)))
-        .on_exit(Message::Hover(None))
-        .into()
+        .on_exit(Message::Hover(None));
+    dbg("file_row", ma).into()
 }
 
 fn large_cell<'a>(i: usize, e: &Entry, state: &Explorer, skin: skin::Skin) -> Element<'a, Message> {

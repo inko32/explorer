@@ -120,6 +120,8 @@ pub struct Explorer {
     back: Vec<PathBuf>,
     forward: Vec<PathBuf>,
     pub dark: bool,
+    /// `--ui-debug`: outline every element (colored 1px borders).
+    pub ui_debug: bool,
     pub maximized: bool,
     /// Self-rendered window border/title bar (off = native decorations).
     pub self_border: bool,
@@ -220,6 +222,7 @@ impl Explorer {
             back: Vec::new(),
             forward: Vec::new(),
             dark: false,
+            ui_debug: std::env::var_os("EXPLORER_UI_DEBUG").is_some(),
             maximized: false,
             self_border: true,
             frame_style: FrameStyle::Win8,
