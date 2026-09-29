@@ -25,6 +25,31 @@ fn fs_stream_builder() -> fs::EventReceiver {
 }
 
 fn main() -> iced::Result {
+    // Renderer selection (D17): GPU (wgpu) is primary, CPU (tiny-skia) is the
+    // reserved fallback — both are compiled in and picked at startup.
+    //   explorer             -> wgpu, auto-fallback to tiny-skia if GPU init fails
+    //   explorer --render gpu -> wgpu only; startup ERROR if unavailable
+    //   explorer --render cpu -> tiny-skia only
+    for arg in std::env::args().skip(1) {
+        match arg.as_str() {
+            "--render" => {}
+            "--help" | "-h" => {
+                eprintln!("Windows 8 style file explorer\n\nUSAGE:\n    explorer [--render <gpu|cpu>]\n\nOPTIONS:\n    --render gpu    GPU rendering (wgpu); fails at startup if unavailable\n    --render cpu    CPU rendering (tiny-skia); always works\n    (no flag)       GPU with automatic CPU fallback");
+                return Ok(());
+            }
+            v if v.starts_with("--render=") => set_renderer(&v["--render=".len()..]),
+            v if v.starts_with("--render") && v.len() > "--render".len() => {
+                set_renderer(&v["--render".len()..].trim_start_matches('='))
+            }
+            _ => {}
+        }
+    }
+    if std::env::var_os("EXPLORER_DEBUG").is_some() || std::env::var_os("ICED_BACKEND").is_some() {
+        eprintln!(
+            "renderer: {}",
+            std::env::var("ICED_BACKEND").unwrap_or_else(|_| "gpu (auto-fallback to cpu)".into())
+        );
+    }
     iced::application(
         || (Explorer::new(), iced::Task::none()),
         Explorer::update,
@@ -49,6 +74,22 @@ fn main() -> iced::Result {
         ..Default::default()
     })
     .run()
+}
+
+/// `--render gpu|cpu` -> iced's `ICED_BACKEND` (wgpu / tiny-skia). An
+/// explicit choice is strict: `--render gpu` errors out instead of silently
+/// falling back; no flag = auto-fallback.
+fn set_renderer(choice: &str) {
+    let backend = match choice {
+        "gpu" | "wgpu" => "wgpu",
+        "cpu" | "tiny-skia" | "tiny_skia" => "tiny-skia",
+        other => {
+            eprintln!("unknown --render value '{other}' (expected gpu|cpu)");
+            std::process::exit(2);
+        }
+    };
+    // SAFETY: single-threaded, before iced::application run.
+    std::env::set_var("ICED_BACKEND", backend);
 }
 
 /// Global keyboard shortcuts (binding table). When an inline rename editor is
