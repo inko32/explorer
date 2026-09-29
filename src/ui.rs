@@ -487,6 +487,14 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
         let grab = if state.frame_style == crate::model::FrameStyle::Win8 { 8.0 } else { 5.0 };
         let mut s = stack![dbg("frame", framed), dbg("resize_ring", resize_frame(grab)),
                            dbg("captions", caption_overlay(state, skin))];
+        // splitter drag: hold the resize cursor window-wide while dragging
+        // (the pointer leaves the small splitter target mid-drag)
+        if state.bar_split {
+            s = s.push(
+                mouse_area(Space::new().width(Length::Fill).height(Length::Fill))
+                    .interaction(iced::mouse::Interaction::ResizingHorizontally),
+            );
+        }
         if let Some(l) = menu_layer {
             s = s.push(dbg("menu", l));
         }
@@ -1321,6 +1329,8 @@ fn big_cmd_w(
             .center_y(Length::Fixed(46.0)),
         dbg(
             "big_label",
+            // content 25px centered in the 30px zone: 2.5px gap above and
+            // below the text, matching the icon's margins
             container(column![l1, l2].width(Length::Fixed(width)))
                 .width(Length::Fixed(width))
                 .height(Length::Fixed(30.0))
@@ -1699,7 +1709,10 @@ fn big_cmd_split(
         _ => top.into(),
     };
     let (l1, l2) = big_label_lines(label, Some(drop_arrow_el(tc, 5.0)), width, tc);
-    let bottom_col = column![l1, l2].width(Length::Fixed(width));
+    // centered in the 30px zone, same as plain big buttons
+    let bottom_col = container(column![l1, l2].width(Length::Fixed(width)))
+        .height(Length::Fixed(30.0))
+        .center_y(Length::Fixed(30.0));
     let bottom = button(bottom_col)
     .width(Length::Fixed(width))
     .height(Length::Fixed(30.0))
