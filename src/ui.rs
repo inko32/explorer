@@ -1211,6 +1211,36 @@ fn cmd_style(
 }
 
 
+/// Win8 big-button width from content: max(text lines, 40px icon) + 12px
+/// padding. Char widths approximate Segoe UI / DejaVu Sans at 11px.
+fn big_width(label: &str, has_arrow: bool) -> f32 {
+    let words: Vec<&str> = label.split_whitespace().collect();
+    let (line1, line2): (String, Option<String>) = if words.len() > 1 {
+        (words[..words.len() - 1].join(" "), Some(words.last().unwrap().to_string()))
+    } else {
+        (label.to_string(), None)
+    };
+    let text_w = |s: &str| -> f32 {
+        s.chars()
+            .map(|c| match c {
+                'i' | 'j' | 'l' | 't' | 'f' | 'r' => 3.2f32,
+                'm' | 'w' => 8.6,
+                'M' | 'W' => 9.4,
+                ' ' => 3.2,
+                c if c.is_ascii_uppercase() => 7.0,
+                _ => 5.4,
+            })
+            .sum()
+    };
+    let mut w = text_w(&line1);
+    if let Some(l2) = &line2 {
+        w = w.max(text_w(l2) + if has_arrow { 9.0 } else { 0.0 });
+    } else if has_arrow {
+        w = w.max(9.0);
+    }
+    w.max(40.0) + 12.0
+}
+
 /// Compact two-line label for big buttons (split or plain): line 1 = all
 /// but the last word, line 2 = last word (plain) or "word v" (split) or the
 /// lone arrow. 11px text at line_height 1.1, two 12px rows in the 30px zone.
@@ -1237,7 +1267,7 @@ fn big_label_lines(
             .align_x(iced::alignment::Horizontal::Center),
     )
     .width(Length::Fixed(width))
-    .height(Length::Fixed(12.0))
+    .height(Length::Fixed(13.0)) // +1px over line 2's 12: the visual gap
     .center_x(Length::Fixed(width))
     .into();
     let l2: Element<Message> = match (line2, line2_extra) {
@@ -1433,7 +1463,9 @@ fn group_from_config(g: &GroupDef, state: &Explorer, skin: skin::Skin, x_base: f
         }
         if cmd.size.as_deref() == Some("big") {
             let enabled = enabled_of(cmd);
-            let w = cmd.width.unwrap_or(62.0);
+            let w = cmd
+                .width
+                .unwrap_or_else(|| big_width(&cmd.label, cmd.dropdown.is_some()));
             let has_action = state.ribbon.commands.contains_key(&cmd.id);
             let msg = enabled.then(|| Message::RunCommand(cmd.id.clone()));
             let el: Element<Message> = if let Some(items) = &cmd.dropdown {
@@ -1861,22 +1893,10 @@ fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         ..Default::default()
     });
 
-    // splitter between the bars: a 1px line (accent on hover/drag) in a
-    // small grab target, with the horizontal-resize cursor
-    let line_c = if drag || state.splitter_hover { skin.accent_dark } else { skin.group_sep };
+    // invisible splitter: the natural gap between the bars IS the drag
+    // target (halved: 15 -> 8 px total); only the cursor betrays it
     let splitter = mouse_area(
-        container(
-            container(Space::new().width(Length::Fixed(1.0)).height(Length::Fixed(24.0)))
-                .width(Length::Fixed(1.0))
-                .height(Length::Fixed(30.0))
-                .center_x(Length::Fixed(1.0))
-                .center_y(Length::Fixed(30.0))
-                .style(bg(line_c)),
-        )
-        .width(Length::Fixed(7.0))
-        .height(Length::Fixed(30.0))
-        .center_x(Length::Fixed(7.0))
-        .center_y(Length::Fixed(30.0)),
+        Space::new().width(Length::Fixed(4.0)).height(Length::Fixed(30.0)),
     )
     .on_press(Message::BeginBarSplit)
     .on_enter(Message::SplitterHover(true))
@@ -1891,7 +1911,7 @@ fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
             splitter,
             search,
         ]
-        .spacing(4)
+        .spacing(2)
         .align_y(iced::Alignment::Center)
         .padding(6),
     )
