@@ -209,6 +209,17 @@ fn resize_zone(
 /// sides+bottom (the classic sizing border); Win10: 1px all around.
 /// The internal content is inset by exactly these amounts - the "virtual
 /// window" shrinks, the frame never covers content.
+/// Frame insets without an Explorer (model-side splitter math).
+pub fn frame_insets_pub(self_border: bool, style: crate::model::FrameStyle) -> (f32, f32, f32, f32) {
+    if !self_border {
+        return (0.0, 0.0, 0.0, 0.0);
+    }
+    match style {
+        crate::model::FrameStyle::Win8 => (2.0, 6.0, 6.0, 6.0),
+        crate::model::FrameStyle::Win10 => (1.0, 1.0, 1.0, 1.0),
+    }
+}
+
 fn frame_insets(state: &Explorer) -> (f32, f32, f32, f32) {
     if !state.self_border {
         return (0.0, 0.0, 0.0, 0.0);
@@ -231,12 +242,16 @@ fn frame_color(state: &Explorer, skin: skin::Skin) -> Color {
 /// Win8: min/max width = 60% of close width, short (20px), thin glyphs.
 /// Win10: uniform 46px, nearly full title-bar height.
 fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'static, Message> {
-    let (mw, cw, h, glyph, y, right_pad) = match state.frame_style {
-        // min/max = 75% of close; shifted left by the side-border width
-        // reference: buttons span the full title bar (frame + 30px), close
-        // 44px, min/max ~60% of close
-        crate::model::FrameStyle::Win8 => (26.0, 44.0, 32.0, 13.0, 0.0, 6.0),
-        crate::model::FrameStyle::Win10 => (46.0, 46.0, 29.0, 15.0, 1.0, 1.0),
+    // Reference (drive-tools, 100% dpi): buttons touch the top edge but are
+    // NOT full title-bar height (22 of 32); close 44, min/max 26 (~60%);
+    // ~10px glyphs with thick ~2px strokes (the *8 builtin variants).
+    let (mw, cw, h, glyph, y, right_pad, names) = match state.frame_style {
+        crate::model::FrameStyle::Win8 => (
+            26.0, 44.0, 22.0, 13.0, 0.0, 6.0,
+            ("minimize8", "maximize8", "close8"),
+        ),
+        crate::model::FrameStyle::Win10 => (46.0, 46.0, 29.0, 15.0, 1.0, 1.0,
+            ("minimize", "maximize", "close")),
     };
     let one = move |icon_name: &'static str,
                     w: f32,
@@ -278,9 +293,9 @@ fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'static, Messa
     let ghost = Color::from_rgba(1.0, 1.0, 1.0, 0.18);
     container(
         row![
-            one("minimize", mw, Message::Minimize, ghost, false),
-            one("maximize", mw, Message::Maximize, ghost, false),
-            one("close", cw, Message::Close, skin.close_hover, true),
+            one(names.0, mw, Message::Minimize, ghost, false),
+            one(names.1, mw, Message::Maximize, ghost, false),
+            one(names.2, cw, Message::Close, skin.close_hover, true),
         ]
         .height(Length::Fixed(h)),
     )
@@ -1659,6 +1674,10 @@ fn nav_circle(icon_name: &'static str, enabled: bool, msg: Message, skin: skin::
 }
 
 fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
+    let drag = state.bar_split;
+    let (_, fr, _, fl) = frame_insets(state);
+    let content_w = (state.win_w - fl - fr).max(320.0);
+    let search_w = (content_w * state.search_share).clamp(120.0, content_w - 280.0);
     let refresh = button(icon("refresh", 16.0, skin))
         .width(Length::Fixed(24.0))
         .height(Length::Fixed(24.0))
@@ -1762,7 +1781,7 @@ fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         ]
         .align_y(iced::Alignment::Center),
     )
-    .width(Length::Fixed(180.0))
+    .width(Length::Fixed(search_w))
     .height(Length::Fixed(30.0))
     .padding(iced::Padding { top: 0.0, right: 0.0, bottom: 0.0, left: 8.0 })
     .style(move |_t: &iced::Theme| container::Style {
@@ -1775,12 +1794,23 @@ fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         ..Default::default()
     });
 
+    // splitter between the bars: drag resizes both (search gets
+    // `search_share` of the content width, address takes the rest)
+    let splitter = mouse_area(
+        container(Space::new().width(Length::Fixed(5.0)).height(Length::Fixed(30.0)))
+            .style(move |_t: &iced::Theme| container::Style {
+                background: if drag { Some(skin.pressed.into()) } else { None },
+                ..Default::default()
+            }),
+    )
+    .on_press(Message::BeginBarSplit);
     container(
         row![
             nav_circle("back", !state.back_is_empty(), Message::Back, skin),
             nav_circle("forward", !state.forward_is_empty(), Message::Forward, skin),
             nav_circle("up", state.cwd.parent().is_some(), Message::Up, skin),
             crumb_bar,
+            splitter,
             search,
         ]
         .spacing(4)
