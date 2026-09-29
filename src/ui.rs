@@ -1628,7 +1628,12 @@ fn big_cmd_split(
         .spacing(2)
         .align_y(iced::Alignment::Start)
         .into(),
-        None => drop_arrow_el(tc, 0.0),
+        // arrow alone on line 2 (one-word labels): same offset and height as
+        // the "word v" row, so all big split buttons' line 2 aligns
+        None => container(drop_arrow_el(tc, 5.5))
+            .height(Length::Fixed(13.2))
+            .align_y(iced::Alignment::Start)
+            .into(),
     };
     let bottom_col = column![
         container(text(line1).size(11.0).color(tc))
