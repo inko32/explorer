@@ -40,6 +40,9 @@ pub fn builtin_svg(name: &str, s: &Skin) -> svg::Handle {
         "maximize" => maximize(s),
         "restore" => restore(s),
         "close" => close(s),
+        "minimize8" => minimize8(s),
+        "maximize8" => maximize8(s),
+        "close8" => close8(s),
         "gear" => gear(s),
         "open" => open(s),
         "copy_path" => copy_path(s),
@@ -567,6 +570,24 @@ pub fn restore(_s: &Skin) -> svg::Handle {
         "{}{}",
         rect(2.5, 2.5, 8.0, 8.0, Color::TRANSPARENT, Some((Color::WHITE, 1.2))),
         rect(5.5, 5.5, 8.0, 8.0, Color::TRANSPARENT, Some((Color::WHITE, 1.2))),
+    ))
+}
+
+/// Win8 caption glyphs: ~10px, thick ~2px strokes, full-span geometry
+/// (measured from windows-8-file-explorer-drive-tools.png).
+pub fn minimize8(_s: &Skin) -> svg::Handle {
+    doc(line(2.5, 8.0, 13.5, 8.0, Color::WHITE, 2.8))
+}
+
+pub fn maximize8(_s: &Skin) -> svg::Handle {
+    doc(rect(2.5, 2.5, 11.0, 11.0, Color::TRANSPARENT, Some((Color::WHITE, 2.8))))
+}
+
+pub fn close8(_s: &Skin) -> svg::Handle {
+    doc(format!(
+        "{}{}",
+        line(3.0, 3.0, 13.0, 13.0, Color::WHITE, 2.8),
+        line(13.0, 3.0, 3.0, 13.0, Color::WHITE, 2.8),
     ))
 }
 
