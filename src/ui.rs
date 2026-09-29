@@ -1155,23 +1155,30 @@ fn big_cmd_w(
             .height(Length::Fixed(46.0))
             .center_x(Length::Fixed(width))
             .center_y(Length::Fixed(46.0)),
-        container(
-            text(label.to_string())
-                .size(11.0)
-                .color(if enabled { skin.text } else { skin.disabled })
-                .align_x(iced::alignment::Horizontal::Center),
-        )
-        .width(Length::Fixed(width))
-        .height(Length::Fixed(30.0))
-        .center_x(Length::Fixed(width))
-        .align_y(iced::Alignment::Start),
+        dbg(
+            "big_label",
+            container(
+                text(label.to_string())
+                    .size(11.0)
+                    .line_height(1.15)
+                    .color(if enabled { skin.text } else { skin.disabled })
+                    .align_x(iced::alignment::Horizontal::Center),
+            )
+            .width(Length::Fixed(width))
+            .height(Length::Fixed(30.0))
+            .center_x(Length::Fixed(width))
+            .center_y(Length::Fixed(30.0)),
+        ),
     ]
     .width(Length::Fixed(width));
-    let btn = button(content)
-        .width(Length::Fixed(width))
-        .height(Length::Fixed(76.0))
-        .padding(0)
-        .style(cmd_style(enabled, skin));
+    let btn = button(dbg(
+        Box::leak(format!("big_cmd:{label}").into_boxed_str()),
+        content,
+    ))
+    .width(Length::Fixed(width))
+    .height(Length::Fixed(76.0))
+    .padding(0)
+    .style(cmd_style(enabled, skin));
     match (enabled, msg) {
         (true, Some(m)) => btn.on_press(m).into(),
         _ => btn.into(),
@@ -1189,12 +1196,16 @@ fn small_cmd_active(
     msg: Option<Message>,
     skin: skin::Skin,
 ) -> Element<'static, Message> {
-    let content = row![
+    let row = row![
         icon_el,
         text(label.to_string()).size(11.0).color(if enabled { skin.text } else { skin.disabled }),
     ]
     .spacing(5)
     .align_y(iced::Alignment::Center);
+    // iced buttons top-align their content: center it in the full row height
+    let content = container(row)
+        .height(Length::Fixed(height))
+        .center_y(Length::Fixed(height));
     let btn = button(content)
         .width(Length::Fixed(width))
         .height(Length::Fixed(height))
@@ -1211,10 +1222,11 @@ fn small_cmd_active(
             }
             style
         });
-    match (enabled, msg) {
+    let el: Element<Message> = match (enabled, msg) {
         (true, Some(m)) => btn.on_press(m).into(),
         _ => btn.into(),
-    }
+    };
+    dbg(Box::leak(format!("cmd:{label}").into_boxed_str()), el)
 }
 
 fn group(caption: &str, width: f32, content: Element<'static, Message>, skin: skin::Skin) -> Element<'static, Message> {
@@ -1471,21 +1483,25 @@ fn checkbox_cmd(
         },
         ..Default::default()
     });
-    let content = row![
+    let row = row![
         box_el,
         text(label.to_string()).size(11.0).color(if enabled { skin.text } else { skin.disabled }),
     ]
     .spacing(6)
     .align_y(iced::Alignment::Center);
+    let content = container(row)
+        .height(Length::Fixed(height))
+        .center_y(Length::Fixed(height));
     let btn = button(content)
         .width(Length::Fixed(width))
         .height(Length::Fixed(height))
         .padding([0.0, 4.0])
         .style(cmd_style(enabled, skin));
-    match (enabled, msg) {
+    let el: Element<Message> = match (enabled, msg) {
         (true, Some(m)) => btn.on_press(m).into(),
         _ => btn.into(),
-    }
+    };
+    dbg(Box::leak(format!("checkbox:{label}").into_boxed_str()), el)
 }
 
 /// Win8 split big button: the icon area runs the default action, the
@@ -1559,10 +1575,11 @@ fn big_cmd_split(
         (true, Some(m)) => bottom.on_press(m).into(),
         _ => bottom.into(),
     };
-    column![top, bottom]
+    let name: &'static str = Box::leak(format!("big_split:{label}").into_boxed_str());
+    dbg(name, column![dbg("big_split_icon", top), dbg("big_split_label", bottom)]
         .width(Length::Fixed(width))
-        .align_x(iced::Alignment::Center)
-        .into()
+        .align_x(iced::Alignment::Center))
+    .into()
 }
 
 /// Clamp a dropdown menu anchor x so the menu stays inside the window.
