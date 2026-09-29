@@ -130,6 +130,10 @@ pub struct Explorer {
     /// Compositor scale factor, learned via `window::scale_factor` after open.
     pub system_scale: f32,
     pub maximized: bool,
+    /// Last title-bar press (double-click detection: the 2nd press must not
+    /// start a window drag, or the in-flight move scrambles the placement of
+    /// the subsequent maximize).
+    last_title_press: Option<std::time::Instant>,
     /// Self-rendered window border/title bar (off = native decorations).
     pub self_border: bool,
     /// Win8 double border vs Win10 1px border.
@@ -236,6 +240,7 @@ impl Explorer {
                 .filter(|v: &f32| *v > 0.0),
             system_scale: 0.0,
             maximized: false,
+            last_title_press: None,
             self_border: true,
             frame_style: FrameStyle::Win8,
             quick_access: vec!["undo".into(), "redo".into()],
@@ -727,6 +732,18 @@ impl Explorer {
                 iced::Task::none()
             }
             Message::TitlebarPress => {
+                // Second press of a double-click: skip the drag; the
+                // TitlebarDoubleClick event that follows toggles maximize,
+                // exactly like the ^ caption button.
+                let now = std::time::Instant::now();
+                let is_second = self
+                    .last_title_press
+                    .map(|t| now.duration_since(t).as_millis() < 400)
+                    .unwrap_or(false);
+                self.last_title_press = Some(now);
+                if is_second {
+                    return iced::Task::none();
+                }
                 if let Some(id) = self.window {
                     return iced::window::drag(id);
                 }
