@@ -1,11 +1,19 @@
 //! Explorer — iced. Windows 8 style file explorer for POSIX (Wayland first).
 
+mod border;
+mod commands;
+mod folder;
+mod fonts;
 mod fs;
 mod icon;
 mod icons;
 mod model;
+mod nav_pane;
+mod navigation;
 mod ribbon;
+mod status;
 mod ui;
+mod ui_common;
 
 use model::{Explorer, Message};
 
@@ -66,6 +74,8 @@ fn main() -> iced::Result {
         ui::view,
     )
     .scale_factor(|state: &Explorer| state.dpi_multiplier())
+    .font(fonts::UI_FONT_BYTES)
+    .default_font(fonts::default_font())
     .title(|state: &Explorer| state.title())
     .theme(|state: &Explorer| state.theme())
     .subscription(|_state: &Explorer| {
