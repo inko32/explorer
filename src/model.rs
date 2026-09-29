@@ -12,6 +12,8 @@ pub enum Message {
     BeginBarSplit,
     /// Cursor moved during a splitter drag (window-logical x).
     BarSplitMove(f32),
+    /// Hover state of the address/search splitter (drives tint + cursor).
+    SplitterHover(bool),
     Navigate(PathBuf),
     Back,
     Forward,
@@ -138,6 +140,8 @@ pub struct Explorer {
     pub search_share: f32,
     /// Splitter drag in progress.
     pub bar_split: bool,
+    /// Pointer over the address/search splitter.
+    pub splitter_hover: bool,
     pub maximized: bool,
     /// Last title-bar press (double-click detection: the 2nd press must not
     /// start a window drag, or the in-flight move scrambles the placement of
@@ -250,6 +254,7 @@ impl Explorer {
             system_scale: 0.0,
             search_share: 0.15625, // 180 / 1152
             bar_split: false,
+            splitter_hover: false,
             maximized: false,
             last_title_press: None,
             self_border: true,
@@ -979,6 +984,10 @@ impl Explorer {
             }
             Message::BeginBarSplit => {
                 self.bar_split = true;
+                iced::Task::none()
+            }
+            Message::SplitterHover(h) => {
+                self.splitter_hover = h;
                 iced::Task::none()
             }
             Message::BarSplitMove(x) => {

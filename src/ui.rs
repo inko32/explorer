@@ -1794,16 +1794,27 @@ fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         ..Default::default()
     });
 
-    // splitter between the bars: drag resizes both (search gets
-    // `search_share` of the content width, address takes the rest)
+    // splitter between the bars: a 1px line (accent on hover/drag) in a
+    // small grab target, with the horizontal-resize cursor
+    let line_c = if drag || state.splitter_hover { skin.accent_dark } else { skin.group_sep };
     let splitter = mouse_area(
-        container(Space::new().width(Length::Fixed(5.0)).height(Length::Fixed(30.0)))
-            .style(move |_t: &iced::Theme| container::Style {
-                background: if drag { Some(skin.pressed.into()) } else { None },
-                ..Default::default()
-            }),
+        container(
+            container(Space::new().width(Length::Fixed(1.0)).height(Length::Fixed(24.0)))
+                .width(Length::Fixed(1.0))
+                .height(Length::Fixed(30.0))
+                .center_x(Length::Fixed(1.0))
+                .center_y(Length::Fixed(30.0))
+                .style(bg(line_c)),
+        )
+        .width(Length::Fixed(7.0))
+        .height(Length::Fixed(30.0))
+        .center_x(Length::Fixed(7.0))
+        .center_y(Length::Fixed(30.0)),
     )
-    .on_press(Message::BeginBarSplit);
+    .on_press(Message::BeginBarSplit)
+    .on_enter(Message::SplitterHover(true))
+    .on_exit(Message::SplitterHover(false))
+    .interaction(iced::mouse::Interaction::ResizingHorizontally);
     container(
         row![
             nav_circle("back", !state.back_is_empty(), Message::Back, skin),

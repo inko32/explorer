@@ -573,21 +573,27 @@ pub fn restore(_s: &Skin) -> svg::Handle {
     ))
 }
 
-/// Win8 caption glyphs: ~10px, thick ~2px strokes, full-span geometry
-/// (measured from windows-8-file-explorer-drive-tools.png).
+/// Win8 caption glyphs (measured from windows-8-file-explorer-drive-tools.png):
+/// `_` is a low underline, `^` a filled rect with a thicker top bar (a mini
+/// window), `X` is old-school flat — arms stop short of the corners with
+/// butt caps (a line "cutting" the X's head and bottom).
 pub fn minimize8(_s: &Skin) -> svg::Handle {
-    doc(line(2.5, 8.0, 13.5, 8.0, Color::WHITE, 2.8))
+    doc(rect(3.0, 10.8, 10.0, 2.2, Color::WHITE, None))
 }
 
 pub fn maximize8(_s: &Skin) -> svg::Handle {
-    doc(rect(2.5, 2.5, 11.0, 11.0, Color::TRANSPARENT, Some((Color::WHITE, 2.8))))
+    doc(format!(
+        "{}{}",
+        rect(3.0, 3.2, 10.0, 2.8, Color::WHITE, None),
+        rect(3.0, 6.0, 10.0, 7.2, Color::WHITE, None),
+    ))
 }
 
 pub fn close8(_s: &Skin) -> svg::Handle {
     doc(format!(
         "{}{}",
-        line(3.0, 3.0, 13.0, 13.0, Color::WHITE, 2.8),
-        line(13.0, 3.0, 3.0, 13.0, Color::WHITE, 2.8),
+        line(4.4, 4.4, 11.6, 11.6, Color::WHITE, 2.1),
+        line(11.6, 4.4, 4.4, 11.6, Color::WHITE, 2.1),
     ))
 }
 
