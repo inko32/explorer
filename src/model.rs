@@ -6,6 +6,8 @@ use crate::fs::{self, FsEvent, Job};
 #[derive(Debug, Clone)]
 pub enum Message {
     WindowOpened(iced::window::Id),
+    /// System (compositor) scale factor, learned once at startup.
+    SystemScale(f32),
     Navigate(PathBuf),
     Back,
     Forward,
@@ -122,7 +124,16 @@ pub struct Explorer {
     pub dark: bool,
     /// `--ui-debug`: outline every element (colored 1px borders).
     pub ui_debug: bool,
+    /// `--dpi=N`: absolute UI scale factor (percent of 96 dpi, or direct).
+    /// None = follow the system scale.
+    pub dpi_target: Option<f32>,
+    /// Compositor scale factor, learned via `window::scale_factor` after open.
+    pub system_scale: f32,
     pub maximized: bool,
+    /// Last title-bar press (double-click detection: the 2nd press must not
+    /// start a window drag, or the in-flight move scrambles the placement of
+    /// the subsequent maximize).
+    last_title_press: Option<std::time::Instant>,
     /// Self-rendered window border/title bar (off = native decorations).
     pub self_border: bool,
     /// Win8 double border vs Win10 1px border.
@@ -223,7 +234,13 @@ impl Explorer {
             forward: Vec::new(),
             dark: false,
             ui_debug: std::env::var_os("EXPLORER_UI_DEBUG").is_some(),
+            dpi_target: std::env::var("EXPLORER_DPI")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .filter(|v: &f32| *v > 0.0),
+            system_scale: 0.0,
             maximized: false,
+            last_title_press: None,
             self_border: true,
             frame_style: FrameStyle::Win8,
             quick_access: vec!["undo".into(), "redo".into()],
@@ -269,6 +286,15 @@ impl Explorer {
             });
         }
         s
+    }
+
+    /// Scale-factor multiplier for iced (total = system x multiplier, polled
+    /// every frame). Returns 1.0 until the system scale is learned.
+    pub fn dpi_multiplier(&self) -> f32 {
+        match (self.dpi_target, self.system_scale) {
+            (Some(target), s) if s > 0.0 => target / s,
+            _ => 1.0,
+        }
     }
 
     pub fn title(&self) -> String {
@@ -624,6 +650,13 @@ impl Explorer {
         match message {
             Message::WindowOpened(id) => {
                 self.window = Some(id);
+                iced::window::scale_factor(id).map(Message::SystemScale)
+            }
+            Message::SystemScale(s) => {
+                if std::env::var_os("EXPLORER_DEBUG").is_some() {
+                    eprintln!("SystemScale: {s}");
+                }
+                self.system_scale = s;
                 iced::Task::none()
             }
             Message::Navigate(p) => {
@@ -699,6 +732,18 @@ impl Explorer {
                 iced::Task::none()
             }
             Message::TitlebarPress => {
+                // Second press of a double-click: skip the drag; the
+                // TitlebarDoubleClick event that follows toggles maximize,
+                // exactly like the ^ caption button.
+                let now = std::time::Instant::now();
+                let is_second = self
+                    .last_title_press
+                    .map(|t| now.duration_since(t).as_millis() < 400)
+                    .unwrap_or(false);
+                self.last_title_press = Some(now);
+                if is_second {
+                    return iced::Task::none();
+                }
                 if let Some(id) = self.window {
                     return iced::window::drag(id);
                 }
@@ -878,6 +923,10 @@ impl Explorer {
             Message::WindowResized(w, h) => {
                 self.viewport_h = h;
                 self.win_w = w;
+                if std::env::var_os("EXPLORER_DEBUG").is_some() {
+                    eprintln!("WindowResized: logical {w}x{h}, system_scale={}, dpi={:?}",
+                        self.system_scale, self.dpi_target);
+                }
                 iced::Task::none()
             }
             Message::ToggleSelfBorder => {
