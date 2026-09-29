@@ -189,9 +189,26 @@ impl Explorer {
     pub fn new() -> Self {
         let (sched, ev_rx) = fs::spawn();
         let _ = crate::FS_STREAM_RX.set(std::sync::Mutex::new(Some(ev_rx)));
-        let cwd = std::env::args()
-            .nth(1)
-            .map(PathBuf::from)
+        // Initial path: first positional arg (flags and their values are
+        // skipped — see main.rs for the flag set).
+        let mut cwd = None;
+        let mut skip_next = false;
+        for arg in std::env::args().skip(1) {
+            if skip_next {
+                skip_next = false;
+                continue;
+            }
+            if arg == "--render" {
+                skip_next = true;
+                continue;
+            }
+            if arg.starts_with('-') {
+                continue;
+            }
+            cwd = Some(PathBuf::from(arg));
+            break;
+        }
+        let cwd = cwd
             .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
             .unwrap_or_else(|| PathBuf::from("/"));
         let mut s = Self {
