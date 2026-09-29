@@ -573,6 +573,19 @@ pub fn restore(_s: &Skin) -> svg::Handle {
     ))
 }
 
+/// Dropdown-menu arrow: 90-degree apex downward triangle in an 8x4 box.
+/// Its top base (the longest line) is meant to sit at the x-height top of
+/// the adjacent text (top of aszxcv/y, middle of b) — the caller pads it.
+pub fn drop_arrow(c: Color) -> svg::Handle {
+    svg::Handle::from_memory(
+        format!(
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 4'><path d='M0 0 H8 L4 4 Z' fill='{}'/></svg>",
+            hex(c)
+        )
+        .into_bytes(),
+    )
+}
+
 /// Win8 caption glyphs, redrawn pixel-per-pixel from /tmp/user-win8cap.png
 /// (real Win8 capture). Ratios are against the 21px button height, rendered
 /// in a 16-unit box at 13px. min/max take the title-bar text color (dark on
