@@ -30,12 +30,21 @@ fn main() -> iced::Result {
     //   explorer             -> wgpu, auto-fallback to tiny-skia if GPU init fails
     //   explorer --render gpu -> wgpu only; startup ERROR if unavailable
     //   explorer --render cpu -> tiny-skia only
+    let mut want_dpi = false;
     for arg in std::env::args().skip(1) {
+        if want_dpi {
+            want_dpi = false;
+            set_dpi(&arg);
+            continue;
+        }
         match arg.as_str() {
             "--render" => {}
             "--ui-debug" => std::env::set_var("EXPLORER_UI_DEBUG", "1"),
+            v if v == "--dpi" => want_dpi = true,
+            v if v.starts_with("--dpi=") => set_dpi(&v["--dpi=".len()..]),
+            v if v.starts_with("--size=") => set_size(&v["--size=".len()..]),
             "--help" | "-h" => {
-                eprintln!("Windows 8 style file explorer\n\nUSAGE:\n    explorer [--render <gpu|cpu>] [--ui-debug] [path]\n\nOPTIONS:\n    --render gpu    GPU rendering (wgpu); fails at startup if unavailable\n    --render cpu    CPU rendering (tiny-skia); always works\n    --ui-debug      outline every UI element with colored 1px borders\n    (no flag)       GPU with automatic CPU fallback");
+                eprintln!("Windows 8 style file explorer\n\nUSAGE:\n    explorer [--render <gpu|cpu>] [--ui-debug] [path]\n\nOPTIONS:\n    --render gpu    GPU rendering (wgpu); fails at startup if unavailable\n    --render cpu    CPU rendering (tiny-skia); always works\n    --ui-debug      outline every UI element with colored 1px borders\n    --dpi=N         absolute UI scale: percent of 96 dpi (100, 125, 150, 123...)\n                    or a direct factor <= 10 (1.5); default = system scale\n    --size=WxH      window size in logical pixels (default 1152x720)\n    (no flag)       GPU with automatic CPU fallback");
                 return Ok(());
             }
             v if v.starts_with("--render=") => set_renderer(&v["--render=".len()..]),
@@ -56,6 +65,7 @@ fn main() -> iced::Result {
         Explorer::update,
         ui::view,
     )
+    .scale_factor(|state: &Explorer| state.dpi_multiplier())
     .title(|state: &Explorer| state.title())
     .theme(|state: &Explorer| state.theme())
     .subscription(|_state: &Explorer| {
@@ -67,7 +77,7 @@ fn main() -> iced::Result {
         ])
     })
     .window(iced::window::Settings {
-        size: iced::Size::new(1152.0, 720.0),
+        size: window_size(),
         min_size: Some(iced::Size::new(560.0, 360.0)),
         decorations: false, // border module draws our frame
         resizable: true,
@@ -75,6 +85,33 @@ fn main() -> iced::Result {
         ..Default::default()
     })
     .run()
+}
+
+/// `--dpi=N` -> `EXPLORER_DPI`: absolute scale (percent of 96 dpi, or a
+/// direct factor <= 10). Applied as a multiplier over the system scale.
+fn set_dpi(value: &str) {
+    let v: f32 = match value.parse() {
+        Ok(v) if v > 0.0 && v <= 1000.0 => v,
+        _ => {
+            eprintln!("invalid --dpi value '{value}' (expected percent like 100/125/150 or factor <= 10)");
+            std::process::exit(2);
+        }
+    };
+    let factor = if v <= 10.0 { v } else { v / 100.0 };
+    std::env::set_var("EXPLORER_DPI", factor.to_string());
+}
+
+/// `--size=WxH` -> `EXPLORER_SIZE`: initial window size (logical pixels).
+fn set_size(value: &str) {
+    let (w, h) = value
+        .split_once('x')
+        .and_then(|(w, h)| Some((w.parse::<f32>().ok()?, h.parse::<f32>().ok()?)))
+        .filter(|(w, h)| *w >= 480.0 && *h >= 300.0 && *w <= 10000.0 && *h <= 10000.0)
+        .unwrap_or_else(|| {
+            eprintln!("invalid --size value '{value}' (expected like 1152x720, min 480x300)");
+            std::process::exit(2);
+        });
+    std::env::set_var("EXPLORER_SIZE", format!("{w}x{h}"));
 }
 
 /// `--render gpu|cpu` -> iced's `ICED_BACKEND` (wgpu / tiny-skia). An
@@ -91,6 +128,23 @@ fn set_renderer(choice: &str) {
     };
     // SAFETY: single-threaded, before iced::application run.
     std::env::set_var("ICED_BACKEND", backend);
+}
+
+/// Base LOGICAL window size. `--dpi` scales the CONTENT; the window size is
+/// set independently (`--size=WxH` / EXPLORER_SIZE, default below).
+pub const BASE_LOGICAL: (f32, f32) = (1152.0, 720.0);
+
+/// Initial window size: `--size=WxH` if given, else the base.
+fn window_size() -> iced::Size {
+    if let Ok(v) = std::env::var("EXPLORER_SIZE") {
+        if let Some((w, h)) = v
+            .split_once('x')
+            .and_then(|(w, h)| Some((w.parse::<f32>().ok()?, h.parse::<f32>().ok()?)))
+        {
+            return iced::Size::new(w, h);
+        }
+    }
+    iced::Size::new(BASE_LOGICAL.0, BASE_LOGICAL.1)
 }
 
 /// Global keyboard shortcuts (binding table). When an inline rename editor is
