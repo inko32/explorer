@@ -242,17 +242,20 @@ fn frame_color(state: &Explorer, skin: skin::Skin) -> Color {
 /// Win8: min/max width = 60% of close width, short (20px), thin glyphs.
 /// Win10: uniform 46px, nearly full title-bar height.
 fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'static, Message> {
-    // Reference (drive-tools, 100% dpi): buttons touch the top edge but are
-    // NOT full title-bar height (22 of 32); close 44, min/max 26 (~60%);
-    // ~10px glyphs with thick ~2px strokes (the *8 builtin variants).
+    // Pixel ratios from the real Win8 capture (/tmp/user-win8cap.png):
+    // buttons hang below the top frame (y=2), height 21 = 69% of the 30px
+    // title bar; adjacent, no gaps; min/max w = 1.33x h, close w = 2.24x h;
+    // glyph baseline at ~70% of the button height.
     let (mw, cw, h, glyph, y, right_pad, names) = match state.frame_style {
         crate::model::FrameStyle::Win8 => (
-            26.0, 44.0, 22.0, 13.0, 0.0, 6.0,
+            28.0, 47.0, 21.0, 13.0, 2.0, 6.0,
             ("minimize8", "maximize8", "close8"),
         ),
         crate::model::FrameStyle::Win10 => (46.0, 46.0, 29.0, 15.0, 1.0, 1.0,
             ("minimize", "maximize", "close")),
     };
+    // glyph bottoms share one baseline at ~70% of the button height
+    let baseline_pad = h - h * 0.697;
     let one = move |icon_name: &'static str,
                     w: f32,
                     msg: Message,
@@ -260,11 +263,21 @@ fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'static, Messa
                     solid: bool|
           -> Element<'static, Message> {
         button(
-            container(crate::icon::view(icon_name, glyph, &skin))
-                .width(Length::Fixed(w))
-                .height(Length::Fixed(h))
-                .center_x(Length::Fixed(w))
-                .center_y(Length::Fixed(h)),
+            container(
+                container(crate::icon::view(icon_name, glyph, &skin))
+                    .width(Length::Fixed(w))
+                    .height(Length::Fixed(h - baseline_pad))
+                    .center_x(Length::Fixed(w))
+                    .align_y(iced::Alignment::End),
+            )
+            .width(Length::Fixed(w))
+            .height(Length::Fixed(h))
+            .padding(iced::Padding {
+                top: 0.0,
+                right: 0.0,
+                bottom: baseline_pad,
+                left: 0.0,
+            }),
         )
         .width(Length::Fixed(w))
         .height(Length::Fixed(h))
@@ -717,7 +730,7 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     // and recenters AFTER the blocks: `... contextual  title  _^x`.
     // Win8: min/max are 60% of the close button's width; Win10: uniform 46
     let captions_w = match state.frame_style {
-        crate::model::FrameStyle::Win8 => 26.0 + 26.0 + 44.0 + 6.0,
+        crate::model::FrameStyle::Win8 => 28.0 + 28.0 + 47.0 + 6.0,
         crate::model::FrameStyle::Win10 => 46.0 * 3.0,
     };
     let n_ctx = visible_tabs(state)
