@@ -4,8 +4,9 @@
 //! plain-data types below. Dispatch:
 //!
 //! - normal paths → GIO backend (POSIX local fs, volumes, trash)
-//! - paths inside an archive (`.7z`, `.zip`, …) → the 7-Zip backend, so
-//!   archives open like folders (TechSpec-after-iced)
+//! - paths inside an archive (`.7z`, `.zip`, …) → the archive backend
+//!   registry (7z.so COM → tar → 7z CLI), so archives open like folders
+//!   (TechSpec-after-iced)
 //!
 //! POSIX / Windows / Rust-native backends can replace GIO without UI
 //! changes (D4); a native 7z binding can replace the CLI without touching
