@@ -366,6 +366,13 @@ pub fn view<Message: 'static>(name: &str, size: f32, skin: &Skin) -> Element<'st
                 .height(Length::Fixed(size))
                 .into();
         }
+    } else {
+        // not in the registry — builtin SVGs may still serve it
+        // (unknown names render the placeholder file glyph)
+        return svg(crate::icons::builtin_svg(name, skin))
+            .width(Length::Fixed(size))
+            .height(Length::Fixed(size))
+            .into();
     }
     // unknown name: blank
     Space::new().width(Length::Fixed(size)).height(Length::Fixed(size)).into()

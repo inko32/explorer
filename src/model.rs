@@ -8,6 +8,12 @@ pub enum Message {
     WindowOpened(iced::window::Id),
     /// System (compositor) scale factor, learned once at startup.
     SystemScale(f32),
+    /// Press on the address/search splitter: start a drag.
+    BeginBarSplit,
+    /// Cursor moved during a splitter drag (window-logical x).
+    BarSplitMove(f32),
+    /// Hover state of the address/search splitter (drives tint + cursor).
+    SplitterHover(bool),
     Navigate(PathBuf),
     Back,
     Forward,
@@ -129,6 +135,13 @@ pub struct Explorer {
     pub dpi_target: Option<f32>,
     /// Compositor scale factor, learned via `window::scale_factor` after open.
     pub system_scale: f32,
+    /// Search-box width as a share of the content width (the scaling factor
+    /// for the address/search split; polished later).
+    pub search_share: f32,
+    /// Splitter drag in progress.
+    pub bar_split: bool,
+    /// Pointer over the address/search splitter.
+    pub splitter_hover: bool,
     pub maximized: bool,
     /// Last title-bar press (double-click detection: the 2nd press must not
     /// start a window drag, or the in-flight move scrambles the placement of
@@ -239,6 +252,9 @@ impl Explorer {
                 .and_then(|v| v.parse().ok())
                 .filter(|v: &f32| *v > 0.0),
             system_scale: 0.0,
+            search_share: 0.15625, // 180 / 1152
+            bar_split: false,
+            splitter_hover: false,
             maximized: false,
             last_title_press: None,
             self_border: true,
@@ -947,9 +963,38 @@ impl Explorer {
                 iced::Task::none()
             }
             Message::Event(e) => {
+                // splitter drag: track the cursor, end on left release
+                if self.bar_split {
+                    use iced::mouse::{Button as MButton, Event as MEvent};
+                    match &e {
+                        iced::Event::Mouse(MEvent::CursorMoved { position }) => {
+                            return self.update(Message::BarSplitMove(position.x));
+                        }
+                        iced::Event::Mouse(MEvent::ButtonReleased(MButton::Left)) => {
+                            self.bar_split = false;
+                            return iced::Task::none();
+                        }
+                        _ => {}
+                    }
+                }
                 if let Some(m) = crate::handle_key(e, self.renaming.is_some()) {
                     return self.update(m);
                 }
+                iced::Task::none()
+            }
+            Message::BeginBarSplit => {
+                self.bar_split = true;
+                iced::Task::none()
+            }
+            Message::SplitterHover(h) => {
+                self.splitter_hover = h;
+                iced::Task::none()
+            }
+            Message::BarSplitMove(x) => {
+                let (_, fr, _, fl) = crate::ui::frame_insets_pub(self.self_border, self.frame_style);
+                let content_w = (self.win_w - fl - fr).max(320.0);
+                let search_w = (content_w - (x - fl) - 2.5).clamp(120.0, content_w - 280.0);
+                self.search_share = (search_w / content_w).clamp(0.08, 0.6);
                 iced::Task::none()
             }
             Message::FsEvent(ev) => {

@@ -40,6 +40,9 @@ pub fn builtin_svg(name: &str, s: &Skin) -> svg::Handle {
         "maximize" => maximize(s),
         "restore" => restore(s),
         "close" => close(s),
+        "minimize8" => minimize8(s),
+        "maximize8" => maximize8(s),
+        "close8" => close8(s),
         "gear" => gear(s),
         "open" => open(s),
         "copy_path" => copy_path(s),
@@ -567,6 +570,30 @@ pub fn restore(_s: &Skin) -> svg::Handle {
         "{}{}",
         rect(2.5, 2.5, 8.0, 8.0, Color::TRANSPARENT, Some((Color::WHITE, 1.2))),
         rect(5.5, 5.5, 8.0, 8.0, Color::TRANSPARENT, Some((Color::WHITE, 1.2))),
+    ))
+}
+
+/// Win8 caption glyphs (measured from windows-8-file-explorer-drive-tools.png):
+/// `_` is a low underline, `^` a filled rect with a thicker top bar (a mini
+/// window), `X` is old-school flat — arms stop short of the corners with
+/// butt caps (a line "cutting" the X's head and bottom).
+pub fn minimize8(_s: &Skin) -> svg::Handle {
+    doc(rect(3.0, 10.8, 10.0, 2.2, Color::WHITE, None))
+}
+
+pub fn maximize8(_s: &Skin) -> svg::Handle {
+    doc(format!(
+        "{}{}",
+        rect(3.0, 3.2, 10.0, 2.8, Color::WHITE, None),
+        rect(3.0, 6.0, 10.0, 7.2, Color::WHITE, None),
+    ))
+}
+
+pub fn close8(_s: &Skin) -> svg::Handle {
+    doc(format!(
+        "{}{}",
+        line(4.4, 4.4, 11.6, 11.6, Color::WHITE, 2.1),
+        line(11.6, 4.4, 4.4, 11.6, Color::WHITE, 2.1),
     ))
 }
 
