@@ -6,6 +6,8 @@ use crate::fs::{self, FsEvent, Job};
 #[derive(Debug, Clone)]
 pub enum Message {
     WindowOpened(iced::window::Id),
+    /// System (compositor) scale factor, learned once at startup.
+    SystemScale(f32),
     Navigate(PathBuf),
     Back,
     Forward,
@@ -122,6 +124,11 @@ pub struct Explorer {
     pub dark: bool,
     /// `--ui-debug`: outline every element (colored 1px borders).
     pub ui_debug: bool,
+    /// `--dpi=N`: absolute UI scale factor (percent of 96 dpi, or direct).
+    /// None = follow the system scale.
+    pub dpi_target: Option<f32>,
+    /// Compositor scale factor, learned via `window::scale_factor` after open.
+    pub system_scale: f32,
     pub maximized: bool,
     /// Self-rendered window border/title bar (off = native decorations).
     pub self_border: bool,
@@ -223,6 +230,11 @@ impl Explorer {
             forward: Vec::new(),
             dark: false,
             ui_debug: std::env::var_os("EXPLORER_UI_DEBUG").is_some(),
+            dpi_target: std::env::var("EXPLORER_DPI")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .filter(|v: &f32| *v > 0.0),
+            system_scale: 0.0,
             maximized: false,
             self_border: true,
             frame_style: FrameStyle::Win8,
@@ -269,6 +281,15 @@ impl Explorer {
             });
         }
         s
+    }
+
+    /// Scale-factor multiplier for iced (total = system x multiplier, polled
+    /// every frame). Returns 1.0 until the system scale is learned.
+    pub fn dpi_multiplier(&self) -> f32 {
+        match (self.dpi_target, self.system_scale) {
+            (Some(target), s) if s > 0.0 => target / s,
+            _ => 1.0,
+        }
     }
 
     pub fn title(&self) -> String {
@@ -624,6 +645,13 @@ impl Explorer {
         match message {
             Message::WindowOpened(id) => {
                 self.window = Some(id);
+                iced::window::scale_factor(id).map(Message::SystemScale)
+            }
+            Message::SystemScale(s) => {
+                if std::env::var_os("EXPLORER_DEBUG").is_some() {
+                    eprintln!("SystemScale: {s}");
+                }
+                self.system_scale = s;
                 iced::Task::none()
             }
             Message::Navigate(p) => {
@@ -878,6 +906,10 @@ impl Explorer {
             Message::WindowResized(w, h) => {
                 self.viewport_h = h;
                 self.win_w = w;
+                if std::env::var_os("EXPLORER_DEBUG").is_some() {
+                    eprintln!("WindowResized: logical {w}x{h}, system_scale={}, dpi={:?}",
+                        self.system_scale, self.dpi_target);
+                }
                 iced::Task::none()
             }
             Message::ToggleSelfBorder => {
