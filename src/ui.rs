@@ -38,11 +38,15 @@ pub mod skin {
         pub folder_edge: iced::Color,
         pub close_hover: iced::Color,
         pub address_border: iced::Color,
+        /// title-bar text color (dark on the light Win8 blue, white on dark)
+        pub title_text: iced::Color,
     }
 
     pub const LIGHT: Skin = Skin {
-        accent: color!(0x0078D7),
-        accent_dark: color!(0x00559B),
+        // Win8 100% reference (windows-8-file-explorer-drive-tools.png):
+        // light sky-blue chrome, darker File tab, deep outer frame edge
+        accent: color!(0x6BADF6),
+        accent_dark: color!(0x368BE9),
         titlebar_inactive: color!(0xC8C8C8),
         window_bg: color!(0xFFFFFF),
         ribbon_bg: color!(0xF5F6F7),
@@ -56,10 +60,10 @@ pub mod skin {
         hover_btn_border: color!(0xA4CEF9),
         nav_hover: color!(0xE5F3FB),
         nav_hover_border: color!(0x70C0E7),
-        file_tab: color!(0x0066B4),
-        file_tab_hover: color!(0x007DDD),
+        file_tab: color!(0x1979CA),
+        file_tab_hover: color!(0x2B87D8),
         sel: color!(0xCCE8FF),
-        sel_border: color!(0x0078D7),
+        sel_border: color!(0x1979CA),
         sep: color!(0xDADBDC),
         group_sep: color!(0xE2E3E4),
         // note: separators DADBDC outer / E2E3E4 inner (clone)
@@ -70,11 +74,12 @@ pub mod skin {
         folder_edge: color!(0xC88E1E),
         close_hover: color!(0xE81123),
         address_border: color!(0xA9A9A9),
+        title_text: color!(0x1A1A1A),
     };
 
     pub const DARK: Skin = Skin {
-        accent: color!(0x0078D7),
-        accent_dark: color!(0x004A86),
+        accent: color!(0x4A90D9),
+        accent_dark: color!(0x2C5F9E),
         titlebar_inactive: color!(0x3A3A3A),
         window_bg: color!(0x1E1E1E),
         ribbon_bg: color!(0x2D2D2D),
@@ -85,13 +90,13 @@ pub mod skin {
         hover: color!(0x3A4046),
         pressed: color!(0x4A525A),
         hover_btn: color!(0x3A4046),
-        hover_btn_border: color!(0x0078D7),
+        hover_btn_border: color!(0x4A90D9),
         nav_hover: color!(0x3A4046),
-        nav_hover_border: color!(0x0078D7),
-        file_tab: color!(0x0066B4),
-        file_tab_hover: color!(0x007DDD),
+        nav_hover_border: color!(0x4A90D9),
+        file_tab: color!(0x1979CA),
+        file_tab_hover: color!(0x2B87D8),
         sel: color!(0x2F5480),
-        sel_border: color!(0x0078D7),
+        sel_border: color!(0x4A90D9),
         sep: color!(0x454545),
         group_sep: color!(0x505050),
         text: color!(0xE8E8E8),
@@ -101,6 +106,7 @@ pub mod skin {
         folder_edge: color!(0x8A6618),
         close_hover: color!(0xE81123),
         address_border: color!(0x555555),
+        title_text: color!(0xFFFFFF),
     };
 
     impl Skin {
@@ -227,7 +233,9 @@ fn frame_color(state: &Explorer, skin: skin::Skin) -> Color {
 fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'static, Message> {
     let (mw, cw, h, glyph, y, right_pad) = match state.frame_style {
         // min/max = 75% of close; shifted left by the side-border width
-        crate::model::FrameStyle::Win8 => (39.0, 52.0, 23.0, 13.0, 0.0, 6.0),
+        // reference: buttons span the full title bar (frame + 30px), close
+        // 44px, min/max ~60% of close
+        crate::model::FrameStyle::Win8 => (26.0, 44.0, 32.0, 13.0, 0.0, 6.0),
         crate::model::FrameStyle::Win10 => (46.0, 46.0, 29.0, 15.0, 1.0, 1.0),
     };
     let one = move |icon_name: &'static str,
@@ -394,20 +402,48 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
     });
     let (ft, fr, fb, fl) = frame_insets(state);
     let framed: Element<Message> = if state.self_border {
-        container(root)
+        // Win8: two-tone frame — deep 1px outer edge (#368BE9), light fill
+        // (#6BADF6); total insets unchanged (2/6/6/6). Win10: 1px dark.
+        if state.frame_style == crate::model::FrameStyle::Win8 {
+            container(
+                container(root)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .padding(iced::Padding {
+                        top: ft - 1.0,
+                        right: fr - 1.0,
+                        bottom: fb - 1.0,
+                        left: fl - 1.0,
+                    })
+                    .style(move |_: &iced::Theme| container::Style {
+                        background: Some(skin.accent.into()),
+                        ..Default::default()
+                    }),
+            )
             .width(Length::Fill)
             .height(Length::Fill)
-            .padding(iced::Padding {
-                top: ft,
-                right: fr,
-                bottom: fb,
-                left: fl,
-            })
+            .padding(1.0)
             .style(move |_: &iced::Theme| container::Style {
-                background: Some(frame_color(state, skin).into()),
+                background: Some(skin.accent_dark.into()),
                 ..Default::default()
             })
             .into()
+        } else {
+            container(root)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .padding(iced::Padding {
+                    top: ft,
+                    right: fr,
+                    bottom: fb,
+                    left: fl,
+                })
+                .style(move |_: &iced::Theme| container::Style {
+                    background: Some(frame_color(state, skin).into()),
+                    ..Default::default()
+                })
+                .into()
+        }
     } else {
         root.into()
     };
@@ -666,7 +702,7 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     // and recenters AFTER the blocks: `... contextual  title  _^x`.
     // Win8: min/max are 60% of the close button's width; Win10: uniform 46
     let captions_w = match state.frame_style {
-        crate::model::FrameStyle::Win8 => 39.0 + 39.0 + 52.0 + 6.0,
+        crate::model::FrameStyle::Win8 => 26.0 + 26.0 + 44.0 + 6.0,
         crate::model::FrameStyle::Win10 => 46.0 * 3.0,
     };
     let n_ctx = visible_tabs(state)
@@ -705,7 +741,7 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         let title = container(
             text(elide(&state.title(), elide_w))
                 .size(12.0)
-                .color(Color::WHITE)
+                .color(skin.title_text)
                 .width(Length::Shrink),
         )
         .height(Length::Fill)
@@ -740,7 +776,7 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     let title = container(
         text(elide(&state.title(), title_zone - 8.0))
             .size(12.0)
-            .color(Color::WHITE)
+            .color(skin.title_text)
             .width(Length::Shrink),
     )
     .width(Length::Fixed(title_zone))
@@ -1245,7 +1281,8 @@ fn group(caption: &str, width: f32, content: Element<'static, Message>, skin: sk
             container(text(caption.to_string()).size(11.0).color(skin.subtle))
                 .width(Length::Fixed(width))
                 .height(Length::Fixed(15.0))
-                .center_x(Length::Fixed(width)),
+                .center_x(Length::Fixed(width))
+                .style(bg(skin.ribbon_bg)),
         ],
         strip,
     ]
@@ -1688,7 +1725,7 @@ fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
             .padding([0.0, 4.0]),
     )
     .width(Length::Fill)
-    .height(Length::Fixed(28.0))
+    .height(Length::Fixed(30.0))
     .style(move |_t: &iced::Theme| container::Style {
         background: Some(skin.window_bg.into()),
         border: iced::Border {
@@ -1699,19 +1736,35 @@ fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         ..Default::default()
     });
 
+    // search box: placeholder left, recessed magnifier button at the right
+    // end (Win8: light-blue tint + thin divider)
+    let search_btn = container(icon("search", 13.0, skin))
+        .width(Length::Fixed(26.0))
+        .height(Length::Fill)
+        .center_x(Length::Fixed(26.0))
+        .center_y(Length::Fixed(30.0))
+        .style(move |_t: &iced::Theme| container::Style {
+            background: Some(Color::from_rgb8(0xE8, 0xF1, 0xFB).into()),
+            border: iced::Border {
+                color: Color::from_rgb8(0xA9, 0xC4, 0xE8),
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        });
     let search = container(
         row![
-            icon("search", 14.0, skin),
             text(format!("Search {}", state.title()))
                 .size(12.0)
                 .color(skin.disabled),
+            Space::new().width(Length::Fill),
+            search_btn,
         ]
-        .spacing(6)
         .align_y(iced::Alignment::Center),
     )
-    .width(Length::Fixed(200.0))
-    .height(Length::Fixed(28.0))
-    .padding([0.0, 8.0])
+    .width(Length::Fixed(180.0))
+    .height(Length::Fixed(30.0))
+    .padding(iced::Padding { top: 0.0, right: 0.0, bottom: 0.0, left: 8.0 })
     .style(move |_t: &iced::Theme| container::Style {
         background: Some(skin.window_bg.into()),
         border: iced::Border {
