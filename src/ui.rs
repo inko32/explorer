@@ -1623,7 +1623,7 @@ fn big_cmd_split(
     let line2_row: Element<Message> = match line2 {
         Some(last) => row![
             text(last).size(11.0).color(tc),
-            drop_arrow_el(tc, 3.5),
+            drop_arrow_el(tc, 5.5),
         ]
         .spacing(2)
         .align_y(iced::Alignment::Start)
@@ -1655,8 +1655,8 @@ fn big_cmd_split(
     .into()
 }
 
-/// 90-degree dropdown triangle, 7x4 px, top-padded so its base sits at the
-/// x-height top of an adjacent 11px label (~3.5 px below the line top).
+/// 90-degree dropdown triangle, 7x4 px, top-padded so its base touches the
+/// x-height TOP of an adjacent 11px label (5.5 px below the line top).
 fn drop_arrow_el(c: Color, top_pad: f32) -> Element<'static, Message> {
     container(
         iced::widget::svg(crate::icons::drop_arrow(c))
