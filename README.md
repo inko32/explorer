@@ -20,6 +20,7 @@ explains the switch).
 source ./env.sh        # build intermediates go to zram, not the SSD
 cargo run              # opens the explorer window (GPU, CPU fallback)
 cargo run -- --render cpu   # force CPU (tiny-skia); --render gpu is strict
+cargo run -- --ui-debug     # outline every UI element (colored 1px borders)
 make dist              # stripped release binary in dist/
 ```
 
