@@ -18,7 +18,8 @@ explains the switch).
 
 ```sh
 source ./env.sh        # build intermediates go to zram, not the SSD
-cargo run              # opens the explorer window
+cargo run              # opens the explorer window (GPU, CPU fallback)
+cargo run -- --render cpu   # force CPU (tiny-skia); --render gpu is strict
 make dist              # stripped release binary in dist/
 ```
 
