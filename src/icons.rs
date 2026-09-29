@@ -7,7 +7,7 @@
 use iced::widget::svg;
 use iced::Color;
 
-use crate::ui::skin::Skin;
+use crate::ui_common::skin::Skin;
 
 /// Builtin theme-colored SVG generator dispatch (registry `svg: builtin`).
 pub fn builtin_svg(name: &str, s: &Skin) -> svg::Handle {
@@ -579,7 +579,7 @@ pub fn restore(_s: &Skin) -> svg::Handle {
 pub fn drop_arrow(c: Color) -> svg::Handle {
     svg::Handle::from_memory(
         format!(
-            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 4'><path d='M0 0 H8 L4 4 Z' fill='{}'/></svg>",
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 6 3'><path d='M0 0 H6 L3 3 Z' fill='{}'/></svg>",
             hex(c)
         )
         .into_bytes(),

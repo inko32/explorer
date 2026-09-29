@@ -67,7 +67,7 @@ pub enum Message {
     /// Minimize the ribbon to its tab row (Win8 collapse chevron).
     ToggleRibbonCollapse,
     /// Begin a compositor-driven edge resize (custom border mode).
-    StartResize(crate::ui::ResizeDir),
+    StartResize(crate::border::ResizeDir),
     /// Pressed a contextual title-bar block: activate the tab AND let the
     /// band drag the window (a plain click without movement still switches).
     BlockPress(String),
@@ -334,9 +334,9 @@ impl Explorer {
 
     pub fn theme(&self) -> iced::Theme {
         if self.dark {
-            iced::Theme::custom("win8-dark", crate::ui::skin::DARK.palette())
+            iced::Theme::custom("win8-dark", crate::ui_common::skin::DARK.palette())
         } else {
-            iced::Theme::custom("win8-light", crate::ui::skin::LIGHT.palette())
+            iced::Theme::custom("win8-light", crate::ui_common::skin::LIGHT.palette())
         }
     }
 
@@ -673,6 +673,18 @@ impl Explorer {
                     eprintln!("SystemScale: {s}");
                 }
                 self.system_scale = s;
+                // iced applies the dpi multiplier to the viewport WITHOUT
+                // re-emitting a Resized event, so once `--dpi` changes the
+                // effective scale the cached logical win_w is stale (e.g.
+                // --dpi=100 on a 150% system: win_w still 1152 while the
+                // logical width becomes 1728) and the splitter math stops
+                // tracking the cursor. Re-query the size under the new scale.
+                if self.dpi_target.is_some() {
+                    if let Some(id) = self.window {
+                        return iced::window::size(id)
+                            .map(|sz| Message::WindowResized(sz.width, sz.height));
+                    }
+                }
                 iced::Task::none()
             }
             Message::Navigate(p) => {
@@ -991,9 +1003,12 @@ impl Explorer {
                 iced::Task::none()
             }
             Message::BarSplitMove(x) => {
-                let (_, fr, _, fl) = crate::ui::frame_insets_pub(self.self_border, self.frame_style);
+                let (_, fr, _, fl) = crate::border::frame_insets_pub(self.self_border, self.frame_style);
                 let content_w = (self.win_w - fl - fr).max(320.0);
-                let search_w = (content_w - (x - fl) - 2.5).clamp(120.0, content_w - 280.0);
+                // search right edge sits at content_w - 6 (band padding); the
+                // splitter center is 4px left of the search left edge (half
+                // the 4px splitter + 2px row spacing) -> offset 6 + 4 = 10
+                let search_w = (content_w - (x - fl) - 10.0).clamp(120.0, content_w - 280.0);
                 self.search_share = (search_w / content_w).clamp(0.08, 0.6);
                 iced::Task::none()
             }

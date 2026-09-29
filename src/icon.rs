@@ -15,7 +15,7 @@ use std::sync::OnceLock;
 use iced::widget::{image, svg, Space};
 use iced::{Element, Length};
 
-use crate::ui::skin::Skin;
+use crate::ui_common::skin::Skin;
 
 #[derive(Debug, serde::Deserialize)]
 struct IconDef {
