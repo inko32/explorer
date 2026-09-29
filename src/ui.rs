@@ -1452,7 +1452,7 @@ fn group_from_config(g: &GroupDef, state: &Explorer, skin: skin::Skin, x_base: f
                 items: items.clone(),
             });
             let arrow: Element<Message> = small_cmd_active(
-                crate::icon::view("chevron_down", 10.0, &skin),
+                drop_arrow_el(if enabled { skin.subtle } else { skin.disabled }, 0.0),
                 "",
                 18.0,
                 row_h,
@@ -1623,12 +1623,12 @@ fn big_cmd_split(
     let line2_row: Element<Message> = match line2 {
         Some(last) => row![
             text(last).size(11.0).color(tc),
-            text("\u{25BC}").size(8.0).color(tc),
+            drop_arrow_el(tc, 3.5),
         ]
         .spacing(2)
-        .align_y(iced::Alignment::Center)
+        .align_y(iced::Alignment::Start)
         .into(),
-        None => text("\u{25BC}").size(8.0).color(tc).into(),
+        None => drop_arrow_el(tc, 0.0),
     };
     let bottom_col = column![
         container(text(line1).size(11.0).color(tc))
@@ -1652,6 +1652,23 @@ fn big_cmd_split(
     dbg(name, column![dbg("big_split_icon", top), dbg("big_split_label", bottom)]
         .width(Length::Fixed(width))
         .align_x(iced::Alignment::Center))
+    .into()
+}
+
+/// 90-degree dropdown triangle, 7x4 px, top-padded so its base sits at the
+/// x-height top of an adjacent 11px label (~3.5 px below the line top).
+fn drop_arrow_el(c: Color, top_pad: f32) -> Element<'static, Message> {
+    container(
+        iced::widget::svg(crate::icons::drop_arrow(c))
+            .width(Length::Fixed(7.0))
+            .height(Length::Fixed(4.0)),
+    )
+    .padding(iced::Padding {
+        top: top_pad,
+        right: 0.0,
+        bottom: 0.0,
+        left: 0.0,
+    })
     .into()
 }
 
