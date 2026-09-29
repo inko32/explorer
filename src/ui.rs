@@ -215,7 +215,7 @@ pub fn frame_insets_pub(self_border: bool, style: crate::model::FrameStyle) -> (
         return (0.0, 0.0, 0.0, 0.0);
     }
     match style {
-        crate::model::FrameStyle::Win8 => (2.0, 6.0, 6.0, 6.0),
+        crate::model::FrameStyle::Win8 => (1.0, 6.0, 6.0, 6.0),
         crate::model::FrameStyle::Win10 => (1.0, 1.0, 1.0, 1.0),
     }
 }
@@ -225,7 +225,7 @@ fn frame_insets(state: &Explorer) -> (f32, f32, f32, f32) {
         return (0.0, 0.0, 0.0, 0.0);
     }
     match state.frame_style {
-        crate::model::FrameStyle::Win8 => (2.0, 6.0, 6.0, 6.0),
+        crate::model::FrameStyle::Win8 => (1.0, 6.0, 6.0, 6.0),
         crate::model::FrameStyle::Win10 => (1.0, 1.0, 1.0, 1.0),
     }
 }
@@ -242,23 +242,38 @@ fn frame_color(state: &Explorer, skin: skin::Skin) -> Color {
 /// Win8: min/max width = 60% of close width, short (20px), thin glyphs.
 /// Win10: uniform 46px, nearly full title-bar height.
 fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'static, Message> {
-    // Reference (drive-tools, 100% dpi): buttons touch the top edge but are
-    // NOT full title-bar height (22 of 32); close 44, min/max 26 (~60%);
-    // ~10px glyphs with thick ~2px strokes (the *8 builtin variants).
+    // Pixel ratios from the real Win8 capture (/tmp/user-win8cap.png):
+    // buttons hang below the top frame (y=2), height 21 = 69% of the 30px
+    // title bar; adjacent, no gaps; min/max w = 1.33x h, close w = 2.24x h;
+    // glyph baseline at ~70% of the button height.
     let (mw, cw, h, glyph, y, right_pad, names) = match state.frame_style {
         crate::model::FrameStyle::Win8 => (
-            26.0, 44.0, 22.0, 13.0, 0.0, 6.0,
+            28.0, 47.0, 21.0, 13.0, 1.0, 6.0,
             ("minimize8", "maximize8", "close8"),
         ),
         crate::model::FrameStyle::Win10 => (46.0, 46.0, 29.0, 15.0, 1.0, 1.0,
             ("minimize", "maximize", "close")),
     };
+    // Win8: buttons are opaque at rest (titlebar blue / close red) so the
+    // frame's top edge never shows as a line above/through them
+    let rest_bg: Option<Color> = match state.frame_style {
+        crate::model::FrameStyle::Win8 => Some(skin.accent),
+        crate::model::FrameStyle::Win10 => None,
+    };
+    // glyph bottoms share one baseline at ~70% of the button height
     let one = move |icon_name: &'static str,
                     w: f32,
                     msg: Message,
                     hover_bg: Color,
                     solid: bool|
           -> Element<'static, Message> {
+        let rest = if solid { Some(skin.close_hover) } else { rest_bg };
+        let blend_white = |c: Color, a: f32| Color {
+            r: c.r + (1.0 - c.r) * a,
+            g: c.g + (1.0 - c.g) * a,
+            b: c.b + (1.0 - c.b) * a,
+            a: 1.0,
+        };
         button(
             container(crate::icon::view(icon_name, glyph, &skin))
                 .width(Length::Fixed(w))
@@ -278,9 +293,15 @@ fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'static, Messa
                     Some(Color::from_rgb8(0x8F, 0x0A, 0x15).into())
                 }
                 (true, _) => Some(Color::from_rgb8(0xC2, 0x0E, 0x1C).into()),
-                (false, button::Status::Hovered) => Some(hover_bg.into()),
-                (false, button::Status::Pressed) => Some(hover_bg.scale_alpha(0.7).into()),
-                _ => None,
+                (false, button::Status::Hovered) => Some(match rest {
+                    Some(c) => blend_white(c, 0.18).into(),
+                    None => hover_bg.into(),
+                }),
+                (false, button::Status::Pressed) => Some(match rest {
+                    Some(c) => blend_white(c, 0.32).into(),
+                    None => hover_bg.scale_alpha(0.7).into(),
+                }),
+                (false, _) => rest.map(Into::into),
             },
             text_color: Color::WHITE,
             border: Default::default(),
@@ -717,7 +738,7 @@ fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     // and recenters AFTER the blocks: `... contextual  title  _^x`.
     // Win8: min/max are 60% of the close button's width; Win10: uniform 46
     let captions_w = match state.frame_style {
-        crate::model::FrameStyle::Win8 => 26.0 + 26.0 + 44.0 + 6.0,
+        crate::model::FrameStyle::Win8 => 28.0 + 28.0 + 47.0 + 6.0,
         crate::model::FrameStyle::Win10 => 46.0 * 3.0,
     };
     let n_ctx = visible_tabs(state)

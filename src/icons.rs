@@ -573,27 +573,36 @@ pub fn restore(_s: &Skin) -> svg::Handle {
     ))
 }
 
-/// Win8 caption glyphs (measured from windows-8-file-explorer-drive-tools.png):
-/// `_` is a low underline, `^` a filled rect with a thicker top bar (a mini
-/// window), `X` is old-school flat — arms stop short of the corners with
-/// butt caps (a line "cutting" the X's head and bottom).
-pub fn minimize8(_s: &Skin) -> svg::Handle {
-    doc(rect(3.0, 10.8, 10.0, 2.2, Color::WHITE, None))
+/// Win8 caption glyphs, redrawn pixel-per-pixel from /tmp/user-win8cap.png
+/// (real Win8 capture). Ratios are against the 21px button height, rendered
+/// in a 16-unit box at 13px. min/max take the title-bar text color (dark on
+/// the light blue), the X stays white. All three share one baseline at
+/// ~70% of the button (`_` bottom = box bottom = X bottom, like text).
+pub fn minimize8(s: &Skin) -> svg::Handle {
+    let c = s.title_text;
+    // 7.3 x 2.1 px low bar
+    doc(rect(3.5, 11.4, 9.0, 2.6, c, None))
 }
 
-pub fn maximize8(_s: &Skin) -> svg::Handle {
+pub fn maximize8(s: &Skin) -> svg::Handle {
+    let c = s.title_text;
+    // 10.5 x 8.4 px outline, top bar 2.1 px, sides/bottom 1.05 px
+    // (a mini window with a thicker title bar)
     doc(format!(
-        "{}{}",
-        rect(3.0, 3.2, 10.0, 2.8, Color::WHITE, None),
-        rect(3.0, 6.0, 10.0, 7.2, Color::WHITE, None),
+        "{}{}{}{}",
+        rect(1.55, 2.85, 12.9, 2.6, c, None),
+        rect(1.55, 2.85, 1.3, 10.35, c, None),
+        rect(13.15, 2.85, 1.3, 10.35, c, None),
+        rect(1.55, 11.9, 12.9, 1.3, c, None),
     ))
 }
 
 pub fn close8(_s: &Skin) -> svg::Handle {
+    // 8.4 x 7.3 px, stroke 2.1, flat butt ends cut short of the corners
     doc(format!(
         "{}{}",
-        line(4.4, 4.4, 11.6, 11.6, Color::WHITE, 2.1),
-        line(11.6, 4.4, 4.4, 11.6, Color::WHITE, 2.1),
+        line(2.85, 3.5, 13.15, 12.55, Color::WHITE, 2.6),
+        line(13.15, 3.5, 2.85, 12.55, Color::WHITE, 2.6),
     ))
 }
 
