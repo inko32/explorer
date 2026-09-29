@@ -1211,6 +1211,66 @@ fn cmd_style(
 }
 
 
+/// Compact two-line label for big buttons (split or plain): line 1 = all
+/// but the last word, line 2 = last word (plain) or "word v" (split) or the
+/// lone arrow. 11px text at line_height 1.1, two 12px rows in the 30px zone.
+fn big_label_lines(
+    label: &str,
+    line2_extra: Option<Element<'static, Message>>, // e.g. the dropdown arrow
+    width: f32,
+    tc: Color,
+) -> (Element<'static, Message>, Element<'static, Message>) {
+    let words: Vec<&str> = label.split_whitespace().collect();
+    let (line1, line2): (String, Option<String>) = if words.len() > 1 {
+        (
+            words[..words.len() - 1].join(" "),
+            Some(words[words.len() - 1].to_string()),
+        )
+    } else {
+        (label.to_string(), None)
+    };
+    let l1: Element<Message> = container(
+        text(line1)
+            .size(11.0)
+            .line_height(1.1)
+            .color(tc)
+            .align_x(iced::alignment::Horizontal::Center),
+    )
+    .width(Length::Fixed(width))
+    .height(Length::Fixed(12.0))
+    .center_x(Length::Fixed(width))
+    .into();
+    let l2: Element<Message> = match (line2, line2_extra) {
+        (Some(last), extra) => {
+            let mut r = row![text(last)
+                .size(11.0)
+                .line_height(1.1)
+                .color(tc)]
+            .spacing(2)
+            .align_y(iced::Alignment::Start);
+            if let Some(e) = extra {
+                r = r.push(e);
+            }
+            container(r)
+                .width(Length::Fixed(width))
+                .height(Length::Fixed(12.0))
+                .center_x(Length::Fixed(width))
+                .into()
+        }
+        (None, Some(extra)) => container(extra)
+            .width(Length::Fixed(width))
+            .height(Length::Fixed(12.0))
+            .center_x(Length::Fixed(width))
+            .align_y(iced::Alignment::Start)
+            .into(),
+        (None, None) => Space::new()
+            .width(Length::Fixed(width))
+            .height(Length::Fixed(12.0))
+            .into(),
+    };
+    (l1, l2)
+}
+
 fn big_cmd_w(
     icon_el: Element<'static, Message>,
     label: &str,
@@ -1221,6 +1281,8 @@ fn big_cmd_w(
 ) -> Element<'static, Message> {
     // icon zone 46 (icon a bit higher) + always-2-line label zone 30 = 76px,
     // exactly three 23px small rows + spacing + group pad
+    let tc = if enabled { skin.text } else { skin.disabled };
+    let (l1, l2) = big_label_lines(label, None, width, tc);
     let content = column![
         container(icon_el)
             .width(Length::Fixed(width))
@@ -1229,17 +1291,11 @@ fn big_cmd_w(
             .center_y(Length::Fixed(46.0)),
         dbg(
             "big_label",
-            container(
-                text(label.to_string())
-                    .size(11.0)
-                    .line_height(1.15)
-                    .color(if enabled { skin.text } else { skin.disabled })
-                    .align_x(iced::alignment::Horizontal::Center),
-            )
-            .width(Length::Fixed(width))
-            .height(Length::Fixed(30.0))
-            .center_x(Length::Fixed(width))
-            .center_y(Length::Fixed(30.0)),
+            container(column![l1, l2].width(Length::Fixed(width)))
+                .width(Length::Fixed(width))
+                .height(Length::Fixed(30.0))
+                .center_x(Length::Fixed(width))
+                .center_y(Length::Fixed(30.0)),
         ),
     ]
     .width(Length::Fixed(width));
@@ -1610,40 +1666,8 @@ fn big_cmd_split(
         (true, Some(m)) => top.on_press(m).into(),
         _ => top.into(),
     };
-    // one word: `Delete` / `v`; two words: `Navigation` / `Pane v`
-    let words: Vec<&str> = label.split_whitespace().collect();
-    let (line1, line2): (String, Option<String>) = if words.len() > 1 {
-        (
-            words[..words.len() - 1].join(" "),
-            Some(words[words.len() - 1].to_string()),
-        )
-    } else {
-        (label.to_string(), None)
-    };
-    let line2_row: Element<Message> = match line2 {
-        Some(last) => row![
-            text(last).size(11.0).color(tc),
-            drop_arrow_el(tc, 5.5),
-        ]
-        .spacing(2)
-        .align_y(iced::Alignment::Start)
-        .into(),
-        // arrow alone on line 2 (one-word labels): same offset and height as
-        // the "word v" row, so all big split buttons' line 2 aligns
-        None => container(drop_arrow_el(tc, 5.5))
-            .height(Length::Fixed(13.2))
-            .align_y(iced::Alignment::Start)
-            .into(),
-    };
-    let bottom_col = column![
-        container(text(line1).size(11.0).color(tc))
-            .width(Length::Fixed(width))
-            .center_x(Length::Fixed(width)),
-        container(line2_row)
-            .width(Length::Fixed(width))
-            .center_x(Length::Fixed(width)),
-    ]
-    .width(Length::Fixed(width));
+    let (l1, l2) = big_label_lines(label, Some(drop_arrow_el(tc, 5.0)), width, tc);
+    let bottom_col = column![l1, l2].width(Length::Fixed(width));
     let bottom = button(bottom_col)
     .width(Length::Fixed(width))
     .height(Length::Fixed(30.0))
