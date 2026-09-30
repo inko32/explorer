@@ -1296,7 +1296,7 @@ fn group_from_config(g: &GroupDef, state: &Explorer, skin: skin::Skin, x_base: f
                         y: ribbon_body_y() + GROUP_TOP_PAD + BIG_BTN_H,
                         source: cmd.id.clone(),
                         source_w: w,
-                        items: items.clone(),
+                        items: items.iter().cloned().map(crate::model::MenuEntry::Item).collect(),
                     }),
                     skin,
                 )
@@ -1352,7 +1352,7 @@ fn group_from_config(g: &GroupDef, state: &Explorer, skin: skin::Skin, x_base: f
                 y: ay,
                 source: cmd.id.clone(),
                 source_w: w,
-                items: items.clone(),
+                items: items.iter().cloned().map(crate::model::MenuEntry::Item).collect(),
             });
             let arrow: Element<Message> = small_cmd_active(
                 drop_arrow_el(if enabled { skin.subtle } else { skin.disabled }, 0.0),
@@ -1413,7 +1413,7 @@ fn group_from_config(g: &GroupDef, state: &Explorer, skin: skin::Skin, x_base: f
                 y: ribbon_body_y() + GROUP_TOP_PAD + BIG_BTN_H,
                 source: g.label.clone(),
                 source_w: gw,
-                items,
+                items: items.into_iter().map(crate::model::MenuEntry::Item).collect(),
             });
         let grid = container(content)
             .width(Length::Fixed(gw - 24.0))

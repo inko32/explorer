@@ -6,7 +6,7 @@ use iced::{Color, Element, Length};
 
 use crate::model::{Explorer, Message};
 use crate::ribbon;
-use crate::ui_common::{dbg, skin, UI_DEBUG};
+use crate::ui_common::{bg, dbg, skin, UI_DEBUG, MENU_ITEM_H, MENU_SECTION_H, MENU_W};
 
 pub fn view(state: &Explorer) -> Element<'_, Message> {
     UI_DEBUG.store(state.ui_debug, std::sync::atomic::Ordering::Relaxed);
@@ -22,23 +22,7 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
     root = root.push(dbg("main_row", row![nav, fv].height(Length::Fill)));
     root = root.push(dbg("statusbar", crate::status::statusbar(state, skin)));
     // ribbon dropdown menu (above everything; backdrop click closes)
-    let menu_layer: Option<Element<Message>> = state.open_menu.as_ref().map(|m| {
-        let menu_w = m
-            .items
-            .iter()
-            .map(|id| {
-                state
-                    .ribbon
-                    .commands
-                    .get(id)
-                    .map(|_| id)
-                    .unwrap_or(id)
-            })
-            .map(|_| 0.0f32)
-            .sum::<f32>(); // placeholder, computed below
-        let _ = menu_w;
-        menu_overlay(state, m, skin)
-    });
+    let menu_layer: Option<Element<Message>> = state.open_menu.as_ref().map(|m| menu_overlay(state, m, skin));
     let (ft, fr, fb, fl) = crate::border::frame_insets(state);
     let framed: Element<Message> = if state.self_border {
         // Win8: two-tone frame — deep 1px outer edge (#368BE9), light fill
@@ -111,67 +95,137 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
 }
 
 /// Dropdown menu overlay: transparent backdrop (click closes) + the menu
-/// popup anchored under the ribbon at x.
+/// popup anchored under the ribbon at x. MS Paint metrics: menu bg FBFCFD,
+/// border DCDDDE, fixed 140px width; items 22px (16px icon + 16px gap +
+/// label, TMenuItem Insets(3,8,3,5)); section headers 28px bold on F5F6F7
+/// with D9DADB lines (TMenuSection).
 fn menu_overlay(state: &Explorer, m: &crate::model::OpenMenu, skin: skin::Skin) -> Element<'static, Message> {
+    use crate::model::MenuEntry;
     let has_sel = !state.selected.is_empty();
     let has_clip = state.clipboard.is_some();
     let has_items = !state.entries.is_empty();
-    let mut labels: Vec<(String, String, bool)> = Vec::new(); // (id, label, enabled)
-    for id in &m.items {
-        // labels: ribbon button label -> command-table label -> raw id
-        let mut label = String::new();
-        let mut icon_name: Option<String> = None;
-        for tab in state.ribbon.tabs.iter().chain(state.ribbon.contextual_tabs.iter()) {
-            for g in &tab.groups {
-                for c in &g.commands {
-                    if &c.id == id {
-                        label = c.label.clone();
-                        icon_name = c.icon.clone();
+    // resolve labels/icons for item rows (sections carry their own label)
+    let mut labels: Vec<(MenuEntry, String, Option<String>, bool)> = Vec::new();
+    for entry in &m.items {
+        match entry {
+            MenuEntry::Section(name) => {
+                labels.push((entry.clone(), name.clone(), None, false));
+            }
+            MenuEntry::Item(id) => {
+                // labels: ribbon button label -> command-table label -> raw id
+                let mut label = String::new();
+                let mut icon_name: Option<String> = None;
+                for tab in state.ribbon.tabs.iter().chain(state.ribbon.contextual_tabs.iter()) {
+                    for g in &tab.groups {
+                        for c in &g.commands {
+                            if &c.id == id {
+                                label = c.label.clone();
+                                icon_name = c.icon.clone();
+                            }
+                        }
                     }
                 }
+                if label.is_empty() {
+                    label = state
+                        .ribbon
+                        .commands
+                        .get(id)
+                        .and_then(|d| d.label.clone())
+                        .unwrap_or_else(|| id.clone());
+                }
+                let enabled = ribbon::command_enabled(id, has_sel, has_clip, has_items);
+                labels.push((entry.clone(), label, icon_name, enabled));
             }
         }
-        if label.is_empty() {
-            label = state
-                .ribbon
-                .commands
-                .get(id)
-                .and_then(|d| d.label.clone())
-                .unwrap_or_else(|| id.clone());
-        }
-        let enabled = ribbon::command_enabled(id, has_sel, has_clip, has_items);
-        labels.push((id.clone(), label, enabled));
-        let _ = icon_name;
     }
+    // TPopupMenu setWidth(140): 140 is the floor, labels can push it wider
     let w = labels
         .iter()
-        .map(|(_, l, _)| l.chars().count() as f32 * 7.0 + 34.0)
-        .fold(m.source_w.max(120.0), f32::max);
+        .map(|(_, l, _, _)| l.chars().count() as f32 * 7.0 + 34.0)
+        .fold(m.source_w.max(MENU_W), f32::max);
     let mut items_col = column![].spacing(0);
-    for (id, label, enabled) in labels {
-        let item_label: iced::widget::Text<'_, iced::Theme, iced::Renderer> = text(label)
-            .size(11.5)
-            .color(if enabled { skin.text } else { skin.disabled });
-        let item = button(item_label)
-        .width(Length::Fixed(w))
-        .height(Length::Fixed(22.0))
-        .padding([0.0, 10.0])
-        .style(move |_t: &iced::Theme, status: button::Status| button::Style {
-            background: match (enabled, status) {
-                (true, button::Status::Hovered) => Some(skin.nav_hover.into()),
-                _ => None,
-            },
-            text_color: if enabled { skin.text } else { skin.disabled },
-            border: Default::default(),
-            shadow: Default::default(),
-            snap: true,
-        });
-        let item_el: Element<Message> = if enabled {
-            item.on_press(Message::MenuPick(id)).into()
-        } else {
-            item.into()
-        };
-        items_col = items_col.push(item_el);
+    let mut first_section = true;
+    for (entry, label, icon_name, enabled) in labels {
+        match entry {
+            MenuEntry::Section(_) => {
+                // TMenuSection: F5F6F7 fill, D9DADB lines (no top line on the
+                // first section), bold 12px text at 10px from the left;
+                // height = font(12) + 16 = 28
+                let top_line: Element<Message> = if first_section {
+                    Space::new().width(Length::Fill).height(Length::Fixed(0.0)).into()
+                } else {
+                    container(Space::new().width(Length::Fill).height(Length::Fixed(1.0)))
+                        .style(move |_| container::Style {
+                            background: Some(skin.menu_section_border.into()),
+                            ..Default::default()
+                        })
+                        .into()
+                };
+                first_section = false;
+                let head = container(
+                    text(label)
+                        .size(12.0)
+                        .color(skin.text)
+                        .width(Length::Fill),
+                )
+                .width(Length::Fixed(w))
+                .height(Length::Fixed(MENU_SECTION_H - 2.0))
+                .align_y(iced::Alignment::Center)
+                .padding(iced::Padding { top: 0.0, right: 0.0, bottom: 0.0, left: 10.0 })
+                .style(bg(skin.ribbon_bg));
+                let bottom_line = container(
+                    Space::new().width(Length::Fill).height(Length::Fixed(1.0)),
+                )
+                .style(move |_| container::Style {
+                    background: Some(skin.menu_section_border.into()),
+                    ..Default::default()
+                });
+                items_col = items_col.push(column![top_line, head, bottom_line].width(Length::Fixed(w)));
+            }
+            MenuEntry::Item(id) => {
+                // TMenuItem: 16px icon + 16px iconTextGap + label, Insets(3,8,3,5)
+                let label_row = row![
+                    container(
+                        crate::icon::view(icon_name.as_deref().unwrap_or("file"), 16.0, &skin),
+                    )
+                    .width(Length::Fixed(16.0))
+                    .height(Length::Fixed(16.0))
+                    .center_x(Length::Fixed(16.0))
+                    .center_y(Length::Fixed(16.0)),
+                    text(label)
+                        .size(12.0)
+                        .color(if enabled { skin.text } else { skin.disabled }),
+                ]
+                .spacing(16)
+                .align_y(iced::Alignment::Center);
+                let item = button(
+                    container(label_row)
+                        .width(Length::Fill)
+                        .height(Length::Fixed(MENU_ITEM_H))
+                        .center_y(Length::Fixed(MENU_ITEM_H))
+                        .padding(iced::Padding { top: 0.0, right: 5.0, bottom: 0.0, left: 8.0 }),
+                )
+                .width(Length::Fixed(w))
+                .height(Length::Fixed(MENU_ITEM_H))
+                .padding(0)
+                .style(move |_t: &iced::Theme, status: button::Status| button::Style {
+                    background: match (enabled, status) {
+                        (true, button::Status::Hovered) => Some(skin.hover_btn.into()),
+                        _ => None,
+                    },
+                    text_color: if enabled { skin.text } else { skin.disabled },
+                    border: Default::default(),
+                    shadow: Default::default(),
+                    snap: true,
+                });
+                let item_el: Element<Message> = if enabled {
+                    item.on_press(Message::MenuPick(id)).into()
+                } else {
+                    item.into()
+                };
+                items_col = items_col.push(item_el);
+            }
+        }
     }
     let popup = container(items_col)
         .width(Length::Fixed(w))

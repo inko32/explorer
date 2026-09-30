@@ -94,6 +94,7 @@ pub struct CmdRef {
     pub dropdown: Option<Vec<String>>,
     /// Custom cursor hook (MS Paint `setViewCursor`) — parsed and kept for
     /// later; not wired to the window yet.
+    #[allow(dead_code)]
     #[serde(default)]
     pub cursor: Option<String>,
     /// Manual width override in px — normally omitted.
@@ -344,36 +345,55 @@ pub(crate) fn ribbon_body_y() -> f32 {
     TITLEBAR_H + TAB_ROW_H + TAB_LINE_H
 }
 
-// ---- MS Paint toolbar metrics ----
-/// Total ribbon body height (unchanged from the classic backend so the
-/// rest of the layout is unaffected): 5 top pad + 77 content + 15 caption
-/// + 3 bottom pad.
-pub(crate) const RIBBON_H: f32 = 100.0;
-/// Toolbar padding: top, sides, bottom (MS Paint EmptyBorder(5,5,3,5)).
+// ---- MS Paint toolbar metrics — EVERY number from the Java source ----
+/// HomeToolBar `EmptyBorder(5, 5, 3, 5)`: top, sides, bottom.
 pub(crate) const PAD_TOP: f32 = 5.0;
 pub(crate) const PAD_SIDE: f32 = 5.0;
 pub(crate) const PAD_BOTTOM: f32 = 3.0;
-/// Group caption row height.
-pub(crate) const CAPTION_H: f32 = 15.0;
-/// Group command-area height.
-pub(crate) const GROUP_CONTENT_H: f32 = RIBBON_H - PAD_TOP - PAD_BOTTOM - CAPTION_H; // 77
-/// Group separator zone width — a FULL-HEIGHT 1px line centered in it
-/// (MS Paint TSeparator(9, 92, gap 0)).
+/// Content row height = `TSeparator(9, 92, 0, ...)` height: 92.
+pub(crate) const CONTENT_H: f32 = 92.0;
+/// Total toolbar height (5 + 92 + 3) — unchanged from the classic backend
+/// so the rest of the app layout is unaffected.
+pub(crate) const RIBBON_H: f32 = PAD_TOP + CONTENT_H + PAD_BOTTOM; // 100
+/// Group caption row: JLabel at Dialog 12 ≈ 17.
+pub(crate) const CAPTION_H: f32 = 17.0;
+/// Group command area.
+pub(crate) const GROUP_CONTENT_H: f32 = CONTENT_H - CAPTION_H; // 75
+/// `TSeparator`: a 9px zone with a FULL-HEIGHT 1px line (gap 0).
 pub(crate) const SEP_W: f32 = 9.0;
-/// Small labeled command row height (three rows fill the content area).
-pub(crate) const SMALL_H: f32 = 25.0;
-/// Vertical spacing between two small-command rows in a column.
-pub(crate) const SMALL_GAP: f32 = 1.0;
-/// Icon-only tool button (MS Paint "Tools" grid squares).
-pub(crate) const ICON_BTN: f32 = 25.0;
-/// Big split button (MS Paint Paste): icon zone + 1px divider + strip.
-pub(crate) const BIG_STRIP_H: f32 = 21.0;
-pub(crate) const BIG_DIVIDER_H: f32 = 1.0;
+/// `TButton` `Insets(3,5,3,5)` + 16px icon → 22px rows; `GridBagPanel` has
+/// ZERO insets → rows pack with NO gaps.
+pub(crate) const SMALL_H: f32 = 22.0;
+/// `MainTools` margin `(2,2,2,2)` + 16 icon → 20px tool squares.
+pub(crate) const ICON_BTN: f32 = 20.0;
+/// `TButtonAndDropTools` (ImageTools selectTool): bigIcon 32 +
+/// `Insets(2,4,2,4)` → 40px icon zone; the Paste bigIcon is 25x31.
 pub(crate) const BIG_ICON: f32 = 32.0;
-/// Gallery: white panel grid of square cells (MS Paint ShapeTools panel).
-pub(crate) const GALLERY_CELL: f32 = 22.0;
-/// Color plate: swatch cell size (MS Paint uses 14px cells, 1px insets).
-pub(crate) const COLOR_CELL: f32 = 14.0;
+pub(crate) const BIG_ICON_ZONE: f32 = 40.0;
+/// `DropTools` VERTICAL strip: text 16 + `Insets(3,5,13,5)` → 32 (the 13
+/// is the bottom arrow zone).
+pub(crate) const BIG_STRIP_H: f32 = 32.0;
+pub(crate) const BIG_DIVIDER_H: f32 = 1.0;
+/// `ShapeTools`: scroll pane preferred 162x64, `listPanel` WHITE, 1px
+/// `LineBorder(borderColor)`, 7 columns, `ShapeButton` margin 0 + 16 icon
+/// → cells 162/7 x 21.
+pub(crate) const GALLERY_W: f32 = 162.0;
+pub(crate) const GALLERY_CELL_W: f32 = GALLERY_W / 7.0; // 23.14
+pub(crate) const GALLERY_CELL_H: f32 = 21.0;
+/// `ColorPlateTool`: `ColorPlateButton` 20x20 (white fill, A0A0A0 edge),
+/// colorPanel `Insets(1,1,1,1)` 10x3 grid; `ColorButton` image 32 with the
+/// swatch at (9,7) 28x28, margins (3,5,3,5); group cell insets (7,7,5,7);
+/// swatch hover CBECFD fill / 64A5E7 border (skin.plate_hover*).
+pub(crate) const COLOR_CELL: f32 = 20.0;
+pub(crate) const COLOR_SWATCH: f32 = 32.0;
+/// `TopMenuButton` (the MS Paint File button): 58x23 — reference only;
+/// the explorer keeps its Win8 File tab.
+#[allow(dead_code)]
+pub(crate) const FILE_BTN_W: f32 = 58.0;
+#[allow(dead_code)]
+pub(crate) const FILE_BTN_H: f32 = 23.0;
+/// Swing default font: Dialog 12 (menu sections bold 12).
+pub(crate) const LABEL_SIZE: f32 = 12.0;
 
 /// The MS Paint color-plate palette, row by row (20 colors; the Java
 /// original reserves 30 cells with the last row empty).
@@ -389,7 +409,7 @@ use iced::{Color, Element, Length};
 
 use crate::border::frame_insets;
 use crate::model::{Explorer, Message};
-use crate::ui_common::{bg, dbg, icon, skin, CHROME_BTN};
+use crate::ui_common::{bg, dbg, icon, skin, CHROME_BTN, MENU_W};
 
 /// Logical size of `n` physical pixels at the current total UI scale: a
 /// 1px line must cover a whole number of device pixels, otherwise it lands
@@ -423,12 +443,19 @@ pub(crate) fn text11_w(s: &str) -> f32 {
         .sum()
 }
 
+/// Advance width at the Swing Dialog-12 size the ribbon labels use.
+pub(crate) fn text_w(s: &str) -> f32 {
+    text11_w(s) * (LABEL_SIZE / 11.0)
+}
+
 pub(crate) fn view(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     // geometry + accent of the active tab (the accent also drives the line)
     let active_geo = active_tab_geometry(state);
-    // MS Paint draws a 1px border line top+bottom over the toolbar. With an
-    // active CONTEXTUAL tab the line takes that tab's accent color — the
-    // active tab covers its own segment (see the bridge below).
+    // HomeToolBar.paintComponent: 1px border lines top (y=0) and bottom
+    // (y=height-1) over the toolbar, plus a bg-colored bridge over the top
+    // line under the File button. With an active CONTEXTUAL tab the line
+    // takes that tab's accent color — the active tab covers its own segment
+    // (see the bridge below).
     let line_color = active_geo.and_then(|(_, _, a)| a).unwrap_or(skin.sep);
     let line = container(Space::new().width(Length::Fill).height(Length::Fixed(phys_px(state, TAB_LINE_H))))
         .style(move |_t: &iced::Theme| container::Style {
@@ -540,9 +567,10 @@ fn tbtn_style(
     }
 }
 
-/// MS Paint `TSeparator`: a `SEP_W`-wide zone with a full-height 1px line.
+/// MS Paint `TSeparator(9, 92, gap 0)`: a 9px zone with a full-height 1px
+/// line centered in it (height 92 = the toolbar content row).
 fn separator(state: &Explorer, skin: skin::Skin) -> Element<'static, Message> {
-    let h = phys_px(state, GROUP_CONTENT_H + CAPTION_H);
+    let h = phys_px(state, CONTENT_H);
     container(
         container(Space::new().width(Length::Fixed(phys_px(state, 1.0))).height(Length::Fixed(h)))
             .style(bg(skin.sep)),
@@ -553,8 +581,9 @@ fn separator(state: &Explorer, skin: skin::Skin) -> Element<'static, Message> {
     .into()
 }
 
-/// Small labeled command (MS Paint Cut/Copy rows): icon + label, 25px high.
-/// `label: ""` renders an MS Paint "Tools"-style icon-only square.
+/// Small labeled command (`TButton` text+icon, Insets(3,5,3,5) + 16px icon
+/// → 22px rows). `label: ""` renders a MainTools-style icon-only 20px
+/// square (Insets(2,2,2,2)).
 fn small_cmd(
     icon_el: Element<'static, Message>,
     label: &str,
@@ -575,10 +604,10 @@ fn small_cmd(
         let r = row![
             icon_el,
             text(label.to_string())
-                .size(11.0)
+                .size(LABEL_SIZE)
                 .color(if enabled { skin.text } else { skin.disabled }),
         ]
-        .spacing(5)
+        .spacing(4)
         .align_y(iced::Alignment::Center);
         container(r)
             .height(Length::Fixed(SMALL_H))
@@ -588,7 +617,7 @@ fn small_cmd(
     let btn = button(content)
         .width(Length::Fixed(width))
         .height(Length::Fixed(if label.is_empty() { ICON_BTN } else { SMALL_H }))
-        .padding([0.0, 4.0])
+        .padding([0.0, 5.0])
         .style(tbtn_style(enabled, selected, skin));
     let el: Element<Message> = match (enabled, msg) {
         (true, Some(m)) => btn.on_press(m).into(),
@@ -600,7 +629,8 @@ fn small_cmd(
     )
 }
 
-/// Checkbox command: a 13px box + label toggle (checked = selected).
+/// Checkbox command (our noun — MS Paint has none): a 13px box + label
+/// toggle on a 22px row; checked = selected.
 fn checkbox_cmd(
     label: &str,
     width: f32,
@@ -630,7 +660,7 @@ fn checkbox_cmd(
     let r = row![
         box_el,
         text(label.to_string())
-            .size(11.0)
+            .size(LABEL_SIZE)
             .color(if enabled { skin.text } else { skin.disabled }),
     ]
     .spacing(6)
@@ -641,7 +671,7 @@ fn checkbox_cmd(
     let btn = button(content)
         .width(Length::Fixed(width))
         .height(Length::Fixed(SMALL_H))
-        .padding([0.0, 4.0])
+        .padding([0.0, 5.0])
         .style(tbtn_style(enabled, false, skin));
     let el: Element<Message> = match (enabled, msg) {
         (true, Some(m)) => btn.on_press(m).into(),
@@ -653,102 +683,132 @@ fn checkbox_cmd(
     )
 }
 
-/// MS Paint `TButtonAndDropTools`: big icon button on top, "label ▾" strip
-/// below. Hover/selected paint ONE shared border around both halves plus a
-/// divider line (paintComponent draws the rect + the split line).
+/// MS Paint `TButtonAndDropTools`: a 40px big-icon button on top, a 1px
+/// divider, then the 32px `DropTools` strip ("label" + ▾ at the bottom
+/// center, Insets(3,5,13,5)). The PARENT paints the chrome: one border
+/// around both halves + the divider line, when selected (SELECTABLE half
+/// also fills C9E0F7) or while the menu is open (paintUrgent, no fill).
+/// Note: the unified HOVER border (parent mouseEntered) is approximated —
+/// each half shows its own hover fill; the shared border appears only when
+/// active.
 #[allow(clippy::too_many_arguments)]
 fn big_split(
     icon_el: Element<'static, Message>,
     label: &str,
     width: f32,
     enabled: bool,
-    selected: bool,
+    selectable: bool,
+    active: bool,
     action: Option<Message>,
     menu: Option<Message>,
     state: &Explorer,
     skin: skin::Skin,
 ) -> Element<'static, Message> {
-    let icon_zone_h = GROUP_CONTENT_H - BIG_STRIP_H - BIG_DIVIDER_H;
     // top half: the big icon runs the action
     let icon_zone = container(icon_el)
         .width(Length::Fixed(width))
-        .height(Length::Fixed(icon_zone_h))
+        .height(Length::Fixed(BIG_ICON_ZONE))
         .center_x(Length::Fixed(width))
-        .center_y(Length::Fixed(icon_zone_h));
+        .center_y(Length::Fixed(BIG_ICON_ZONE));
     let top = button(icon_zone)
         .width(Length::Fixed(width))
-        .height(Length::Fixed(icon_zone_h))
+        .height(Length::Fixed(BIG_ICON_ZONE))
         .padding(0)
-        .style(tbtn_style(enabled, false, skin));
+        .style(tbtn_style(enabled, selectable && active, skin));
     let top: Element<Message> = match (enabled, action) {
         (true, Some(m)) => top.on_press(m).into(),
         _ => top.into(),
     };
-    // divider between the halves (part of the unified chrome)
+    // divider between the halves — drawn only in the active state
+    // (SELECTED_BORDER line at the icon height), else transparent
     let divider = container(
-        container(Space::new().width(Length::Fixed(phys_px(state, 1.0))).height(Length::Fill))
-            .style(bg(skin.sep)),
+        container(
+            Space::new()
+                .width(Length::Fixed(phys_px(state, 1.0)))
+                .height(Length::Fill),
+        )
+        .style(move |_| container::Style {
+            background: Some(
+                (if active { skin.sel_btn_border } else { Color::TRANSPARENT }).into(),
+            ),
+            ..Default::default()
+        }),
     )
     .width(Length::Fixed(width))
     .height(Length::Fixed(BIG_DIVIDER_H))
     .center_x(Length::Fixed(width));
-    // bottom half: "label ▾" opens the dropdown
-    let strip_label = row![
-        text(label.to_string())
-            .size(11.0)
-            .color(if enabled { skin.text } else { skin.disabled }),
-        drop_arrow_el(if enabled { skin.text } else { skin.disabled }, 4.5),
-    ]
-    .spacing(2)
-    .align_y(iced::Alignment::Start);
-    let strip_zone = container(strip_label)
+    // bottom half: the DropTools strip — text, ▾ centered at the bottom
+    let tc = if enabled { skin.text } else { skin.disabled };
+    let strip_zone = column![
+        container(
+            text(label.to_string())
+                .size(LABEL_SIZE)
+                .color(tc),
+        )
         .width(Length::Fixed(width))
-        .height(Length::Fixed(BIG_STRIP_H))
+        .height(Length::Fixed(16.0))
         .center_x(Length::Fixed(width))
-        .center_y(Length::Fixed(BIG_STRIP_H));
-    let bottom = button(strip_zone)
-        .width(Length::Fixed(width))
-        .height(Length::Fixed(BIG_STRIP_H))
-        .padding(0)
-        .style(tbtn_style(enabled, false, skin));
+        .align_y(iced::Alignment::End),
+        container(drop_arrow_el(tc, 0.0))
+            .width(Length::Fixed(width))
+            .height(Length::Fixed(BIG_STRIP_H - 16.0))
+            .center_x(Length::Fixed(width))
+            .align_y(iced::Alignment::Center),
+    ]
+    .width(Length::Fixed(width));
+    let bottom = button(
+        container(strip_zone)
+            .width(Length::Fixed(width))
+            .height(Length::Fixed(BIG_STRIP_H)),
+    )
+    .width(Length::Fixed(width))
+    .height(Length::Fixed(BIG_STRIP_H))
+    .padding(0)
+    .style(tbtn_style(enabled, false, skin));
     let bottom: Element<Message> = match (enabled, menu) {
         (true, Some(m)) => bottom.on_press(m).into(),
         _ => bottom.into(),
     };
-    // shared hover/selected border around the whole control (drawn over the
-    // two button halves + divider)
-    let frame: Element<Message> = container(Space::new().width(Length::Fixed(width)).height(Length::Fixed(GROUP_CONTENT_H)))
-        .width(Length::Fixed(width))
-        .height(Length::Fixed(GROUP_CONTENT_H))
-        .style(move |_| container::Style {
-            background: None,
-            border: iced::Border {
-                color: if selected {
-                    skin.sel_btn_border
-                } else {
-                    Color::TRANSPARENT
-                },
-                width: 1.0,
-                radius: 0.0.into(),
+    // the parent's unified border (selected / menu-open)
+    let frame: Element<Message> = container(
+        Space::new()
+            .width(Length::Fixed(width))
+            .height(Length::Fixed(GROUP_CONTENT_H)),
+    )
+    .width(Length::Fixed(width))
+    .height(Length::Fixed(GROUP_CONTENT_H))
+    .style(move |_| container::Style {
+        background: None,
+        border: iced::Border {
+            color: if active {
+                skin.sel_btn_border
+            } else {
+                Color::TRANSPARENT
             },
-            ..Default::default()
-        })
-        .into();
+            width: 1.0,
+            radius: 0.0.into(),
+        },
+        ..Default::default()
+    })
+    .into();
     let name: &'static str = Box::leak(format!("big_split:{label}").into_boxed_str());
     dbg(
         name,
-        stack![column![top, divider, bottom].width(Length::Fixed(width)), frame]
-            .width(Length::Fixed(width)),
+        stack![
+            column![top, divider, bottom].width(Length::Fixed(width)),
+            frame
+        ]
+        .width(Length::Fixed(width)),
     )
     .into()
 }
 
-/// 90-degree dropdown triangle, 6x3 px, top-padded so its base sits below
-/// an adjacent 11px label (same glyph as the classic backend).
+/// 90-degree dropdown triangle (the MS Paint DropTools glyph: three 1px
+/// lines, 5x3 px), padded so it sits below an adjacent label.
 pub(crate) fn drop_arrow_el(c: Color, top_pad: f32) -> Element<'static, Message> {
     container(
         iced::widget::svg(crate::icons::drop_arrow(c))
-            .width(Length::Fixed(6.0))
+            .width(Length::Fixed(5.0))
             .height(Length::Fixed(3.0)),
     )
     .padding(iced::Padding {
@@ -760,9 +820,9 @@ pub(crate) fn drop_arrow_el(c: Color, top_pad: f32) -> Element<'static, Message>
     .into()
 }
 
-/// MS Paint `DropTools` small dropdown: "label ▾" (arrow on the right);
-/// the whole button opens the menu unless `action` is set (then the label
-/// runs the action and only the arrow opens the menu).
+/// MS Paint `DropTools` HORIZONTAL (Insets(3,5,3,15) — the 15 is the arrow
+/// zone): icon + label with a ▾ at width-10. The whole button opens the
+/// menu unless `action` is set (then the label runs the action).
 fn small_dropdown(
     icon_el: Element<'static, Message>,
     label: &str,
@@ -775,18 +835,20 @@ fn small_dropdown(
     let tc = if enabled { skin.text } else { skin.disabled };
     let label_zone = row![
         icon_el,
-        text(label.to_string()).size(11.0).color(tc),
+        text(label.to_string()).size(LABEL_SIZE).color(tc),
         Space::new().width(Length::Fill),
-        drop_arrow_el(tc, 4.5),
+        container(drop_arrow_el(tc, 4.5))
+            .width(Length::Fixed(10.0))
+            .align_x(iced::Alignment::End),
     ]
-    .spacing(5)
+    .spacing(4)
     .align_y(iced::Alignment::Center)
-    .width(Length::Fixed(width - 18.0));
+    .width(Length::Fixed(width - 15.0));
     let content = container(label_zone)
         .width(Length::Fixed(width))
         .height(Length::Fixed(SMALL_H))
         .center_y(Length::Fixed(SMALL_H))
-        .padding([0.0, 4.0]);
+        .padding(iced::Padding { top: 0.0, right: 5.0, bottom: 0.0, left: 5.0 });
     let btn = button(content)
         .width(Length::Fixed(width))
         .height(Length::Fixed(SMALL_H))
@@ -802,27 +864,26 @@ fn small_dropdown(
     )
 }
 
-/// Width of one small command (icon + label + padding; icon-only square).
+/// Width of one small command, margins included (TButton Insets(3,5,3,5),
+/// iconTextGap 4; DropTools keeps its ▾ in the 15px right margin).
 fn small_width(cmd: &CmdRef) -> f32 {
     if cmd.label.is_empty() && cmd.icon.is_some() {
         return ICON_BTN;
     }
-    let mut w = 8.0; // horizontal padding
+    let mut w = 10.0; // left + right margins
     if cmd.kind.as_deref() == Some("checkbox") {
         w += 13.0 + 6.0;
     } else if cmd.icon.is_some() {
-        w += 16.0 + 5.0;
+        w += 16.0 + 4.0;
     }
-    w += text11_w(&cmd.label);
-    if cmd.dropdown.is_some() {
-        w += 18.0;
-    }
+    w += text_w(&cmd.label);
     w.ceil()
 }
 
-/// Width of the big split button from its strip label.
+/// Width of the big split button: the icon zone is 4+32+4 = 40; the strip
+/// is 5+text+5 (arrow sits in the 13px bottom margin).
 fn big_split_width(label: &str) -> f32 {
-    (text11_w(label) + 6.0 + 8.0 + 18.0).max(44.0).ceil()
+    (text_w(label) + 10.0).max(BIG_ICON_ZONE + 1.0).ceil()
 }
 
 /// Effective command width (YAML `width` wins).
@@ -836,31 +897,35 @@ fn cmd_width(cmd: &CmdRef) -> f32 {
     })
 }
 
-/// Effective group width: content + the group padding MS Paint leaves
-/// around each group (2px sides — visually from the grid gaps).
+/// Effective group width. MS Paint groups have NO side padding — GridBag
+/// zero insets pack the components flush; the toolbar padding frames the
+/// row. GridBag also puts NO gaps between grid columns; the only visual
+/// gaps come from the components' own margins.
 pub(crate) fn group_width(g: &GroupDef) -> f32 {
     if let Some(w) = g.width {
         return w;
     }
     match g.kind.as_deref() {
         Some("gallery") => {
-            let rows = g.rows.unwrap_or(3).clamp(1, 3) as f32;
-            let cols = (g.commands.len() as f32 / rows).ceil();
-            (PAD_SIDE + cols * GALLERY_CELL + 20.0 + PAD_SIDE).ceil()
+            let rows = g.rows.unwrap_or(3).clamp(1, 3);
+            let cols = g.commands.len().div_ceil(rows).max(1);
+            (cols as f32 * GALLERY_CELL_W + 2.0 + 13.0).ceil()
         }
-        Some("color_plate") => (2.0 * (COLOR_CELL + 2.0) + 2.0 + 10.0 * (COLOR_CELL + 2.0) + 2.0 + 20.0).ceil(),
+        Some("color_plate") => {
+            // ColorPlateTool cell insets (7,7,5,7): 7 leading; ColorButton
+            // 32+margins 10 = 42; gap 7+7 = 14; color2 42; gap 7; panel
+            // 10*20 + insets 2 = 202; chooser 30+margins 10 = 40.
+            (7.0 + 42.0 + 14.0 + 42.0 + 7.0 + 202.0 + 40.0_f32).ceil()
+        }
         _ => {
             let rows = g.rows.unwrap_or(3).clamp(1, 3);
             let mut items_w = 0.0f32;
-            let mut n_items = 0usize;
             let mut smalls: Vec<&CmdRef> = Vec::new();
             for cmd in &g.commands {
                 if cmd.separator == Some(true) {
                     items_w += SEP_W;
-                    n_items += 1;
                 } else if cmd.size.as_deref() == Some("big") {
                     items_w += cmd_width(cmd);
-                    n_items += 1;
                 } else {
                     smalls.push(cmd);
                 }
@@ -869,10 +934,8 @@ pub(crate) fn group_width(g: &GroupDef) -> f32 {
             let col_w = smalls.iter().map(|c| cmd_width(c)).fold(0.0f32, f32::max);
             if !smalls.is_empty() {
                 items_w += columns as f32 * col_w;
-                n_items += columns;
             }
-            let spacing = 2.0 * n_items.saturating_sub(1) as f32;
-            (PAD_SIDE * 2.0 + items_w + spacing).ceil()
+            items_w.ceil()
         }
     }
 }
@@ -883,8 +946,20 @@ pub(crate) fn menu_anchor(state: &Explorer, x: f32) -> f32 {
     x.clamp(4.0, (state.win_w - fl - fr - 220.0).max(4.0))
 }
 
+/// Convert YAML dropdown entries to menu rows; `">Name"` entries become
+/// MS Paint `TMenuSection` headers.
+fn menu_entries(items: &[String]) -> Vec<crate::model::MenuEntry> {
+    items
+        .iter()
+        .map(|s| match s.strip_prefix('>') {
+            Some(name) => crate::model::MenuEntry::Section(name.to_string()),
+            None => crate::model::MenuEntry::Item(s.clone()),
+        })
+        .collect()
+}
+
 /// Build one group's content from YAML. Small commands stack into
-/// `rows`-tall columns (MS Paint clipboard/tools arrangement).
+/// `rows`-tall columns (ClipboardTools arrangement), packed with no gaps.
 fn group_from_config(g: &GroupDef, state: &Explorer, skin: skin::Skin, x_base: f32) -> Element<'static, Message> {
     let has_sel = !state.selected.is_empty();
     let has_clip = state.clipboard.is_some();
@@ -930,29 +1005,30 @@ fn group_from_config(g: &GroupDef, state: &Explorer, skin: skin::Skin, x_base: f
         return gallery(g, state, skin, x_base);
     }
 
-    let mut content = row![].spacing(2);
+    let mut content = row![];
     let mut bigs_w = 0.0f32;
     for cmd in &g.commands {
         if cmd.separator == Some(true) {
             content = content.push(separator(state, skin));
-            bigs_w += SEP_W + 2.0;
+            bigs_w += SEP_W;
             continue;
         }
         if cmd.size.as_deref() == Some("big") {
             let enabled = enabled_of(cmd);
             let w = cmd_width(cmd);
             let has_action = state.ribbon.commands.contains_key(&cmd.id);
-            let selected = selected_of(cmd);
+            let selectable = cmd.group.is_some();
+            let active = selected_of(cmd);
             let action = enabled.then(|| {
                 press_of(cmd, Message::RunCommand(cmd.id.clone()))
             });
             let menu = cmd.dropdown.as_ref().and_then(|items| {
                 enabled.then(|| Message::OpenMenu {
-                    x: menu_anchor(state, x_base + PAD_SIDE + bigs_w),
+                    x: menu_anchor(state, x_base + bigs_w),
                     y: ribbon_body_y() + PAD_TOP + GROUP_CONTENT_H,
                     source: cmd.id.clone(),
-                    source_w: w,
-                    items: items.clone(),
+                    source_w: w.max(MENU_W),
+                    items: menu_entries(items),
                 })
             });
             let el = big_split(
@@ -960,13 +1036,14 @@ fn group_from_config(g: &GroupDef, state: &Explorer, skin: skin::Skin, x_base: f
                 &cmd.label,
                 w,
                 enabled,
-                selected,
+                selectable,
+                active,
                 if has_action { action } else { None },
                 menu,
                 state,
                 skin,
             );
-            bigs_w += w + 2.0;
+            bigs_w += w;
             content = content.push(el);
         }
     }
@@ -991,14 +1068,14 @@ fn group_from_config(g: &GroupDef, state: &Explorer, skin: skin::Skin, x_base: f
         let el: Element<Message> = if cmd.kind.as_deref() == Some("checkbox") {
             checkbox_cmd(&cmd.label, w, enabled, selected, msg, skin)
         } else if let Some(items) = &cmd.dropdown {
-            // MS Paint has no split small: whole button opens the menu,
-            // unless the command itself has an action (then it wins).
+            // MS Paint has no split small: the DropTools button opens the
+            // menu, unless the command itself has an action (then it wins).
             let menu_msg = enabled.then(|| Message::OpenMenu {
-                x: menu_anchor(state, x_base + PAD_SIDE + bigs_w + col * (col_w + 2.0)),
-                y: ribbon_body_y() + PAD_TOP + row_i * (SMALL_H + SMALL_GAP) + SMALL_H,
+                x: menu_anchor(state, x_base + bigs_w + col * col_w),
+                y: ribbon_body_y() + PAD_TOP + row_i * SMALL_H + SMALL_H,
                 source: cmd.id.clone(),
-                source_w: w,
-                items: items.clone(),
+                source_w: w.max(MENU_W),
+                items: menu_entries(items),
             });
             small_dropdown(
                 crate::icon::view(cmd.icon.as_deref().unwrap_or("file"), 16.0, &skin),
@@ -1024,7 +1101,7 @@ fn group_from_config(g: &GroupDef, state: &Explorer, skin: skin::Skin, x_base: f
     }
     let mut it = smalls.into_iter();
     for _ in 0..columns {
-        let mut col = column![].spacing(SMALL_GAP);
+        let mut col = column![];
         for _ in 0..rows {
             if let Some(s) = it.next() {
                 col = col.push(s);
@@ -1035,8 +1112,9 @@ fn group_from_config(g: &GroupDef, state: &Explorer, skin: skin::Skin, x_base: f
     group_frame(&g.label.clone(), group_width(g), content.into(), skin)
 }
 
-/// MS Paint gallery (ShapeTools): a white 1px-bordered panel with a grid
-/// of square cells, plus an expand chevron opening the full list.
+/// MS Paint gallery (ShapeTools): a white panel with a 1px border and a
+/// grid of 23x21 cells (16px icons, margin 0). Our extension: a 13px strip
+/// with an expand chevron where the Java scroll pane has its 13px scrollbar.
 fn gallery(g: &GroupDef, state: &Explorer, skin: skin::Skin, x_base: f32) -> Element<'static, Message> {
     let rows = g.rows.unwrap_or(3).clamp(1, 3);
     let columns = g.commands.len().div_ceil(rows).max(1);
@@ -1047,13 +1125,13 @@ fn gallery(g: &GroupDef, state: &Explorer, skin: skin::Skin, x_base: f32) -> Ele
             let enabled = cmd.enabled.unwrap_or(true);
             let btn = button(
                 container(crate::icon::view(cmd.icon.as_deref().unwrap_or("file"), 16.0, &skin))
-                    .width(Length::Fixed(GALLERY_CELL))
-                    .height(Length::Fixed(GALLERY_CELL))
-                    .center_x(Length::Fixed(GALLERY_CELL))
-                    .center_y(Length::Fixed(GALLERY_CELL)),
+                    .width(Length::Fixed(GALLERY_CELL_W))
+                    .height(Length::Fixed(GALLERY_CELL_H))
+                    .center_x(Length::Fixed(GALLERY_CELL_W))
+                    .center_y(Length::Fixed(GALLERY_CELL_H)),
             )
-            .width(Length::Fixed(GALLERY_CELL))
-            .height(Length::Fixed(GALLERY_CELL))
+            .width(Length::Fixed(GALLERY_CELL_W))
+            .height(Length::Fixed(GALLERY_CELL_H))
             .padding(0)
             .style(tbtn_style(enabled, false, skin));
             let el: Element<Message> = match enabled {
@@ -1064,9 +1142,9 @@ fn gallery(g: &GroupDef, state: &Explorer, skin: skin::Skin, x_base: f32) -> Ele
         })
         .collect();
     let mut it = cells.into_iter();
-    let mut grid = column![].spacing(1);
+    let mut grid = column![];
     for _ in 0..rows {
-        let mut line = row![].spacing(1);
+        let mut line = row![];
         for _ in 0..columns {
             if let Some(c) = it.next() {
                 line = line.push(c);
@@ -1088,15 +1166,15 @@ fn gallery(g: &GroupDef, state: &Explorer, skin: skin::Skin, x_base: f32) -> Ele
     let items: Vec<String> = g.commands.iter().map(|c| c.id.clone()).collect();
     let gw = group_width(g);
     let expand = button(crate::icon::view("chevron_down", 12.0, &skin))
-        .width(Length::Fixed(20.0))
+        .width(Length::Fixed(13.0))
         .height(Length::Fixed(GROUP_CONTENT_H))
         .style(tbtn_style(true, false, skin))
         .on_press(Message::OpenMenu {
-            x: menu_anchor(state, x_base + gw - 26.0),
+            x: menu_anchor(state, x_base + gw - 20.0),
             y: ribbon_body_y() + PAD_TOP + GROUP_CONTENT_H,
             source: g.label.clone(),
-            source_w: gw,
-            items,
+            source_w: gw.max(MENU_W),
+            items: menu_entries(&items),
         });
     group_frame(
         &g.label.clone(),
@@ -1106,65 +1184,148 @@ fn gallery(g: &GroupDef, state: &Explorer, skin: skin::Skin, x_base: f32) -> Ele
     )
 }
 
-/// MS Paint Colors group: color1/color2 selectors, the 10x2 palette grid
-/// and a chooser button (the group's first command, if any). A swatch
-/// click dispatches `RunCommand("color_plate:<RRGGBB>")` — define a
-/// matching command in ribbon.yaml to wire it (kept for later use).
+/// MS Paint Colors group (ColorPlateTool): two 32px color buttons (black
+/// frame + 28px swatch, "Color 1"/"Color 2" labels under), the 10-column
+/// plate of 20px cells (white fill, A0A0A0 edge; hover CBECFD/64A5E7), and
+/// the Edit Color chooser (30px icon + label). Cell insets (7,7,5,7).
+/// A swatch click dispatches `RunCommand("color_plate:<RRGGBB>")` — kept
+/// for later wiring.
 fn color_plate(g: &GroupDef, _state: &Explorer, skin: skin::Skin) -> Element<'static, Message> {
-    let sel_box = |c: Color| {
-        container(Space::new().width(Length::Fixed(COLOR_CELL)).height(Length::Fixed(COLOR_CELL)))
-            .width(Length::Fixed(COLOR_CELL + 2.0))
-            .height(Length::Fixed(COLOR_CELL + 2.0))
-            .style(move |_| container::Style {
-                background: Some(c.into()),
-                border: iced::Border {
-                    color: skin.sep,
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            })
+    let color_btn = |c: Color, label: &'static str| {
+        let swatch = container(
+            container(Space::new().width(Length::Fixed(28.0)).height(Length::Fixed(28.0)))
+                .width(Length::Fixed(COLOR_SWATCH))
+                .height(Length::Fixed(COLOR_SWATCH))
+                .center_x(Length::Fixed(COLOR_SWATCH))
+                .center_y(Length::Fixed(COLOR_SWATCH))
+                .style(move |_| container::Style {
+                    background: Some(c.into()),
+                    border: iced::Border {
+                        color: Color::from_rgb8(0x21, 0x21, 0x21),
+                        width: 1.0,
+                        radius: 0.0.into(),
+                    },
+                    ..Default::default()
+                }),
+        )
+        .width(Length::Fixed(COLOR_SWATCH + 10.0))
+        .height(Length::Fixed(COLOR_SWATCH + 10.0))
+        .center_x(Length::Fixed(COLOR_SWATCH + 10.0))
+        .center_y(Length::Fixed(COLOR_SWATCH + 10.0));
+        let content = column![
+            swatch,
+            container(text(label).size(LABEL_SIZE).color(skin.text))
+                .width(Length::Fixed(COLOR_SWATCH + 10.0))
+                .center_x(Length::Fixed(COLOR_SWATCH + 10.0)),
+        ]
+        .spacing(2);
+        button(content)
+            .width(Length::Fixed(COLOR_SWATCH + 10.0))
+            .padding(0)
+            .style(tbtn_style(true, false, skin))
     };
-    let mut rows = column![].spacing(2);
+    let mut plate = column![];
     for r in 0..2 {
-        let mut line = row![].spacing(2);
+        let mut line = row![];
         for c in 0..10 {
             let hex = COLOR_PLATE[r][c];
             let c = Color::from_rgb8(((hex >> 16) & 0xFF) as u8, ((hex >> 8) & 0xFF) as u8, (hex & 0xFF) as u8);
             let swatch = button(
-                container(Space::new().width(Length::Fixed(COLOR_CELL)).height(Length::Fixed(COLOR_CELL)))
-                    .style(bg(c)),
+                container(
+                    Space::new()
+                        .width(Length::Fixed(COLOR_CELL - 2.0))
+                        .height(Length::Fixed(COLOR_CELL - 2.0)),
+                )
+                .width(Length::Fixed(COLOR_CELL))
+                .height(Length::Fixed(COLOR_CELL))
+                .center_x(Length::Fixed(COLOR_CELL))
+                .center_y(Length::Fixed(COLOR_CELL))
+                .style(move |_t| container::Style {
+                    background: Some(c.into()),
+                    border: iced::Border {
+                        color: Color::from_rgb8(0xA0, 0xA0, 0xA0),
+                        width: 1.0,
+                        radius: 0.0.into(),
+                    },
+                    ..Default::default()
+                }),
             )
             .width(Length::Fixed(COLOR_CELL))
             .height(Length::Fixed(COLOR_CELL))
             .padding(0)
-            .style(tbtn_style(true, false, skin))
+            .style(move |_t, status| {
+                let mut style = tbtn_style(true, false, skin)(_t, status);
+                if status == button::Status::Hovered {
+                    style.background = Some(skin.plate_hover.into());
+                    style.border = iced::Border {
+                        color: skin.plate_hover_border,
+                        width: 1.0,
+                        radius: 0.0.into(),
+                    };
+                }
+                style
+            })
             .on_press(Message::RunCommand(format!("color_plate:{hex:06X}")));
             line = line.push(swatch);
         }
-        rows = rows.push(line);
+        plate = plate.push(line);
     }
+    let panel = container(plate)
+        .padding(1.0)
+        .style(move |_| container::Style {
+            background: Some(skin.window_bg.into()),
+            border: iced::Border {
+                color: Color::from_rgb8(0xA0, 0xA0, 0xA0),
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        });
+    // chooser: the group's first command, if any (MS Paint opens the Edit
+    // Colors dialog here)
     let chooser: Element<Message> = match g.commands.first() {
-        Some(cmd) => button(crate::icon::view(cmd.icon.as_deref().unwrap_or("gear"), 16.0, &skin))
-            .width(Length::Fixed(20.0))
-            .height(Length::Fixed(20.0))
-            .style(tbtn_style(true, false, skin))
-            .on_press(Message::RunCommand(cmd.id.clone()))
-            .into(),
-        None => Space::new().width(Length::Fixed(20.0)).height(Length::Fixed(20.0)).into(),
+        Some(cmd) => {
+            let content = column![
+                container(crate::icon::view(cmd.icon.as_deref().unwrap_or("gear"), 30.0, &skin))
+                    .width(Length::Fixed(40.0))
+                    .height(Length::Fixed(30.0))
+                    .center_x(Length::Fixed(40.0))
+                    .center_y(Length::Fixed(30.0)),
+                container(
+                    text("Edit Color").size(LABEL_SIZE).color(skin.text),
+                )
+                .width(Length::Fixed(40.0))
+                .center_x(Length::Fixed(40.0)),
+            ]
+            .spacing(2);
+            button(content)
+                .width(Length::Fixed(40.0))
+                .padding(0)
+                .style(tbtn_style(true, false, skin))
+                .on_press(Message::RunCommand(cmd.id.clone()))
+                .into()
+        }
+        None => Space::new().width(Length::Fixed(40.0)).height(Length::Fixed(30.0)).into(),
     };
-    let content = row![
-        column![sel_box(Color::BLACK), sel_box(Color::WHITE)].spacing(2),
-        rows,
-        container(chooser).height(Length::Fixed(GROUP_CONTENT_H)).align_y(iced::Alignment::End),
-    ]
-    .spacing(4)
+    let content = container(
+        row![
+            Space::new().width(Length::Fixed(7.0)),
+            color_btn(Color::BLACK, "Color 1"),
+            color_btn(Color::WHITE, "Color 2"),
+            Space::new().width(Length::Fixed(7.0)),
+            panel,
+            chooser,
+        ]
+        .spacing(0)
+        .align_y(iced::Alignment::Center),
+    )
+    .height(Length::Fixed(GROUP_CONTENT_H))
     .align_y(iced::Alignment::Center);
     group_frame(&g.label.clone(), group_width(g), content.into(), skin)
 }
 
-/// A group: content on top, centered caption under it (MS Paint grid:
-/// glue above the caption pushes it to the bottom edge).
+/// A group: content on top, centered Dialog-12 caption under it (the Java
+/// groups pin the caption to the bottom edge via a weighted glue row).
 fn group_frame(caption: &str, width: f32, content: Element<'static, Message>, skin: skin::Skin) -> Element<'static, Message> {
     column![
         container(dbg(
@@ -1173,7 +1334,7 @@ fn group_frame(caption: &str, width: f32, content: Element<'static, Message>, sk
         ))
         .width(Length::Fixed(width))
         .height(Length::Fixed(GROUP_CONTENT_H)),
-        container(text(caption.to_string()).size(11.0).color(skin.subtle))
+        container(text(caption.to_string()).size(LABEL_SIZE).color(skin.subtle))
             .width(Length::Fixed(width))
             .height(Length::Fixed(CAPTION_H))
             .center_x(Length::Fixed(width))
@@ -1201,7 +1362,6 @@ fn mspaint_body(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     }
     body.into()
 }
-
 // ---------------- tab strip (explorer chrome — same as classic) ----------------
 
 /// Active tab's merge overlay: repaints the MIDDLE (`width - 2`) of the

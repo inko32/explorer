@@ -10,6 +10,13 @@ use crate::model::Message;
 /// status-bar view switcher) — one size everywhere.
 pub(crate) const CHROME_BTN: f32 = 26.0;
 
+/// MS Paint `TPopupMenu.setWidth(140)` — the menu width floor.
+pub(crate) const MENU_W: f32 = 140.0;
+/// `TMenuItem`: 16 icon + iconTextGap 16 + `Insets(3,8,3,5)` → 22px rows.
+pub(crate) const MENU_ITEM_H: f32 = 22.0;
+/// `TMenuSection`: font 12 + 16 = 28 (two 1px lines + 26px content).
+pub(crate) const MENU_SECTION_H: f32 = 28.0;
+
 pub mod skin {
     use iced::color;
 
@@ -59,6 +66,11 @@ pub mod skin {
         /// dropdown menu (MS Paint: FBFCFD fill / DCDDDE border)
         pub menu_bg: iced::Color,
         pub menu_border: iced::Color,
+        /// menu section header (MS Paint TMenuSection: F5F6F7 fill / D9DADB lines)
+        pub menu_section_border: iced::Color,
+        /// color-plate swatch hover (MS Paint ColorPlateButton: CBECFD / 64A5E7)
+        pub plate_hover: iced::Color,
+        pub plate_hover_border: iced::Color,
         /// nav crumb bar / search box border (clone: D9D9D9)
         pub nav_border: iced::Color,
         /// search box recessed button (clone: E8F1FB fill / A9C4E8 divider)
@@ -110,6 +122,9 @@ pub mod skin {
         search_btn_border: color!(0xA9C4E8),
         menu_bg: color!(0xFBFCFD),
         menu_border: color!(0xDCDDDE),
+        menu_section_border: color!(0xD9DADB),
+        plate_hover: color!(0xCBECFD),
+        plate_hover_border: color!(0x64A5E7),
         address_border: color!(0xA9A9A9),
         title_text: color!(0x1A1A1A),
     };
@@ -152,6 +167,9 @@ pub mod skin {
         search_btn_border: color!(0x46647F),
         menu_bg: color!(0x383838),
         menu_border: color!(0x505050),
+        menu_section_border: color!(0x505050),
+        plate_hover: color!(0x3A506E),
+        plate_hover_border: color!(0x4A7AB5),
         address_border: color!(0x555555),
         title_text: color!(0xFFFFFF),
     };

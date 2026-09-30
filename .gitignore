@@ -1,5 +1,7 @@
 /dist/
 /target/
+/real-win10/
 *.bmp
 *.ppm
 *.log
+/explorer-*.zip
