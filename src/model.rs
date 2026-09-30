@@ -43,7 +43,7 @@ pub enum Message {
     SetView(ViewMode),
     SetSort(SortBy),
     /// Open a ribbon dropdown menu at (x, y content-relative).
-    OpenMenu { x: f32, y: f32, source: String, source_w: f32, items: Vec<String> },
+    OpenMenu { x: f32, y: f32, source: String, source_w: f32, items: Vec<MenuEntry> },
     CloseMenu,
     /// A dropdown menu item was picked.
     MenuPick(String),
@@ -105,7 +105,15 @@ pub struct OpenMenu {
     pub source: String,
     /// Width of the source button (menu is at least this wide).
     pub source_w: f32,
-    pub items: Vec<String>,
+    pub items: Vec<MenuEntry>,
+}
+
+/// A dropdown menu row: a command item or a section header
+/// (MS Paint `TMenuSection`; ribbon.yaml `">Name"` dropdown entries).
+#[derive(Clone, Debug)]
+pub enum MenuEntry {
+    Item(String),
+    Section(String),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -305,7 +313,7 @@ impl Explorer {
                 source_w: 140.0,
                 items: ["sort_name", "sort_size", "sort_modified"]
                     .iter()
-                    .map(|s| s.to_string())
+                    .map(|s| crate::model::MenuEntry::Item(s.to_string()))
                     .collect(),
             });
         }
