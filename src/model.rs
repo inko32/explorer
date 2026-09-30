@@ -58,6 +58,9 @@ pub enum Message {
     FsEvent(FsEvent),
     /// Ribbon command (YAML-defined): internal or `sh -c` shell.
     RunCommand(String),
+    /// Ribbon radio-group selection (MS Paint `GroupTButtons` behavior):
+    /// `id` becomes the selected button of `group`, then the command runs.
+    RibbonSelect { group: String, id: String },
     /// Scroll offset + viewport height from the file list scrollable.
     Scrolled { y: f32, height: f32 },
     /// Window resized (for list virtualization viewport + title-bar layout).
@@ -169,6 +172,10 @@ pub struct Explorer {
     pub show_hidden: bool,
     pub active_tab: String,
     pub ribbon: crate::ribbon::RibbonConfig,
+    /// Ribbon radio-group selections: group name -> selected command id
+    /// (MS Paint `GroupTButtons`; written by RibbonSelect, read by the
+    /// ribbon backend for SELECTABLE buttons that declare a `group:`).
+    pub ribbon_sel: std::collections::HashMap<String, String>,
     pub scroll_y: f32,
     pub viewport_h: f32,
     /// Measured window width (resize events) for title-bar layout.
@@ -271,6 +278,7 @@ impl Explorer {
             show_hidden: false,
             active_tab: "home".into(),
             ribbon: crate::ribbon::load(),
+            ribbon_sel: std::collections::HashMap::new(),
             scroll_y: 0.0,
             viewport_h: 600.0,
             win_w: 1152.0,
@@ -941,6 +949,10 @@ impl Explorer {
                 iced::Task::none()
             }
             Message::RunCommand(id) => {
+                return self.run_command(&id);
+            }
+            Message::RibbonSelect { group, id } => {
+                self.ribbon_sel.insert(group, id.clone());
                 return self.run_command(&id);
             }
             Message::Scrolled { y, height } => {

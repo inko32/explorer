@@ -10,6 +10,11 @@ mod icons;
 mod model;
 mod nav_pane;
 mod navigation;
+// Ribbon backend — switchable; both backends stay compilable. The active
+// one provides `mod ribbon`; the other waits as backup (see
+// docs/RIBBON-MSPAINT.md for the noun mapping and port notes).
+#[path = "ribbon.rs"] // MS Paint style (active)
+// #[path = "ribbon_classic.rs"] // Win8 clone (backup)
 mod ribbon;
 mod status;
 mod ui;

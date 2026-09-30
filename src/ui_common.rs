@@ -30,6 +30,9 @@ pub mod skin {
         /// ribbon command hover: fill + border (clone: E8EFF7/A4CEF9)
         pub hover_btn: iced::Color,
         pub hover_btn_border: iced::Color,
+        /// selected/pressed ribbon button (MS Paint: C9E0F7/62A2E4)
+        pub sel_btn: iced::Color,
+        pub sel_btn_border: iced::Color,
         /// circular nav-button hover (clone: E5F3FB/70C0E7)
         pub nav_hover: iced::Color,
         pub nav_hover_border: iced::Color,
@@ -53,6 +56,9 @@ pub mod skin {
         pub close_pressed: iced::Color,
         /// main-tab hover outline (clone: EBECED; dark: subtle gray)
         pub tab_hover_outline: iced::Color,
+        /// dropdown menu (MS Paint: FBFCFD fill / DCDDDE border)
+        pub menu_bg: iced::Color,
+        pub menu_border: iced::Color,
         /// nav crumb bar / search box border (clone: D9D9D9)
         pub nav_border: iced::Color,
         /// search box recessed button (clone: E8F1FB fill / A9C4E8 divider)
@@ -79,6 +85,8 @@ pub mod skin {
         pressed: color!(0xA4CEF9),
         hover_btn: color!(0xE8EFF7),
         hover_btn_border: color!(0xA4CEF9),
+        sel_btn: color!(0xC9E0F7),
+        sel_btn_border: color!(0x62A2E4),
         nav_hover: color!(0xE5F3FB),
         nav_hover_border: color!(0x70C0E7),
         file_tab: color!(0x1979CA),
@@ -100,6 +108,8 @@ pub mod skin {
         nav_border: color!(0xD9D9D9),
         search_btn_bg: color!(0xE8F1FB),
         search_btn_border: color!(0xA9C4E8),
+        menu_bg: color!(0xFBFCFD),
+        menu_border: color!(0xDCDDDE),
         address_border: color!(0xA9A9A9),
         title_text: color!(0x1A1A1A),
     };
@@ -118,6 +128,8 @@ pub mod skin {
         pressed: color!(0x4A525A),
         hover_btn: color!(0x3A4046),
         hover_btn_border: color!(0x4A90D9),
+        sel_btn: color!(0x3D5A78),
+        sel_btn_border: color!(0x5A89C0),
         nav_hover: color!(0x3A4046),
         nav_hover_border: color!(0x4A90D9),
         file_tab: color!(0x1979CA),
@@ -138,6 +150,8 @@ pub mod skin {
         nav_border: color!(0x555555),
         search_btn_bg: color!(0x2E3F55),
         search_btn_border: color!(0x46647F),
+        menu_bg: color!(0x383838),
+        menu_border: color!(0x505050),
         address_border: color!(0x555555),
         title_text: color!(0xFFFFFF),
     };

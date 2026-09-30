@@ -176,9 +176,9 @@ fn menu_overlay(state: &Explorer, m: &crate::model::OpenMenu, skin: skin::Skin) 
     let popup = container(items_col)
         .width(Length::Fixed(w))
         .style(move |_| container::Style {
-            background: Some(skin.window_bg.into()),
+            background: Some(skin.menu_bg.into()),
             border: iced::Border {
-                color: skin.sep,
+                color: skin.menu_border,
                 width: 1.0,
                 radius: 0.0.into(),
             },
