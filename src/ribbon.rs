@@ -1,5 +1,22 @@
-//! YAML-driven ribbon (D12): config schema, loader, `when` expression
-//! evaluator, enablement rules, icon mapping, command dispatch.
+//! MS Paint-style ribbon backend.
+//!
+//! A reimplementation of the ribbon from the Java MS Paint clone
+//! (/tmp/zramfs_inkodaily/MSPaint-master). Noun mapping and port notes:
+//! docs/RIBBON-MSPAINT.md. The Win8-clone backend is preserved in
+//! ribbon_classic.rs; switch in main.rs (`#[path]` attribute).
+//!
+//! MS Paint facts this backend follows (all sizes logical px, 96 dpi):
+//! - toolbar bg F5F6F7 (= skin.ribbon_bg), border lines DADBDC (= skin.sep)
+//! - button hover E8EFF7/A4CEF9 (= skin.hover_btn/hover_btn_border),
+//!   selected C9E0F7/62A2E4 (= skin.sel_btn/sel_btn_border)
+//! - group separators: a 9px zone with a FULL-HEIGHT 1px line (gap 0)
+//! - toolbar padding 5 top / 5 sides / 3 bottom; caption row under content
+//! - big split button (Paste): big icon on top, "label ▾" strip below, one
+//!   shared selected/hover border around both halves + a divider line
+//! - galleries: white 1px-bordered panel with a grid of square cells
+//! - color plate: color1/color2 selectors + 10x2 color grid (+ chooser)
+//! Dark mode: every color goes through the skin. High dpi: 1px lines are
+//! snapped to whole physical pixels via `phys_px`.
 
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -24,9 +41,7 @@ pub struct TabDef {
     pub color: Option<String>,
     #[serde(default)]
     pub when: Option<String>,
-    /// When to AUTO-activate the tab (defaults to `when`). Use a stricter
-    /// expression to show the tab idle on weaker contexts: e.g. the Archive
-    /// tab shows when an archive is selected but only activates inside one.
+    /// When to AUTO-activate the tab (defaults to `when).
     #[serde(default)]
     pub activate_when: Option<String>,
     #[serde(default)]
@@ -36,16 +51,14 @@ pub struct TabDef {
 #[derive(Debug, Deserialize)]
 pub struct GroupDef {
     pub label: String,
-    /// Manual width override in px — normally omitted: the width is computed
-    /// from the group's content (buttons, columns, spacing, padding).
+    /// Manual width override in px — normally omitted: computed from content.
     #[serde(default)]
     pub width: Option<f32>,
-    /// Vertical slots per small-command column (default 3, max 3 -
-    /// four buttons in one column are not allowed).
+    /// Vertical slots per small-command column (default 3).
     #[serde(default)]
     pub rows: Option<usize>,
-    /// "gallery": tile the commands as an in-ribbon gallery grid with an
-    /// expand button opening the full list as a dropdown.
+    /// "gallery": white grid panel + expand dropdown.
+    /// "color_plate": MS Paint Colors group (kept for later use).
     #[serde(default)]
     pub kind: Option<String>,
     #[serde(default)]
@@ -54,7 +67,7 @@ pub struct GroupDef {
 
 #[derive(Debug, Deserialize)]
 pub struct CmdRef {
-    /// Empty + `separator: true` renders a vertical separator INSIDE a group.
+    /// Empty + `separator: true` renders a full-height separator INSIDE a group.
     #[serde(default)]
     pub id: String,
     #[serde(default)]
@@ -67,18 +80,25 @@ pub struct CmdRef {
     pub size: Option<String>,
     #[serde(default)]
     pub enabled: Option<bool>,
-    /// Manual width override in px — normally omitted: big buttons size
-    /// from label+icon (`big_width`), small ones from icon+label (+checkbox
-    /// box / dropdown arrow) via `small_width`.
+    /// Radio-group name (MS Paint `GroupTButtons`): selecting this button
+    /// deselects the other group members. Selection lives in
+    /// Explorer::ribbon_sel (Message::RibbonSelect).
     #[serde(default)]
-    pub width: Option<f32>,
-    /// "checkbox": renders a check box + label (active state = checked).
+    pub group: Option<String>,
+    /// "checkbox": toggle button — active state = checked.
     #[serde(default)]
     pub kind: Option<String>,
-    /// Dropdown menu items (command ids) — renders a split button with an
-    /// arrow that opens the menu below the ribbon.
+    /// Dropdown menu items (command ids) — a split button when the command
+    /// also has an action, a plain "label ▾" dropdown otherwise.
     #[serde(default)]
     pub dropdown: Option<Vec<String>>,
+    /// Custom cursor hook (MS Paint `setViewCursor`) — parsed and kept for
+    /// later; not wired to the window yet.
+    #[serde(default)]
+    pub cursor: Option<String>,
+    /// Manual width override in px — normally omitted.
+    #[serde(default)]
+    pub width: Option<f32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -109,7 +129,7 @@ pub fn load() -> RibbonConfig {
         .expect("embedded ribbon.yaml is valid")
 }
 
-// ---------------- context + `when` expressions ----------------
+// ---------------- context + `when` expressions (same as classic) ----------------
 
 #[derive(Clone, Copy, Default)]
 pub struct Context {
@@ -260,6 +280,13 @@ mod tests {
         assert!(eval_when("(has_image or has_selection) and inside_archive", c));
         assert!(!eval_when("unknown_pred", c));
     }
+
+    #[test]
+    fn embedded_yaml_loads() {
+        let cfg: RibbonConfig = serde_yaml::from_str(include_str!("../assets/ribbon.yaml"))
+            .expect("embedded ribbon.yaml is valid");
+        assert!(!cfg.tabs.is_empty());
+    }
 }
 
 /// Contextual tab accent colors (Win8 palette).
@@ -280,7 +307,7 @@ pub fn color_by_name(name: &str) -> Option<iced::Color> {
     })
 }
 
-// ---------------- enablement ----------------
+// ---------------- enablement (same as classic) ----------------
 
 /// Dynamic enablement: static `enabled: false` wins; then per-command rules.
 pub fn command_enabled(id: &str, has_selection: bool, has_clipboard: bool, has_items: bool) -> bool {
@@ -295,9 +322,67 @@ pub fn command_enabled(id: &str, has_selection: bool, has_clipboard: bool, has_i
     }
 }
 
+// ---------------- geometry (MS Paint metrics; logical px @ 96dpi) ----------------
 
+/// Horizontal space between two CONTEXTUAL tabs (and their title-bar
+/// blocks) — shared with border.rs.
+pub(crate) const CTX_TAB_GAP: f32 = 3.0;
 
-// ---------------- ribbon UI (extracted from ui.rs) ----------------
+// ---- chrome geometry shared with border.rs (single source of fact) ----
+/// Title bar height — border.rs draws the bar; the ribbon's dropdown
+/// anchors are positioned relative to it.
+pub(crate) const TITLEBAR_H: f32 = 30.0;
+/// Tab row height (below the title bar, above the tab-row line).
+pub(crate) const TAB_ROW_H: f32 = 24.0;
+/// The 1px line between the tab row and the ribbon body (also the body's
+/// bottom edge).
+pub(crate) const TAB_LINE_H: f32 = 1.0;
+
+/// Window-y of the ribbon body top: below the title bar, the tab row and
+/// the tab-row line. Dropdown menus anchor under the ribbon from this.
+pub(crate) fn ribbon_body_y() -> f32 {
+    TITLEBAR_H + TAB_ROW_H + TAB_LINE_H
+}
+
+// ---- MS Paint toolbar metrics ----
+/// Total ribbon body height (unchanged from the classic backend so the
+/// rest of the layout is unaffected): 5 top pad + 77 content + 15 caption
+/// + 3 bottom pad.
+pub(crate) const RIBBON_H: f32 = 100.0;
+/// Toolbar padding: top, sides, bottom (MS Paint EmptyBorder(5,5,3,5)).
+pub(crate) const PAD_TOP: f32 = 5.0;
+pub(crate) const PAD_SIDE: f32 = 5.0;
+pub(crate) const PAD_BOTTOM: f32 = 3.0;
+/// Group caption row height.
+pub(crate) const CAPTION_H: f32 = 15.0;
+/// Group command-area height.
+pub(crate) const GROUP_CONTENT_H: f32 = RIBBON_H - PAD_TOP - PAD_BOTTOM - CAPTION_H; // 77
+/// Group separator zone width — a FULL-HEIGHT 1px line centered in it
+/// (MS Paint TSeparator(9, 92, gap 0)).
+pub(crate) const SEP_W: f32 = 9.0;
+/// Small labeled command row height (three rows fill the content area).
+pub(crate) const SMALL_H: f32 = 25.0;
+/// Vertical spacing between two small-command rows in a column.
+pub(crate) const SMALL_GAP: f32 = 1.0;
+/// Icon-only tool button (MS Paint "Tools" grid squares).
+pub(crate) const ICON_BTN: f32 = 25.0;
+/// Big split button (MS Paint Paste): icon zone + 1px divider + strip.
+pub(crate) const BIG_STRIP_H: f32 = 21.0;
+pub(crate) const BIG_DIVIDER_H: f32 = 1.0;
+pub(crate) const BIG_ICON: f32 = 32.0;
+/// Gallery: white panel grid of square cells (MS Paint ShapeTools panel).
+pub(crate) const GALLERY_CELL: f32 = 22.0;
+/// Color plate: swatch cell size (MS Paint uses 14px cells, 1px insets).
+pub(crate) const COLOR_CELL: f32 = 14.0;
+
+/// The MS Paint color-plate palette, row by row (20 colors; the Java
+/// original reserves 30 cells with the last row empty).
+pub(crate) const COLOR_PLATE: [[u32; 10]; 2] = [
+    [0x000000, 0x808080, 0x880015, 0xFF0000, 0xFF7F27, 0xFFFF00, 0x00FF00, 0x00A2E8, 0x3F48CC, 0xA349A4],
+    [0xFFFFFF, 0xC0C0C0, 0x00FFFF, 0xB97A57, 0xFFC90E, 0xEFE4B0, 0xFC9EA0, 0xB5E61D, 0x7092BE, 0xC8BFE6],
+];
+
+// ---------------- ribbon UI ----------------
 
 use iced::widget::{button, column, container, mouse_area, row, stack, text, Space};
 use iced::{Color, Element, Length};
@@ -306,38 +391,68 @@ use crate::border::frame_insets;
 use crate::model::{Explorer, Message};
 use crate::ui_common::{bg, dbg, icon, skin, CHROME_BTN};
 
+/// Logical size of `n` physical pixels at the current total UI scale: a
+/// 1px line must cover a whole number of device pixels, otherwise it lands
+/// on a fractional device width and renders as a blurry gray hairline.
+pub(crate) fn phys_px(state: &Explorer, n: f32) -> f32 {
+    let scale = if state.system_scale > 0.0 {
+        state.system_scale * state.dpi_multiplier()
+    } else {
+        1.0
+    };
+    n / scale
+}
+
+/// Approximate advance width of a string at 11px in the system sans
+/// (DejaVu Sans family) — used for button width estimation.
+pub(crate) fn text11_w(s: &str) -> f32 {
+    s.chars()
+        .map(|c| match c {
+            'i' | 'j' | 'l' => 2.5f32,
+            't' => 3.7,
+            'f' => 3.4,
+            'r' => 4.0,
+            'm' => 9.4,
+            'w' => 8.7,
+            'M' => 9.3,
+            'W' => 11.6,
+            ' ' => 3.4,
+            c if c.is_ascii_uppercase() => 7.7,
+            _ => 6.3,
+        })
+        .sum()
+}
+
 pub(crate) fn view(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     // geometry + accent of the active tab (the accent also drives the line)
     let active_geo = active_tab_geometry(state);
-    // clone/Win8: a 1px line under the tab row; the body has NO top border.
-    // With an active CONTEXTUAL tab the whole line takes that tab's accent
-    // color — the active tab covers its own segment (see the bridge below),
-    // which is also its +1px pane-colored bottom line.
+    // MS Paint draws a 1px border line top+bottom over the toolbar. With an
+    // active CONTEXTUAL tab the line takes that tab's accent color — the
+    // active tab covers its own segment (see the bridge below).
     let line_color = active_geo.and_then(|(_, _, a)| a).unwrap_or(skin.sep);
-    let line: Element<Message> = container(
-        Space::new().width(Length::Fill).height(Length::Fixed(TAB_LINE_H)),
-    )
-    .style(move |_t: &iced::Theme| container::Style {
-        background: Some(line_color.into()),
-        ..Default::default()
-    })
-    .into();
-    let body = container(ribbon_body(state, skin))
+    let line = container(Space::new().width(Length::Fill).height(Length::Fixed(phys_px(state, TAB_LINE_H))))
+        .style(move |_t: &iced::Theme| container::Style {
+            background: Some(line_color.into()),
+            ..Default::default()
+        });
+    let body = container(mspaint_body(state, skin))
         .width(Length::Fill)
         .height(Length::Fixed(RIBBON_H))
+        .padding(iced::Padding {
+            top: PAD_TOP,
+            right: PAD_SIDE,
+            bottom: PAD_BOTTOM,
+            left: PAD_SIDE,
+        })
         .style(move |_| container::Style {
             background: Some(skin.ribbon_bg.into()),
             ..Default::default()
         });
-    // bottom edge of the ribbon body (the top edge is `line` above)
-    let bottom_line: Element<Message> = container(
-        Space::new().width(Length::Fill).height(Length::Fixed(TAB_LINE_H)),
-    )
-    .style(move |_t: &iced::Theme| container::Style {
-        background: Some(skin.sep.into()),
-        ..Default::default()
-    })
-    .into();
+    let bottom_line = container(Space::new().width(Length::Fill).height(Length::Fixed(phys_px(state, TAB_LINE_H))))
+        .style(move |_t: &iced::Theme| container::Style {
+            background: Some(skin.sep.into()),
+            ..Default::default()
+        });
     if state.ribbon_collapsed {
         return column![tab_row(state, skin), line].into();
     }
@@ -357,7 +472,7 @@ pub(crate) fn view(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
             let strip = container(
                 row![
                     Space::new().width(Length::Fixed(x)),
-                    // the tab's +2px height interferes with the tab-row line:
+                    // the tab's +height interferes with the tab-row line:
                     // the side LINES continue down through the zone (no gap
                     // below the tab), the middle swallows the line
                     leg(border_c),
@@ -377,7 +492,6 @@ pub(crate) fn view(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
             .height(Length::Fixed(1.0));
             let bridge = container(
                 column![
-                    // start at y=24: right below the tab row
                     Space::new().width(Length::Fill).height(Length::Fixed(TAB_ROW_H)),
                     strip,
                 ]
@@ -389,6 +503,780 @@ pub(crate) fn view(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         }
         None => col.into(),
     }
+}
+
+// ---------------- MS Paint widgets ----------------
+
+/// MS Paint `TButton` chrome: hover fill+border, selected (radio/toggle/
+/// pressed) fill+border, disabled plain.
+fn tbtn_style(
+    enabled: bool,
+    selected: bool,
+    skin: skin::Skin,
+) -> impl Fn(&iced::Theme, button::Status) -> button::Style + 'static {
+    move |_t, status| {
+        let (bgc, border_c, tc) = if !enabled {
+            (None, Color::TRANSPARENT, skin.disabled)
+        } else if selected {
+            (Some(skin.sel_btn), skin.sel_btn_border, skin.text)
+        } else {
+            match status {
+                button::Status::Hovered => (Some(skin.hover_btn), skin.hover_btn_border, skin.text),
+                button::Status::Pressed => (Some(skin.sel_btn), skin.sel_btn_border, skin.text),
+                _ => (None, Color::TRANSPARENT, skin.text),
+            }
+        };
+        button::Style {
+            background: bgc.map(Into::into),
+            text_color: tc,
+            border: iced::Border {
+                color: border_c,
+                width: if border_c == Color::TRANSPARENT { 0.0 } else { 1.0 },
+                radius: 0.0.into(),
+            },
+            shadow: Default::default(),
+            snap: true,
+        }
+    }
+}
+
+/// MS Paint `TSeparator`: a `SEP_W`-wide zone with a full-height 1px line.
+fn separator(state: &Explorer, skin: skin::Skin) -> Element<'static, Message> {
+    let h = phys_px(state, GROUP_CONTENT_H + CAPTION_H);
+    container(
+        container(Space::new().width(Length::Fixed(phys_px(state, 1.0))).height(Length::Fixed(h)))
+            .style(bg(skin.sep)),
+    )
+    .width(Length::Fixed(SEP_W))
+    .height(Length::Fill)
+    .center_x(Length::Fixed(SEP_W))
+    .into()
+}
+
+/// Small labeled command (MS Paint Cut/Copy rows): icon + label, 25px high.
+/// `label: ""` renders an MS Paint "Tools"-style icon-only square.
+fn small_cmd(
+    icon_el: Element<'static, Message>,
+    label: &str,
+    width: f32,
+    enabled: bool,
+    selected: bool,
+    msg: Option<Message>,
+    skin: skin::Skin,
+) -> Element<'static, Message> {
+    let content: Element<Message> = if label.is_empty() {
+        container(icon_el)
+            .width(Length::Fixed(ICON_BTN))
+            .height(Length::Fixed(ICON_BTN))
+            .center_x(Length::Fixed(ICON_BTN))
+            .center_y(Length::Fixed(ICON_BTN))
+            .into()
+    } else {
+        let r = row![
+            icon_el,
+            text(label.to_string())
+                .size(11.0)
+                .color(if enabled { skin.text } else { skin.disabled }),
+        ]
+        .spacing(5)
+        .align_y(iced::Alignment::Center);
+        container(r)
+            .height(Length::Fixed(SMALL_H))
+            .center_y(Length::Fixed(SMALL_H))
+            .into()
+    };
+    let btn = button(content)
+        .width(Length::Fixed(width))
+        .height(Length::Fixed(if label.is_empty() { ICON_BTN } else { SMALL_H }))
+        .padding([0.0, 4.0])
+        .style(tbtn_style(enabled, selected, skin));
+    let el: Element<Message> = match (enabled, msg) {
+        (true, Some(m)) => btn.on_press(m).into(),
+        _ => btn.into(),
+    };
+    dbg(
+        Box::leak(format!("cmd:{label}").into_boxed_str()),
+        el,
+    )
+}
+
+/// Checkbox command: a 13px box + label toggle (checked = selected).
+fn checkbox_cmd(
+    label: &str,
+    width: f32,
+    enabled: bool,
+    checked: bool,
+    msg: Option<Message>,
+    skin: skin::Skin,
+) -> Element<'static, Message> {
+    let box_el = container(
+        text(if checked { "\u{2713}" } else { "" })
+            .size(10.0)
+            .color(Color::WHITE),
+    )
+    .width(Length::Fixed(13.0))
+    .height(Length::Fixed(13.0))
+    .center_x(Length::Fixed(13.0))
+    .center_y(Length::Fixed(13.0))
+    .style(move |_| container::Style {
+        background: Some((if checked { skin.accent } else { skin.window_bg }).into()),
+        border: iced::Border {
+            color: if checked { skin.accent } else { skin.disabled },
+            width: 1.0,
+            radius: 0.0.into(),
+        },
+        ..Default::default()
+    });
+    let r = row![
+        box_el,
+        text(label.to_string())
+            .size(11.0)
+            .color(if enabled { skin.text } else { skin.disabled }),
+    ]
+    .spacing(6)
+    .align_y(iced::Alignment::Center);
+    let content = container(r)
+        .height(Length::Fixed(SMALL_H))
+        .center_y(Length::Fixed(SMALL_H));
+    let btn = button(content)
+        .width(Length::Fixed(width))
+        .height(Length::Fixed(SMALL_H))
+        .padding([0.0, 4.0])
+        .style(tbtn_style(enabled, false, skin));
+    let el: Element<Message> = match (enabled, msg) {
+        (true, Some(m)) => btn.on_press(m).into(),
+        _ => btn.into(),
+    };
+    dbg(
+        Box::leak(format!("checkbox:{label}").into_boxed_str()),
+        el,
+    )
+}
+
+/// MS Paint `TButtonAndDropTools`: big icon button on top, "label ▾" strip
+/// below. Hover/selected paint ONE shared border around both halves plus a
+/// divider line (paintComponent draws the rect + the split line).
+#[allow(clippy::too_many_arguments)]
+fn big_split(
+    icon_el: Element<'static, Message>,
+    label: &str,
+    width: f32,
+    enabled: bool,
+    selected: bool,
+    action: Option<Message>,
+    menu: Option<Message>,
+    state: &Explorer,
+    skin: skin::Skin,
+) -> Element<'static, Message> {
+    let icon_zone_h = GROUP_CONTENT_H - BIG_STRIP_H - BIG_DIVIDER_H;
+    // top half: the big icon runs the action
+    let icon_zone = container(icon_el)
+        .width(Length::Fixed(width))
+        .height(Length::Fixed(icon_zone_h))
+        .center_x(Length::Fixed(width))
+        .center_y(Length::Fixed(icon_zone_h));
+    let top = button(icon_zone)
+        .width(Length::Fixed(width))
+        .height(Length::Fixed(icon_zone_h))
+        .padding(0)
+        .style(tbtn_style(enabled, false, skin));
+    let top: Element<Message> = match (enabled, action) {
+        (true, Some(m)) => top.on_press(m).into(),
+        _ => top.into(),
+    };
+    // divider between the halves (part of the unified chrome)
+    let divider = container(
+        container(Space::new().width(Length::Fixed(phys_px(state, 1.0))).height(Length::Fill))
+            .style(bg(skin.sep)),
+    )
+    .width(Length::Fixed(width))
+    .height(Length::Fixed(BIG_DIVIDER_H))
+    .center_x(Length::Fixed(width));
+    // bottom half: "label ▾" opens the dropdown
+    let strip_label = row![
+        text(label.to_string())
+            .size(11.0)
+            .color(if enabled { skin.text } else { skin.disabled }),
+        drop_arrow_el(if enabled { skin.text } else { skin.disabled }, 4.5),
+    ]
+    .spacing(2)
+    .align_y(iced::Alignment::Start);
+    let strip_zone = container(strip_label)
+        .width(Length::Fixed(width))
+        .height(Length::Fixed(BIG_STRIP_H))
+        .center_x(Length::Fixed(width))
+        .center_y(Length::Fixed(BIG_STRIP_H));
+    let bottom = button(strip_zone)
+        .width(Length::Fixed(width))
+        .height(Length::Fixed(BIG_STRIP_H))
+        .padding(0)
+        .style(tbtn_style(enabled, false, skin));
+    let bottom: Element<Message> = match (enabled, menu) {
+        (true, Some(m)) => bottom.on_press(m).into(),
+        _ => bottom.into(),
+    };
+    // shared hover/selected border around the whole control (drawn over the
+    // two button halves + divider)
+    let frame: Element<Message> = container(Space::new().width(Length::Fixed(width)).height(Length::Fixed(GROUP_CONTENT_H)))
+        .width(Length::Fixed(width))
+        .height(Length::Fixed(GROUP_CONTENT_H))
+        .style(move |_| container::Style {
+            background: None,
+            border: iced::Border {
+                color: if selected {
+                    skin.sel_btn_border
+                } else {
+                    Color::TRANSPARENT
+                },
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        })
+        .into();
+    let name: &'static str = Box::leak(format!("big_split:{label}").into_boxed_str());
+    dbg(
+        name,
+        stack![column![top, divider, bottom].width(Length::Fixed(width)), frame]
+            .width(Length::Fixed(width)),
+    )
+    .into()
+}
+
+/// 90-degree dropdown triangle, 6x3 px, top-padded so its base sits below
+/// an adjacent 11px label (same glyph as the classic backend).
+pub(crate) fn drop_arrow_el(c: Color, top_pad: f32) -> Element<'static, Message> {
+    container(
+        iced::widget::svg(crate::icons::drop_arrow(c))
+            .width(Length::Fixed(6.0))
+            .height(Length::Fixed(3.0)),
+    )
+    .padding(iced::Padding {
+        top: top_pad,
+        right: 1.0,
+        bottom: 0.0,
+        left: 1.0,
+    })
+    .into()
+}
+
+/// MS Paint `DropTools` small dropdown: "label ▾" (arrow on the right);
+/// the whole button opens the menu unless `action` is set (then the label
+/// runs the action and only the arrow opens the menu).
+fn small_dropdown(
+    icon_el: Element<'static, Message>,
+    label: &str,
+    width: f32,
+    enabled: bool,
+    action: Option<Message>,
+    menu: Option<Message>,
+    skin: skin::Skin,
+) -> Element<'static, Message> {
+    let tc = if enabled { skin.text } else { skin.disabled };
+    let label_zone = row![
+        icon_el,
+        text(label.to_string()).size(11.0).color(tc),
+        Space::new().width(Length::Fill),
+        drop_arrow_el(tc, 4.5),
+    ]
+    .spacing(5)
+    .align_y(iced::Alignment::Center)
+    .width(Length::Fixed(width - 18.0));
+    let content = container(label_zone)
+        .width(Length::Fixed(width))
+        .height(Length::Fixed(SMALL_H))
+        .center_y(Length::Fixed(SMALL_H))
+        .padding([0.0, 4.0]);
+    let btn = button(content)
+        .width(Length::Fixed(width))
+        .height(Length::Fixed(SMALL_H))
+        .padding(0)
+        .style(tbtn_style(enabled, false, skin));
+    let el: Element<Message> = match (enabled, action.or(menu)) {
+        (true, Some(m)) => btn.on_press(m).into(),
+        _ => btn.into(),
+    };
+    dbg(
+        Box::leak(format!("drop:{label}").into_boxed_str()),
+        el,
+    )
+}
+
+/// Width of one small command (icon + label + padding; icon-only square).
+fn small_width(cmd: &CmdRef) -> f32 {
+    if cmd.label.is_empty() && cmd.icon.is_some() {
+        return ICON_BTN;
+    }
+    let mut w = 8.0; // horizontal padding
+    if cmd.kind.as_deref() == Some("checkbox") {
+        w += 13.0 + 6.0;
+    } else if cmd.icon.is_some() {
+        w += 16.0 + 5.0;
+    }
+    w += text11_w(&cmd.label);
+    if cmd.dropdown.is_some() {
+        w += 18.0;
+    }
+    w.ceil()
+}
+
+/// Width of the big split button from its strip label.
+fn big_split_width(label: &str) -> f32 {
+    (text11_w(label) + 6.0 + 8.0 + 18.0).max(44.0).ceil()
+}
+
+/// Effective command width (YAML `width` wins).
+fn cmd_width(cmd: &CmdRef) -> f32 {
+    cmd.width.unwrap_or_else(|| {
+        if cmd.size.as_deref() == Some("big") {
+            big_split_width(&cmd.label)
+        } else {
+            small_width(cmd)
+        }
+    })
+}
+
+/// Effective group width: content + the group padding MS Paint leaves
+/// around each group (2px sides — visually from the grid gaps).
+pub(crate) fn group_width(g: &GroupDef) -> f32 {
+    if let Some(w) = g.width {
+        return w;
+    }
+    match g.kind.as_deref() {
+        Some("gallery") => {
+            let rows = g.rows.unwrap_or(3).clamp(1, 3) as f32;
+            let cols = (g.commands.len() as f32 / rows).ceil();
+            (PAD_SIDE + cols * GALLERY_CELL + 20.0 + PAD_SIDE).ceil()
+        }
+        Some("color_plate") => (2.0 * (COLOR_CELL + 2.0) + 2.0 + 10.0 * (COLOR_CELL + 2.0) + 2.0 + 20.0).ceil(),
+        _ => {
+            let rows = g.rows.unwrap_or(3).clamp(1, 3);
+            let mut items_w = 0.0f32;
+            let mut n_items = 0usize;
+            let mut smalls: Vec<&CmdRef> = Vec::new();
+            for cmd in &g.commands {
+                if cmd.separator == Some(true) {
+                    items_w += SEP_W;
+                    n_items += 1;
+                } else if cmd.size.as_deref() == Some("big") {
+                    items_w += cmd_width(cmd);
+                    n_items += 1;
+                } else {
+                    smalls.push(cmd);
+                }
+            }
+            let columns = smalls.len().div_ceil(rows).max(1);
+            let col_w = smalls.iter().map(|c| cmd_width(c)).fold(0.0f32, f32::max);
+            if !smalls.is_empty() {
+                items_w += columns as f32 * col_w;
+                n_items += columns;
+            }
+            let spacing = 2.0 * n_items.saturating_sub(1) as f32;
+            (PAD_SIDE * 2.0 + items_w + spacing).ceil()
+        }
+    }
+}
+
+/// Clamp a dropdown menu anchor x so the menu stays inside the window.
+pub(crate) fn menu_anchor(state: &Explorer, x: f32) -> f32 {
+    let (_, fr, _, fl) = frame_insets(state);
+    x.clamp(4.0, (state.win_w - fl - fr - 220.0).max(4.0))
+}
+
+/// Build one group's content from YAML. Small commands stack into
+/// `rows`-tall columns (MS Paint clipboard/tools arrangement).
+fn group_from_config(g: &GroupDef, state: &Explorer, skin: skin::Skin, x_base: f32) -> Element<'static, Message> {
+    let has_sel = !state.selected.is_empty();
+    let has_clip = state.clipboard.is_some();
+    let has_items = !state.entries.is_empty();
+    let enabled_of = |cmd: &CmdRef| {
+        cmd.enabled.unwrap_or(true) && command_enabled(&cmd.id, has_sel, has_clip, has_items)
+    };
+    let menu_source = state.open_menu.as_ref().map(|m| m.source.as_str());
+    let active_of = |id: &str| match id {
+        _ if Some(id) == menu_source => true, // pressed while its menu is open
+        "toggle_border" => state.self_border,
+        "toggle_dark" => state.dark,
+        "toggle_hidden" => state.show_hidden,
+        "toggle_frame" => state.frame_style == crate::model::FrameStyle::Win8,
+        "view_large" => state.view == crate::model::ViewMode::Large,
+        "view_details" => state.view == crate::model::ViewMode::Details,
+        _ => false,
+    };
+    // selected = radio-group selection (MS Paint GroupTButtons) or a
+    // model-backed toggle
+    let selected_of = |cmd: &CmdRef| {
+        if let Some(grp) = &cmd.group {
+            match state.ribbon_sel.get(grp) {
+                Some(id) => *id == cmd.id,
+                None => active_of(&cmd.id), // default until first click
+            }
+        } else {
+            active_of(&cmd.id)
+        }
+    };
+    let press_of = |cmd: &CmdRef, msg: Message| match &cmd.group {
+        Some(grp) => Message::RibbonSelect {
+            group: grp.clone(),
+            id: cmd.id.clone(),
+        },
+        None => msg,
+    };
+
+    if g.kind.as_deref() == Some("color_plate") {
+        return color_plate(g, state, skin);
+    }
+    if g.kind.as_deref() == Some("gallery") {
+        return gallery(g, state, skin, x_base);
+    }
+
+    let mut content = row![].spacing(2);
+    let mut bigs_w = 0.0f32;
+    for cmd in &g.commands {
+        if cmd.separator == Some(true) {
+            content = content.push(separator(state, skin));
+            bigs_w += SEP_W + 2.0;
+            continue;
+        }
+        if cmd.size.as_deref() == Some("big") {
+            let enabled = enabled_of(cmd);
+            let w = cmd_width(cmd);
+            let has_action = state.ribbon.commands.contains_key(&cmd.id);
+            let selected = selected_of(cmd);
+            let action = enabled.then(|| {
+                press_of(cmd, Message::RunCommand(cmd.id.clone()))
+            });
+            let menu = cmd.dropdown.as_ref().and_then(|items| {
+                enabled.then(|| Message::OpenMenu {
+                    x: menu_anchor(state, x_base + PAD_SIDE + bigs_w),
+                    y: ribbon_body_y() + PAD_TOP + GROUP_CONTENT_H,
+                    source: cmd.id.clone(),
+                    source_w: w,
+                    items: items.clone(),
+                })
+            });
+            let el = big_split(
+                crate::icon::view(cmd.icon.as_deref().unwrap_or("file"), BIG_ICON, &skin),
+                &cmd.label,
+                w,
+                enabled,
+                selected,
+                if has_action { action } else { None },
+                menu,
+                state,
+                skin,
+            );
+            bigs_w += w + 2.0;
+            content = content.push(el);
+        }
+    }
+
+    let small_cmds: Vec<&CmdRef> =
+        g.commands.iter().filter(|c| c.size.as_deref() != Some("big") && c.separator != Some(true)).collect();
+    let rows = g.rows.unwrap_or(3).clamp(1, 3) as usize;
+    let columns = small_cmds.len().div_ceil(rows).max(1);
+    let col_w = small_cmds
+        .iter()
+        .map(|c| cmd_width(c))
+        .fold(0.0f32, f32::max);
+    let mut smalls: Vec<Element<Message>> = Vec::new();
+    for (j, cmd) in small_cmds.iter().enumerate() {
+        let enabled = enabled_of(cmd);
+        let selected = selected_of(cmd);
+        let w = cmd_width(cmd);
+        let has_action = state.ribbon.commands.contains_key(&cmd.id);
+        let msg = enabled.then(|| press_of(cmd, Message::RunCommand(cmd.id.clone())));
+        let col = (j / rows) as f32;
+        let row_i = (j % rows) as f32;
+        let el: Element<Message> = if cmd.kind.as_deref() == Some("checkbox") {
+            checkbox_cmd(&cmd.label, w, enabled, selected, msg, skin)
+        } else if let Some(items) = &cmd.dropdown {
+            // MS Paint has no split small: whole button opens the menu,
+            // unless the command itself has an action (then it wins).
+            let menu_msg = enabled.then(|| Message::OpenMenu {
+                x: menu_anchor(state, x_base + PAD_SIDE + bigs_w + col * (col_w + 2.0)),
+                y: ribbon_body_y() + PAD_TOP + row_i * (SMALL_H + SMALL_GAP) + SMALL_H,
+                source: cmd.id.clone(),
+                source_w: w,
+                items: items.clone(),
+            });
+            small_dropdown(
+                crate::icon::view(cmd.icon.as_deref().unwrap_or("file"), 16.0, &skin),
+                &cmd.label,
+                w,
+                enabled,
+                if has_action { msg } else { None },
+                menu_msg,
+                skin,
+            )
+        } else {
+            small_cmd(
+                crate::icon::view(cmd.icon.as_deref().unwrap_or("file"), 16.0, &skin),
+                &cmd.label,
+                w,
+                enabled,
+                selected,
+                msg,
+                skin,
+            )
+        };
+        smalls.push(el);
+    }
+    let mut it = smalls.into_iter();
+    for _ in 0..columns {
+        let mut col = column![].spacing(SMALL_GAP);
+        for _ in 0..rows {
+            if let Some(s) = it.next() {
+                col = col.push(s);
+            }
+        }
+        content = content.push(col);
+    }
+    group_frame(&g.label.clone(), group_width(g), content.into(), skin)
+}
+
+/// MS Paint gallery (ShapeTools): a white 1px-bordered panel with a grid
+/// of square cells, plus an expand chevron opening the full list.
+fn gallery(g: &GroupDef, state: &Explorer, skin: skin::Skin, x_base: f32) -> Element<'static, Message> {
+    let rows = g.rows.unwrap_or(3).clamp(1, 3);
+    let columns = g.commands.len().div_ceil(rows).max(1);
+    let cells: Vec<Element<Message>> = g
+        .commands
+        .iter()
+        .map(|cmd| {
+            let enabled = cmd.enabled.unwrap_or(true);
+            let btn = button(
+                container(crate::icon::view(cmd.icon.as_deref().unwrap_or("file"), 16.0, &skin))
+                    .width(Length::Fixed(GALLERY_CELL))
+                    .height(Length::Fixed(GALLERY_CELL))
+                    .center_x(Length::Fixed(GALLERY_CELL))
+                    .center_y(Length::Fixed(GALLERY_CELL)),
+            )
+            .width(Length::Fixed(GALLERY_CELL))
+            .height(Length::Fixed(GALLERY_CELL))
+            .padding(0)
+            .style(tbtn_style(enabled, false, skin));
+            let el: Element<Message> = match enabled {
+                true => btn.on_press(Message::RunCommand(cmd.id.clone())).into(),
+                false => btn.into(),
+            };
+            dbg(Box::leak(format!("cell:{}", cmd.id).into_boxed_str()), el)
+        })
+        .collect();
+    let mut it = cells.into_iter();
+    let mut grid = column![].spacing(1);
+    for _ in 0..rows {
+        let mut line = row![].spacing(1);
+        for _ in 0..columns {
+            if let Some(c) = it.next() {
+                line = line.push(c);
+            }
+        }
+        grid = grid.push(line);
+    }
+    let panel = container(grid)
+        .padding(1.0)
+        .style(move |_| container::Style {
+            background: Some(skin.window_bg.into()),
+            border: iced::Border {
+                color: skin.sep,
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        });
+    let items: Vec<String> = g.commands.iter().map(|c| c.id.clone()).collect();
+    let gw = group_width(g);
+    let expand = button(crate::icon::view("chevron_down", 12.0, &skin))
+        .width(Length::Fixed(20.0))
+        .height(Length::Fixed(GROUP_CONTENT_H))
+        .style(tbtn_style(true, false, skin))
+        .on_press(Message::OpenMenu {
+            x: menu_anchor(state, x_base + gw - 26.0),
+            y: ribbon_body_y() + PAD_TOP + GROUP_CONTENT_H,
+            source: g.label.clone(),
+            source_w: gw,
+            items,
+        });
+    group_frame(
+        &g.label.clone(),
+        gw,
+        row![panel, expand].height(Length::Fixed(GROUP_CONTENT_H)).into(),
+        skin,
+    )
+}
+
+/// MS Paint Colors group: color1/color2 selectors, the 10x2 palette grid
+/// and a chooser button (the group's first command, if any). A swatch
+/// click dispatches `RunCommand("color_plate:<RRGGBB>")` — define a
+/// matching command in ribbon.yaml to wire it (kept for later use).
+fn color_plate(g: &GroupDef, _state: &Explorer, skin: skin::Skin) -> Element<'static, Message> {
+    let sel_box = |c: Color| {
+        container(Space::new().width(Length::Fixed(COLOR_CELL)).height(Length::Fixed(COLOR_CELL)))
+            .width(Length::Fixed(COLOR_CELL + 2.0))
+            .height(Length::Fixed(COLOR_CELL + 2.0))
+            .style(move |_| container::Style {
+                background: Some(c.into()),
+                border: iced::Border {
+                    color: skin.sep,
+                    width: 1.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            })
+    };
+    let mut rows = column![].spacing(2);
+    for r in 0..2 {
+        let mut line = row![].spacing(2);
+        for c in 0..10 {
+            let hex = COLOR_PLATE[r][c];
+            let c = Color::from_rgb8(((hex >> 16) & 0xFF) as u8, ((hex >> 8) & 0xFF) as u8, (hex & 0xFF) as u8);
+            let swatch = button(
+                container(Space::new().width(Length::Fixed(COLOR_CELL)).height(Length::Fixed(COLOR_CELL)))
+                    .style(bg(c)),
+            )
+            .width(Length::Fixed(COLOR_CELL))
+            .height(Length::Fixed(COLOR_CELL))
+            .padding(0)
+            .style(tbtn_style(true, false, skin))
+            .on_press(Message::RunCommand(format!("color_plate:{hex:06X}")));
+            line = line.push(swatch);
+        }
+        rows = rows.push(line);
+    }
+    let chooser: Element<Message> = match g.commands.first() {
+        Some(cmd) => button(crate::icon::view(cmd.icon.as_deref().unwrap_or("gear"), 16.0, &skin))
+            .width(Length::Fixed(20.0))
+            .height(Length::Fixed(20.0))
+            .style(tbtn_style(true, false, skin))
+            .on_press(Message::RunCommand(cmd.id.clone()))
+            .into(),
+        None => Space::new().width(Length::Fixed(20.0)).height(Length::Fixed(20.0)).into(),
+    };
+    let content = row![
+        column![sel_box(Color::BLACK), sel_box(Color::WHITE)].spacing(2),
+        rows,
+        container(chooser).height(Length::Fixed(GROUP_CONTENT_H)).align_y(iced::Alignment::End),
+    ]
+    .spacing(4)
+    .align_y(iced::Alignment::Center);
+    group_frame(&g.label.clone(), group_width(g), content.into(), skin)
+}
+
+/// A group: content on top, centered caption under it (MS Paint grid:
+/// glue above the caption pushes it to the bottom edge).
+fn group_frame(caption: &str, width: f32, content: Element<'static, Message>, skin: skin::Skin) -> Element<'static, Message> {
+    column![
+        container(dbg(
+            Box::leak(format!("group_body:{caption}").into_boxed_str()),
+            content,
+        ))
+        .width(Length::Fixed(width))
+        .height(Length::Fixed(GROUP_CONTENT_H)),
+        container(text(caption.to_string()).size(11.0).color(skin.subtle))
+            .width(Length::Fixed(width))
+            .height(Length::Fixed(CAPTION_H))
+            .center_x(Length::Fixed(width))
+            .style(bg(skin.ribbon_bg)),
+    ]
+    .into()
+}
+
+fn mspaint_body(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
+    let Some(tab) = visible_tabs(state).into_iter().find(|t| t.id == state.active_tab) else {
+        return Space::new().width(Length::Fill).height(Length::Fixed(RIBBON_H)).into();
+    };
+    let mut body = row![];
+    let mut x = 0.0f32;
+    let mut first = true;
+    for g in &tab.groups {
+        if !first {
+            body = body.push(separator(state, skin));
+            x += SEP_W;
+        }
+        first = false;
+        let name: &'static str = Box::leak(format!("group:{}", g.label).into_boxed_str());
+        body = body.push(dbg(name, group_from_config(g, state, skin, x)));
+        x += group_width(g);
+    }
+    body.into()
+}
+
+// ---------------- tab strip (explorer chrome — same as classic) ----------------
+
+/// Active tab's merge overlay: repaints the MIDDLE (`width - 2`) of the
+/// tab's bottom border in the command-pane color, leaving the bottom
+/// corners untouched so the side border lines keep running (into the
+/// bridge legs in `view`).
+fn tab_merge_overlay(width: f32, skin: skin::Skin) -> Element<'static, Message> {
+    container(
+        container(
+            Space::new()
+                .width(Length::Fixed((width - 2.0).max(0.0)))
+                .height(Length::Fixed(1.0)),
+        )
+        .style(move |_| container::Style {
+            background: Some(skin.ribbon_bg.into()),
+            ..Default::default()
+        }),
+    )
+    .width(Length::Fixed(width))
+    .height(Length::Fixed(TAB_ROW_H))
+    .align_x(iced::Alignment::Center)
+    .align_y(iced::Alignment::End)
+    .into()
+}
+
+/// Contextual tab frame (stub / tab-button backing): the caption sits
+/// BETWEEN the side borders, so the text stays at the SAME position idle
+/// and active. Top line: always 1px solid accent. Bottom line: 1px in
+/// `bottom` (the pane color when idle — the border fades to 0% there — or
+/// the accent when active, where `tab_merge_overlay` repaints its middle).
+/// Sides: the distinctive `th`-px border — a linear 100%->0% top-to-bottom
+/// fade when `fade` (idle, 2px), solid when active (1px, thinner than idle).
+fn ctx_frame(
+    width: f32,
+    th: f32,
+    accent: Color,
+    bottom: Color,
+    fade: bool,
+    middle: Element<'static, Message>,
+) -> Element<'static, Message> {
+    let side = move || {
+        container(Space::new().width(Length::Fixed(th)).height(Length::Fill))
+            .width(Length::Fixed(th))
+            .height(Length::Fill)
+            .style(move |_| container::Style {
+                background: Some(if fade {
+                    iced::Background::Gradient(iced::Gradient::Linear(
+                        iced::gradient::Linear::new(iced::Radians(
+                            std::f32::consts::FRAC_PI_2,
+                        ))
+                        .add_stop(0.0, accent)
+                        .add_stop(1.0, Color::TRANSPARENT),
+                    ))
+                } else {
+                    accent.into()
+                }),
+                ..Default::default()
+            })
+    };
+    column![
+        container(Space::new().width(Length::Fill).height(Length::Fixed(1.0)))
+            .style(move |_| container::Style {
+                background: Some(accent.into()),
+                ..Default::default()
+            }),
+        row![side(), middle, side(),].height(Length::Fill),
+        container(Space::new().width(Length::Fill).height(Length::Fixed(1.0)))
+            .style(move |_| container::Style {
+                background: Some(bottom.into()),
+                ..Default::default()
+            }),
+    ]
+    .width(Length::Fixed(width))
+    .height(Length::Fixed(TAB_ROW_H))
+    .into()
 }
 
 fn tab_button(
@@ -423,11 +1311,11 @@ fn tab_button(
     .padding(0)
         .style(move |_t, status| {
             // clone: File tab solid brand color; main tabs transparent with a
-            // 1px #EBECEC outline on hover; active tab fills the body color
-            // and borders top/sides #DADBDC, bottom merges into the body.
+            // 1px outline on hover; active tab fills the body color and
+            // borders top/sides, bottom merges into the body.
             let outline = skin.tab_hover_outline;
             let frame = skin.sep;
-            let (bg, border_color, border_w) = if is_file {
+            let (bgc, border_color, border_w) = if is_file {
                 let c = match status {
                     button::Status::Hovered => skin.file_tab_hover,
                     _ => skin.file_tab,
@@ -441,7 +1329,7 @@ fn tab_button(
                 }
             };
             button::Style {
-                background: bg.map(Into::into),
+                background: bgc.map(Into::into),
                 text_color,
                 border: iced::Border {
                     color: if is_file { Color::TRANSPARENT } else { accent.filter(|_| active && highlight_bar).unwrap_or(border_color) },
@@ -454,9 +1342,9 @@ fn tab_button(
         })
         .on_press(msg);
     // Active tab (normal AND contextual) merges into the command pane:
-    // the middle of its bottom border changes to the pane color (the
-    // corners keep the border so the side lines run on). The bridge in
-    // `view` adds the +2px interference zone under it.
+    // the middle of its bottom border changes to the pane color — the
+    // corners keep the border so the side lines run on. The bridge in
+    // `view` adds the interference zone under it.
     let btn: Element<Message> = if active && !is_file {
         stack![btn, tab_merge_overlay(width, skin)]
             .width(Length::Fixed(width))
@@ -494,6 +1382,21 @@ fn tab_button(
 }
 
 /// Tabs visible right now: main tabs + contextual tabs whose `when` matches.
+pub(crate) fn visible_tabs(state: &Explorer) -> Vec<&TabDef> {
+    let ctx = state.context();
+    state
+        .ribbon
+        .tabs
+        .iter()
+        .chain(
+            state
+                .ribbon
+                .contextual_tabs
+                .iter()
+                .filter(|t| t.when.as_deref().map(|w| eval_when(w, ctx)).unwrap_or(true)),
+        )
+        .collect()
+}
 
 pub(crate) fn tab_width(label: &str) -> f32 {
     // Win8 tabs are roomy: 76px minimum, extending when the text is longer
@@ -516,45 +1419,6 @@ pub(crate) fn main_tabs_width(state: &Explorer) -> f32 {
     state.ribbon.tabs.iter().map(tab_row_w).sum()
 }
 
-/// Horizontal space between two CONTEXTUAL tabs (and between their
-/// title-bar blocks) — single source of fact for the tab row, the
-/// active-tab geometry and the title-bar blocks in border.rs.
-pub(crate) const CTX_TAB_GAP: f32 = 3.0;
-
-// ---- chrome geometry shared with border.rs (single source of fact) ----
-/// Title bar height — border.rs draws the bar; the ribbon's dropdown
-/// anchors are positioned relative to it.
-pub(crate) const TITLEBAR_H: f32 = 30.0;
-/// Tab row height (below the title bar, above the tab-row line).
-pub(crate) const TAB_ROW_H: f32 = 24.0;
-/// The 1px line between the tab row and the ribbon body (also the body's
-/// bottom edge).
-pub(crate) const TAB_LINE_H: f32 = 1.0;
-
-/// Window-y of the ribbon body top: below the title bar, the tab row and
-/// the tab-row line. Dropdown menus anchor under the ribbon from this.
-pub(crate) fn ribbon_body_y() -> f32 {
-    TITLEBAR_H + TAB_ROW_H + TAB_LINE_H
-}
-
-// ---- group metrics — the width math in group_width() and the rendering
-// in group()/group_from_config() must agree exactly, so these are consts ----
-/// Group content top padding (the buttons start this far below the body top).
-pub(crate) const GROUP_TOP_PAD: f32 = 4.0;
-/// Group horizontal padding, each side.
-pub(crate) const GROUP_PAD: f32 = 5.0;
-/// Width of the zone holding a group separator line (right edge) or an
-/// internal `separator: true` strip.
-pub(crate) const GROUP_SEP_W: f32 = 11.0;
-/// Horizontal spacing between the items inside a group.
-pub(crate) const GROUP_ITEM_SPACING: f32 = 2.0;
-/// Height of the tall content zone (internal separator, gallery expand).
-pub(crate) const GROUP_TALL_ZONE_H: f32 = 76.0;
-/// Height of one small-command row.
-pub(crate) const SMALL_ROW_H: f32 = 23.0;
-/// Vertical spacing between two small-command rows in a column.
-pub(crate) const SMALL_ROW_SPACING: f32 = 1.0;
-
 /// x offset + width (+ contextual accent color, if any) of the currently
 /// active tab within the tab row.
 pub(crate) fn active_tab_geometry(state: &Explorer) -> Option<(f32, f32, Option<Color>)> {
@@ -573,22 +1437,6 @@ pub(crate) fn active_tab_geometry(state: &Explorer) -> Option<(f32, f32, Option<
         prev_ctx = ctx;
     }
     None
-}
-
-pub(crate) fn visible_tabs(state: &Explorer) -> Vec<&TabDef> {
-    let ctx = state.context();
-    state
-        .ribbon
-        .tabs
-        .iter()
-        .chain(
-            state
-                .ribbon
-                .contextual_tabs
-                .iter()
-                .filter(|t| t.when.as_deref().map(|w| eval_when(w, ctx)).unwrap_or(true)),
-        )
-        .collect()
 }
 
 fn tab_row(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
@@ -637,11 +1485,6 @@ fn tab_row(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
             // (2px fading sides when idle, 1px solid when active), so the
             // caption keeps the exact same position
             let stub: Element<Message> = if active {
-                // active: SOLID 1px accent frame (thinner than the idle 2px
-                // fading sides), built from the same ctx_frame so the
-                // caption stays at the same position; tab_merge_overlay
-                // repaints the middle of the bottom line in the pane color
-                // and the bridge continues the side lines
                 let label = container(
                     text(stub_label)
                         .size(12.0)
@@ -652,6 +1495,11 @@ fn tab_row(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
                 .height(Length::Fill)
                 .center_x(Length::Fixed(width - 2.0))
                 .center_y(Length::Fill);
+                // active: SOLID 1px accent frame (thinner than the idle 2px
+                // fading sides), built from the same ctx_frame so the
+                // caption stays at the same position; tab_merge_overlay
+                // repaints the middle of the bottom line in the pane color
+                // and the bridge continues the side lines
                 let framed = ctx_frame(width, 1.0, accent, accent, false, label.into());
                 stack![framed, tab_merge_overlay(width, skin)]
                     .width(Length::Fixed(width))
@@ -705,871 +1553,3 @@ fn tab_row(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     .style(bg(skin.window_bg)) // white strip - the accent frame must not bleed through
     .into()
 }
-
-/// Active tab's merge overlay: repaints the MIDDLE (`width - 2`) of the
-/// tab's bottom border in the command-pane color, leaving the bottom
-/// corners untouched so the side border lines keep running (into the
-/// bridge legs in `view`). `width` = full tab width, 24px tall, aligned
-/// to the bottom edge.
-fn tab_merge_overlay(width: f32, skin: skin::Skin) -> Element<'static, Message> {
-    container(
-        container(
-            Space::new()
-                .width(Length::Fixed((width - 2.0).max(0.0)))
-                .height(Length::Fixed(1.0)),
-        )
-        .style(move |_| container::Style {
-            background: Some(skin.ribbon_bg.into()),
-            ..Default::default()
-        }),
-    )
-    .width(Length::Fixed(width))
-    .height(Length::Fixed(TAB_ROW_H))
-    .align_x(iced::Alignment::Center)
-    .align_y(iced::Alignment::End)
-    .into()
-}
-
-/// Contextual tab frame (stub / tab-button backing): the caption sits
-/// BETWEEN the side borders, so the text stays at the SAME position idle
-/// and active (a container border does not offset content in iced layout).
-/// Top line: always 1px solid accent. Bottom line: 1px in `bottom` (the
-/// pane color when idle — the border fades to 0% there — or the accent
-/// when active, where `tab_merge_overlay` repaints its middle). Sides: the
-/// distinctive `th`-px border — a linear 100%->0% top-to-bottom fade when
-/// `fade` (idle, 2px), solid when active (1px, thinner than idle).
-/// `middle` sits between the sides (a Space for a plain tab, the caption
-/// label for a stub).
-#[allow(clippy::too_many_arguments)]
-fn ctx_frame(
-    width: f32,
-    th: f32,
-    accent: Color,
-    bottom: Color,
-    fade: bool,
-    middle: Element<'static, Message>,
-) -> Element<'static, Message> {
-    let side = move || {
-        container(Space::new().width(Length::Fixed(th)).height(Length::Fill))
-            .width(Length::Fixed(th))
-            .height(Length::Fill)
-            .style(move |_| container::Style {
-                background: Some(if fade {
-                    iced::Background::Gradient(iced::Gradient::Linear(
-                        iced::gradient::Linear::new(iced::Radians(
-                            std::f32::consts::FRAC_PI_2,
-                        ))
-                        .add_stop(0.0, accent)
-                        .add_stop(1.0, Color::TRANSPARENT),
-                    ))
-                } else {
-                    accent.into()
-                }),
-                ..Default::default()
-            })
-    };
-    column![
-        container(Space::new().width(Length::Fill).height(Length::Fixed(1.0)))
-            .style(move |_| container::Style {
-                background: Some(accent.into()),
-                ..Default::default()
-            }),
-        row![side(), middle, side(),].height(Length::Fill),
-        container(Space::new().width(Length::Fill).height(Length::Fixed(1.0)))
-            .style(move |_| container::Style {
-                background: Some(bottom.into()),
-                ..Default::default()
-            }),
-    ]
-    .width(Length::Fixed(width))
-    .height(Length::Fixed(TAB_ROW_H))
-    .into()
-}
-
-pub(crate) fn cmd_style(
-    enabled: bool,
-    skin: skin::Skin,
-) -> impl Fn(&iced::Theme, button::Status) -> button::Style + 'static {
-    move |_t, status| {
-        let (bgc, border_c, tc) = if !enabled {
-            (None, Color::TRANSPARENT, skin.disabled)
-        } else {
-            match status {
-                button::Status::Hovered => (Some(skin.hover_btn), skin.hover_btn_border, skin.text),
-                button::Status::Pressed => (Some(skin.pressed), skin.hover_btn_border, skin.text),
-                _ => (None, Color::TRANSPARENT, skin.text),
-            }
-        };
-        button::Style {
-            background: bgc.map(Into::into),
-            text_color: tc,
-            border: iced::Border {
-                color: border_c,
-                width: if border_c == Color::TRANSPARENT { 0.0 } else { 1.0 },
-                radius: 0.0.into(),
-            },
-            shadow: Default::default(),
-            snap: true,
-        }
-    }
-}
-
-
-/// Approximate advance width of a string at 11px in the system sans
-/// (DejaVu Sans family) — used for big-button width estimation.
-pub(crate) fn text11_w(s: &str) -> f32 {
-    s.chars()
-        .map(|c| match c {
-            'i' | 'j' | 'l' => 2.5f32,
-            't' => 3.7,
-            'f' => 3.4,
-            'r' => 4.0,
-            'm' => 9.4,
-            'w' => 8.7,
-            'M' => 9.3,
-            'W' => 11.6,
-            ' ' => 3.4,
-            c if c.is_ascii_uppercase() => 7.7,
-            _ => 6.3,
-        })
-        .sum()
-}
-
-/// Split a label into its two display lines. Manual break wins: a `\n` in
-/// the YAML label (double-quoted "\n" escapes to a real newline) splits
-/// there. Otherwise: 1 word = one line; 2 words = one per line; 3+ words =
-/// the width-balanced break (minimize the wider line; ties go to the
-/// latest break - "Run as\nAdministrator", "Execute\nthe file").
-pub(crate) fn label_lines(label: &str) -> (String, Option<String>) {
-    if let Some((a, b)) = label.split_once('\n') {
-        return (a.to_string(), Some(b.replace('\n', " ")));
-    }
-    let words: Vec<&str> = label.split_whitespace().collect();
-    match words.len() {
-        0 => (String::new(), None),
-        1 => (label.to_string(), None),
-        2 => (words[0].to_string(), Some(words[1].to_string())),
-        _ => {
-            let mut best = 1usize;
-            let mut best_score = f32::MAX;
-            for k in 1..words.len() {
-                let l1 = words[..k].join(" ");
-                let l2 = words[k..].join(" ");
-                let score = text11_w(&l1).max(text11_w(&l2));
-                if score <= best_score {
-                    best_score = score;
-                    best = k;
-                }
-            }
-            (words[..best].join(" "), Some(words[best..].join(" ")))
-        }
-    }
-}
-
-#[cfg(test)]
-mod label_tests {
-    use super::*;
-
-    #[test]
-    fn label_split_two_words() {
-        assert_eq!(label_lines("Move to"), ("Move".to_string(), Some("to".to_string())));
-        assert_eq!(label_lines("Delete"), ("Delete".to_string(), None));
-    }
-
-    #[test]
-    fn label_split_three_words_balanced() {
-        // "Run as Administrator" breaks after "as"; "Execute the file" after "Execute"
-        assert_eq!(
-            label_lines("Run as Administrator"),
-            ("Run as".to_string(), Some("Administrator".to_string()))
-        );
-        assert_eq!(
-            label_lines("Execute the file"),
-            ("Execute".to_string(), Some("the file".to_string()))
-        );
-    }
-
-    #[test]
-    fn label_split_manual_newline() {
-        assert_eq!(
-            label_lines("Run as\nAdministrator"),
-            ("Run as".to_string(), Some("Administrator".to_string()))
-        );
-    }
-}
-
-#[cfg(test)]
-mod width_tests {
-    use super::*;
-
-    #[test]
-    fn embedded_yaml_loads() {
-        let cfg: RibbonConfig = serde_yaml::from_str(include_str!("../assets/ribbon.yaml"))
-            .expect("embedded ribbon.yaml is valid");
-        assert!(!cfg.tabs.is_empty());
-    }
-
-    #[test]
-    fn auto_widths_from_content() {
-        // big: icon floor 48 for short labels, wider for long ones
-        assert_eq!(big_width("Cut", false), 48.0);
-        assert_eq!(big_width("New folder", false), 48.0); // icon floor wins
-        assert!(big_width("Administrator", false) > 48.0);
-        // small: 8 pad + 21 icon zone + label; +18 with a dropdown arrow
-        let mk = |label: &str, icon: bool, dd: bool| CmdRef {
-            id: String::new(),
-            separator: None,
-            label: label.to_string(),
-            icon: icon.then(|| "file".to_string()),
-            size: None,
-            enabled: None,
-            width: None,
-            kind: None,
-            dropdown: dd.then(Vec::new),
-        };
-        let plain = small_width(&mk("Copy", true, false));
-        assert_eq!(plain, (8.0 + 21.0 + text11_w("Copy")).ceil());
-        assert_eq!(small_width(&mk("Copy", true, true)), plain + 18.0);
-        assert_eq!(small_width(&mk("Copy", false, false)), plain - 21.0);
-        // manual override always wins
-        let mut c = mk("Copy", true, false);
-        c.width = Some(123.0);
-        assert_eq!(cmd_width(&c), 123.0);
-    }
-
-    #[test]
-    fn auto_group_width_sums_content() {
-        let g: GroupDef = serde_yaml::from_str(
-            r#"
-label: Clip
-rows: 3
-commands:
-  - { id: a, label: Paste, icon: paste, size: big }
-  - { id: b, label: Cut, icon: cut, size: small }
-  - { id: c, label: Copy, icon: copy, size: small }
-"#,
-        )
-        .unwrap();
-        // 10 pad + big 48 + spacing 2 + one small column
-        let col = small_width(&g.commands[1]).max(small_width(&g.commands[2]));
-        assert_eq!(group_width(&g), (GROUP_PAD * 2.0 + 48.0 + GROUP_ITEM_SPACING + col).ceil());
-        // manual override wins
-        let g2: GroupDef = serde_yaml::from_str("label: X\nwidth: 200\ncommands: []").unwrap();
-        assert_eq!(group_width(&g2), 200.0);
-    }
-}
-
-/// Win8 big-button width from content (spec): min = 1 border + 3 + icon 40
-/// + 3 + 1 border = 48; text gets 1px margins; the arrow adds 2 spacing +
-/// (1 + 6 + 1) zone.
-pub(crate) fn big_width(label: &str, has_arrow: bool) -> f32 {
-    let (line1, line2) = label_lines(label);
-    let arrow = if has_arrow { 10.0 } else { 0.0 };
-    let mut w = text11_w(&line1) + 2.0;
-    if let Some(l2) = &line2 {
-        w = w.max(text11_w(l2) + arrow + 2.0);
-    } else if has_arrow {
-        w = w.max(10.0);
-    }
-    w.max(48.0)
-}
-
-/// Small-button width from content: 4px padding each side + 16px icon with
-/// a 5px gap (checkboxes swap the icon for a 13px box with a 6px gap) +
-/// the 11px label; a dropdown split adds the 18px arrow button.
-pub(crate) fn small_width(cmd: &CmdRef) -> f32 {
-    let mut w = 8.0; // horizontal padding (button padding [0, 4])
-    if cmd.kind.as_deref() == Some("checkbox") {
-        w += 13.0 + 6.0;
-    } else if cmd.icon.is_some() {
-        w += 16.0 + 5.0;
-    }
-    w += text11_w(&cmd.label);
-    if cmd.dropdown.is_some() {
-        w += 18.0;
-    }
-    w.ceil()
-}
-
-/// Effective button width: the manual YAML `width` wins, otherwise it is
-/// computed from the content (icon + label + extras).
-pub(crate) fn cmd_width(cmd: &CmdRef) -> f32 {
-    cmd.width.unwrap_or_else(|| {
-        if cmd.size.as_deref() == Some("big") {
-            big_width(&cmd.label, cmd.dropdown.is_some())
-        } else {
-            small_width(cmd)
-        }
-    })
-}
-
-/// Effective group width: the manual YAML `width` wins, otherwise it is
-/// computed from the content — 10px group padding + big buttons, internal
-/// separators and small-command columns with 2px spacing between items
-/// (+ the 24px expand-chevron zone for galleries).
-pub(crate) fn group_width(g: &GroupDef) -> f32 {
-    if let Some(w) = g.width {
-        return w;
-    }
-    let rows = g.rows.unwrap_or(3).clamp(1, 3);
-    let smalls: Vec<&CmdRef> = g
-        .commands
-        .iter()
-        .filter(|c| c.separator != Some(true) && c.size.as_deref() != Some("big"))
-        .collect();
-    let columns = smalls.len().div_ceil(rows).max(1);
-    let col_w = smalls.iter().map(|c| cmd_width(c)).fold(0.0f32, f32::max);
-    let mut items_w = 0.0f32;
-    let mut n_items = 0usize;
-    for cmd in &g.commands {
-        if cmd.separator == Some(true) {
-            items_w += GROUP_SEP_W;
-            n_items += 1;
-        } else if cmd.size.as_deref() == Some("big") {
-            items_w += cmd_width(cmd);
-            n_items += 1;
-        }
-    }
-    if !smalls.is_empty() {
-        items_w += columns as f32 * col_w;
-        n_items += columns;
-    }
-    let spacing = GROUP_ITEM_SPACING * n_items.saturating_sub(1) as f32;
-    // galleries: width = grid + 24 (expand-chevron zone absorbs the padding
-    // slack); normal groups: the group padding around the content.
-    let extra = if g.kind.as_deref() == Some("gallery") {
-        24.0
-    } else {
-        GROUP_PAD * 2.0
-    };
-    (items_w + spacing + extra).ceil()
-}
-
-
-/// Big-button geometry (user spec): [1px top border, 3px, icon square,
-/// 1px shared icon/label line, 3px, line1 12px, 4px line space, line2 12px,
-/// 3px, 1px bottom border] = 80px total. Icon zone 44, label zone 36.
-pub(crate) const BIG_ICON_ZONE: f32 = 44.0;
-pub(crate) const BIG_LABEL_ZONE: f32 = 36.0;
-pub(crate) const BIG_BTN_H: f32 = BIG_ICON_ZONE + BIG_LABEL_ZONE; // 80
-/// group content = 4px pad + button 80; caption row 15; +1 top line
-pub(crate) const GROUP_CONTENT_H: f32 = 84.0;
-pub(crate) const RIBBON_H: f32 = GROUP_CONTENT_H + 15.0 + TAB_LINE_H; // 100
-
-/// Compact two-line label for big buttons (split or plain): line 1 = all
-/// but the last word, line 2 = last word (plain) or "word v" (split) or the
-/// lone arrow. 11px text at line_height 1.1, two 12px rows in the 30px zone.
-fn big_label_lines(
-    label: &str,
-    line2_extra: Option<Element<'static, Message>>, // e.g. the dropdown arrow
-    width: f32,
-    tc: Color,
-) -> (Element<'static, Message>, Element<'static, Message>) {
-    let (line1, line2) = label_lines(label);
-    let l1: Element<Message> = container(
-        text(line1)
-            .size(11.0)
-            .line_height(1.1)
-            .color(tc)
-            .align_x(iced::alignment::Horizontal::Center),
-    )
-    .width(Length::Fixed(width))
-    .height(Length::Fixed(12.0))
-    .center_x(Length::Fixed(width))
-    .into();
-    let l2: Element<Message> = match (line2, line2_extra) {
-        (Some(last), extra) => {
-            let mut r = row![text(last)
-                .size(11.0)
-                .line_height(1.1)
-                .color(tc)]
-            .spacing(2)
-            .align_y(iced::Alignment::Start);
-            if let Some(e) = extra {
-                r = r.push(e);
-            }
-            container(r)
-                .width(Length::Fixed(width))
-                .height(Length::Fixed(12.0))
-                .center_x(Length::Fixed(width))
-                .into()
-        }
-        (None, Some(extra)) => container(extra)
-            .width(Length::Fixed(width))
-            .height(Length::Fixed(12.0))
-            .center_x(Length::Fixed(width))
-            .align_y(iced::Alignment::Start)
-            .into(),
-        (None, None) => Space::new()
-            .width(Length::Fixed(width))
-            .height(Length::Fixed(12.0))
-            .into(),
-    };
-    (l1, l2)
-}
-
-fn big_cmd_w(
-    icon_el: Element<'static, Message>,
-    label: &str,
-    width: f32,
-    enabled: bool,
-    msg: Option<Message>,
-    skin: skin::Skin,
-) -> Element<'static, Message> {
-    // icon zone: 1px border + 3px space + 40px icon, bottom edge = the shared line
-    let icon_zone = container(icon_el)
-        .width(Length::Fixed(width))
-        .height(Length::Fixed(BIG_ICON_ZONE))
-        .center_x(Length::Fixed(width))
-        .align_y(iced::Alignment::Start)
-        .padding(iced::Padding { top: 4.0, right: 0.0, bottom: 0.0, left: 0.0 });
-    // label zone: 3px space, line1 12, 4px gap, line2 12, 3px + border
-    let tc = if enabled { skin.text } else { skin.disabled };
-    let (l1, l2) = big_label_lines(label, None, width, tc);
-    let label_zone = container(column![l1, l2].spacing(4).width(Length::Fixed(width)))
-        .width(Length::Fixed(width))
-        .height(Length::Fixed(BIG_LABEL_ZONE))
-        .center_x(Length::Fixed(width))
-        .align_y(iced::Alignment::Start)
-        .padding(iced::Padding { top: 3.0, right: 0.0, bottom: 0.0, left: 0.0 });
-    let content = column![
-        dbg("big_icon", icon_zone),
-        dbg("big_label", label_zone),
-    ]
-    .width(Length::Fixed(width));
-    let btn = button(dbg(
-        Box::leak(format!("big_cmd:{label}").into_boxed_str()),
-        content,
-    ))
-    .width(Length::Fixed(width))
-    .height(Length::Fixed(BIG_BTN_H))
-    .padding(0)
-    .style(cmd_style(enabled, skin));
-    match (enabled, msg) {
-        (true, Some(m)) => btn.on_press(m).into(),
-        _ => btn.into(),
-    }
-}
-
-fn small_cmd_active(
-    icon_el: Element<'static, Message>,
-    label: &str,
-    width: f32,
-    height: f32,
-    enabled: bool,
-    active: bool,
-    msg: Option<Message>,
-    skin: skin::Skin,
-) -> Element<'static, Message> {
-    let row = row![
-        icon_el,
-        text(label.to_string()).size(11.0).color(if enabled { skin.text } else { skin.disabled }),
-    ]
-    .spacing(5)
-    .align_y(iced::Alignment::Center);
-    // iced buttons top-align their content: center it in the full row height
-    let content = container(row)
-        .height(Length::Fixed(height))
-        .center_y(Length::Fixed(height));
-    let btn = button(content)
-        .width(Length::Fixed(width))
-        .height(Length::Fixed(height))
-        .padding([0.0, 4.0])
-        .style(move |_t, status| {
-            let mut style = cmd_style(enabled, skin)(_t, status);
-            if active {
-                style.background = Some(skin.pressed.into());
-                style.border = iced::Border {
-                    color: skin.accent,
-                    width: 1.0,
-                    radius: 0.0.into(),
-                };
-            }
-            style
-        });
-    let el: Element<Message> = match (enabled, msg) {
-        (true, Some(m)) => btn.on_press(m).into(),
-        _ => btn.into(),
-    };
-    dbg(Box::leak(format!("cmd:{label}").into_boxed_str()), el)
-}
-
-fn group(caption: &str, width: f32, content: Element<'static, Message>, state: &Explorer, skin: skin::Skin) -> Element<'static, Message> {
-    // clone: groups pad 5px, separator line on the RIGHT, caption #494949.
-    // The separator runs the ENTIRE command-pane height: 2px of air below
-    // the pane top (kept), then straight down to the pane's bottom edge,
-    // crossing the caption row — not just the button area. Its 1px
-    // thickness is snapped to a whole PHYSICAL pixel for crispness at any
-    // dpi.
-    let th = phys_px(state, 1.0);
-    let strip = container(
-        container(Space::new().width(Length::Fixed(th)).height(Length::Fixed(RIBBON_H - 4.0)))
-            .style(bg(skin.group_sep)),
-    )
-    .width(Length::Fixed(GROUP_SEP_W))
-    .height(Length::Fixed(RIBBON_H))
-    .align_y(iced::Alignment::Start)
-    .padding(iced::Padding { top: 2.0, right: 0.0, bottom: 0.0, left: 0.0 })
-    .center_x(Length::Fixed(GROUP_SEP_W));
-    row![
-        column![
-            container(dbg(Box::leak(format!("group_body:{caption}").into_boxed_str()), content))
-                .width(Length::Fixed(width))
-                .height(Length::Fixed(GROUP_CONTENT_H))
-                .padding(iced::Padding { top: GROUP_TOP_PAD, right: GROUP_PAD, bottom: 0.0, left: GROUP_PAD }),
-            container(text(caption.to_string()).size(11.0).color(skin.subtle))
-                .width(Length::Fixed(width))
-                .height(Length::Fixed(15.0))
-                .center_x(Length::Fixed(width))
-                .style(bg(skin.ribbon_bg)),
-        ],
-        strip,
-    ]
-    .into()
-}
-
-fn ribbon_body(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
-    let Some(tab) = visible_tabs(state).into_iter().find(|t| t.id == state.active_tab) else {
-        return Space::new().width(Length::Fill).height(Length::Fixed(RIBBON_H)).into();
-    };
-    let mut groups_row = row![];
-    let mut x = 0.0f32;
-    for g in &tab.groups {
-        let name: &'static str = Box::leak(format!("group:{}", g.label).into_boxed_str());
-        groups_row = groups_row.push(dbg(name, group_from_config(g, state, skin, x)));
-        x += group_width(g) + 1.0; // group + separator strip
-    }
-    groups_row.into()
-}
-
-/// Build one group's content from YAML: big commands stand alone, small
-/// commands stack into `columns` columns (sequential chunks).
-fn group_from_config(g: &GroupDef, state: &Explorer, skin: skin::Skin, x_base: f32) -> Element<'static, Message> {
-    let has_sel = !state.selected.is_empty();
-    let has_clip = state.clipboard.is_some();
-    let has_items = !state.entries.is_empty();
-    let enabled_of = |cmd: &CmdRef| {
-        cmd.enabled.unwrap_or(true) && command_enabled(&cmd.id, has_sel, has_clip, has_items)
-    };
-    let menu_source = state.open_menu.as_ref().map(|m| m.source.as_str());
-    let active_of = |id: &str| match id {
-        _ if Some(id) == menu_source => true, // pressed while its menu is open
-        "toggle_border" => state.self_border,
-        "toggle_dark" => state.dark,
-        "toggle_hidden" => state.show_hidden,
-        "toggle_frame" => state.frame_style == crate::model::FrameStyle::Win8,
-        _ => false,
-    };
-
-    let mut content = row![].spacing(GROUP_ITEM_SPACING);
-    let mut bigs_w = 0.0f32;
-    for cmd in &g.commands {
-        if cmd.separator == Some(true) {
-            // internal | separator inside the group (inset top+bottom)
-            let strip = container(
-                container(Space::new().width(Length::Fixed(1.0)).height(Length::Fixed(GROUP_TALL_ZONE_H - 14.0)))
-                    .style(bg(skin.group_sep)),
-            )
-            .width(Length::Fixed(GROUP_SEP_W))
-            .height(Length::Fixed(GROUP_TALL_ZONE_H))
-            .center_x(Length::Fixed(GROUP_SEP_W))
-            .center_y(Length::Fixed(GROUP_TALL_ZONE_H));
-            content = content.push(strip);
-            bigs_w += GROUP_SEP_W + GROUP_ITEM_SPACING;
-            continue;
-        }
-        if cmd.size.as_deref() == Some("big") {
-            let enabled = enabled_of(cmd);
-            let w = cmd_width(cmd);
-            let has_action = state.ribbon.commands.contains_key(&cmd.id);
-            let msg = enabled.then(|| Message::RunCommand(cmd.id.clone()));
-            let el: Element<Message> = if let Some(items) = &cmd.dropdown {
-                // Win8 split big button: icon = action, label+v = menu
-                big_cmd_split(
-                    crate::icon::view(cmd.icon.as_deref().unwrap_or("file"), 40.0, &skin),
-                    &cmd.label,
-                    w,
-                    enabled,
-                    if has_action { msg } else { None },
-                    enabled.then(|| Message::OpenMenu {
-                        x: menu_anchor(state, x_base + GROUP_PAD + bigs_w),
-                        y: ribbon_body_y() + GROUP_TOP_PAD + BIG_BTN_H,
-                        source: cmd.id.clone(),
-                        source_w: w,
-                        items: items.clone(),
-                    }),
-                    skin,
-                )
-            } else {
-                big_cmd_w(
-                    crate::icon::view(cmd.icon.as_deref().unwrap_or("file"), 40.0, &skin),
-                    &cmd.label,
-                    w,
-                    enabled,
-                    msg,
-                    skin,
-                )
-            };
-            bigs_w += w + GROUP_ITEM_SPACING;
-            content = content.push(el);
-        }
-    }
-
-    let small_cmds: Vec<&CmdRef> =
-        g.commands.iter().filter(|c| c.size.as_deref() != Some("big")).collect();
-    // `rows` = vertical slots per column (Win8: max 3, never four).
-    // Buttons tile column-major; a column with fewer buttons stays compact.
-    // Row height is FIXED (Win8/10: 2-row and 3-row columns look identical).
-    let rows = g.rows.unwrap_or(3).clamp(1, 3) as usize;
-    let columns = small_cmds.len().div_ceil(rows).max(1);
-    let row_h = SMALL_ROW_H;
-    let col_w = small_cmds
-        .iter()
-        .map(|c| cmd_width(c))
-        .fold(0.0f32, f32::max);
-    let mut smalls: Vec<Element<Message>> = Vec::new();
-    for (j, cmd) in small_cmds.iter().enumerate() {
-        let enabled = enabled_of(cmd);
-        let active = active_of(&cmd.id);
-        let w = cmd_width(cmd);
-        let has_action = state.ribbon.commands.contains_key(&cmd.id);
-        let msg = enabled.then(|| Message::RunCommand(cmd.id.clone()));
-        let el: Element<Message> = if cmd.kind.as_deref() == Some("checkbox") {
-            checkbox_cmd(&cmd.label, w, row_h, enabled, active, msg, skin)
-        } else if let Some(items) = &cmd.dropdown {
-            // split small: label runs the command (or opens the menu when it
-            // has no action); the arrow always opens the menu
-            let label_msg = if has_action { msg.clone() } else { None };
-            // menu directly under this button: left edge of its column,
-            // y = the button's bottom (ribbon body top + group pad +
-            // row*(row h + spacing) + row h)
-            let col = (j / rows) as f32;
-            let row_i = (j % rows) as f32;
-            let ax = x_base + GROUP_PAD + bigs_w + col * (col_w + GROUP_ITEM_SPACING);
-            let ay = ribbon_body_y() + GROUP_TOP_PAD + row_i * (SMALL_ROW_H + SMALL_ROW_SPACING) + SMALL_ROW_H;
-            let menu_msg = enabled.then(|| Message::OpenMenu {
-                x: menu_anchor(state, ax),
-                y: ay,
-                source: cmd.id.clone(),
-                source_w: w,
-                items: items.clone(),
-            });
-            let arrow: Element<Message> = small_cmd_active(
-                drop_arrow_el(if enabled { skin.subtle } else { skin.disabled }, 0.0),
-                "",
-                18.0,
-                row_h,
-                enabled,
-                false,
-                menu_msg.clone().or(if has_action { None } else { msg.clone() }),
-                skin,
-            );
-            let main: Element<Message> = small_cmd_active(
-                crate::icon::view(cmd.icon.as_deref().unwrap_or("file"), 16.0, &skin),
-                &cmd.label,
-                w - 18.0,
-                row_h,
-                enabled,
-                active,
-                label_msg.or(menu_msg),
-                skin,
-            );
-            row![main, arrow].width(Length::Fixed(w)).into()
-        } else {
-            small_cmd_active(
-                crate::icon::view(cmd.icon.as_deref().unwrap_or("file"), 16.0, &skin),
-                &cmd.label,
-                w,
-                row_h,
-                enabled,
-                active,
-                msg,
-                skin,
-            )
-        };
-        smalls.push(el);
-    }
-    let mut it = smalls.into_iter();
-    for _ in 0..columns {
-        let mut col = column![].spacing(SMALL_ROW_SPACING);
-        for _ in 0..rows {
-            if let Some(s) = it.next() {
-                col = col.push(s);
-            }
-        }
-        content = content.push(col);
-    }
-    if g.kind.as_deref() == Some("gallery") {
-        // gallery: the tiled grid plus an expand chevron that opens the
-        // full list as a dropdown pane (Win8 Layout group)
-        let items: Vec<String> = g.commands.iter().map(|c| c.id.clone()).collect();
-        let gw = group_width(g);
-        let expand = button(crate::icon::view("chevron_down", 12.0, &skin))
-            .width(Length::Fixed(20.0))
-            .height(Length::Fixed(GROUP_TALL_ZONE_H))
-            .style(cmd_style(true, skin))
-            .on_press(Message::OpenMenu {
-                x: menu_anchor(state, x_base + gw - 60.0),
-                y: ribbon_body_y() + GROUP_TOP_PAD + BIG_BTN_H,
-                source: g.label.clone(),
-                source_w: gw,
-                items,
-            });
-        let grid = container(content)
-            .width(Length::Fixed(gw - 24.0))
-            .height(Length::Fixed(GROUP_CONTENT_H));
-        return group(
-            &g.label.clone(),
-            gw,
-            row![grid, expand].height(Length::Fixed(GROUP_CONTENT_H)).into(),
-            state,
-            skin,
-        );
-    }
-    group(&g.label.clone(), group_width(g), content.into(), state, skin)
-}
-
-/// Checkbox command row: a 13px box + label, standard row height. The
-/// "holding" (checked) state is the command's active state.
-fn checkbox_cmd(
-    label: &str,
-    width: f32,
-    height: f32,
-    enabled: bool,
-    checked: bool,
-    msg: Option<Message>,
-    skin: skin::Skin,
-) -> Element<'static, Message> {
-    let box_el = container(
-        text(if checked { "\u{2713}" } else { "" })
-            .size(10.0)
-            .color(Color::WHITE),
-    )
-    .width(Length::Fixed(13.0))
-    .height(Length::Fixed(13.0))
-    .center_x(Length::Fixed(13.0))
-    .center_y(Length::Fixed(13.0))
-    .style(move |_| container::Style {
-        background: Some(
-            (if checked { skin.accent } else { skin.window_bg }).into(),
-        ),
-        border: iced::Border {
-            color: if checked { skin.accent } else { skin.disabled },
-            width: 1.0,
-            radius: 0.0.into(),
-        },
-        ..Default::default()
-    });
-    let row = row![
-        box_el,
-        text(label.to_string()).size(11.0).color(if enabled { skin.text } else { skin.disabled }),
-    ]
-    .spacing(6)
-    .align_y(iced::Alignment::Center);
-    let content = container(row)
-        .height(Length::Fixed(height))
-        .center_y(Length::Fixed(height));
-    let btn = button(content)
-        .width(Length::Fixed(width))
-        .height(Length::Fixed(height))
-        .padding([0.0, 4.0])
-        .style(cmd_style(enabled, skin));
-    let el: Element<Message> = match (enabled, msg) {
-        (true, Some(m)) => btn.on_press(m).into(),
-        _ => btn.into(),
-    };
-    dbg(Box::leak(format!("checkbox:{label}").into_boxed_str()), el)
-}
-
-/// Win8 split big button: the icon area runs the default action, the
-/// label+v strip opens the dropdown menu.
-fn big_cmd_split(
-    icon_el: Element<'static, Message>,
-    label: &str,
-    width: f32,
-    enabled: bool,
-    action: Option<Message>,
-    menu: Option<Message>,
-    skin: skin::Skin,
-) -> Element<'static, Message> {
-    let tc = if enabled { skin.text } else { skin.disabled };
-    // icon half: top border 1 + 3 space + 40 icon; bottom edge = shared line
-    let icon_zone = container(icon_el)
-        .width(Length::Fixed(width))
-        .height(Length::Fixed(BIG_ICON_ZONE))
-        .center_x(Length::Fixed(width))
-        .align_y(iced::Alignment::Start)
-        .padding(iced::Padding { top: 4.0, right: 0.0, bottom: 0.0, left: 0.0 });
-    let top = button(icon_zone)
-        .width(Length::Fixed(width))
-        .height(Length::Fixed(BIG_ICON_ZONE))
-        .padding(0)
-        .style(cmd_style(enabled, skin));
-    let top: Element<Message> = match (enabled, action) {
-        (true, Some(m)) => top.on_press(m).into(),
-        _ => top.into(),
-    };
-    // label half: shared line + 3 space + line1 12 + 4 gap + line2 12 + 3 +
-    // bottom border; the arrow is 6x3 with 1px margins each side
-    let (l1, l2) = big_label_lines(label, Some(drop_arrow_el(tc, 4.5)), width, tc);
-    let bottom_col = container(column![l1, l2].spacing(4).width(Length::Fixed(width)))
-        .width(Length::Fixed(width))
-        .height(Length::Fixed(BIG_LABEL_ZONE))
-        .align_y(iced::Alignment::Start)
-        .padding(iced::Padding { top: 3.0, right: 0.0, bottom: 0.0, left: 0.0 });
-    let bottom = button(bottom_col)
-        .width(Length::Fixed(width))
-        .height(Length::Fixed(BIG_LABEL_ZONE))
-        .padding(0)
-        .style(cmd_style(enabled, skin));
-    let bottom: Element<Message> = match (enabled, menu) {
-        (true, Some(m)) => bottom.on_press(m).into(),
-        _ => bottom.into(),
-    };
-    let name: &'static str = Box::leak(format!("big_split:{label}").into_boxed_str());
-    dbg(name, column![dbg("big_split_icon", top), dbg("big_split_label", bottom)]
-        .width(Length::Fixed(width))
-        .align_x(iced::Alignment::Center))
-    .into()
-}
-
-/// 90-degree dropdown triangle, 7x4 px, top-padded so its base touches the
-/// x-height TOP of an adjacent 11px label (5.5 px below the line top).
-pub(crate) fn drop_arrow_el(c: Color, top_pad: f32) -> Element<'static, Message> {
-    // 6x3 triangle, always 1px margin left and right
-    container(
-        iced::widget::svg(crate::icons::drop_arrow(c))
-            .width(Length::Fixed(6.0))
-            .height(Length::Fixed(3.0)),
-    )
-    .padding(iced::Padding {
-        top: top_pad,
-        right: 1.0,
-        bottom: 0.0,
-        left: 1.0,
-    })
-    .into()
-}
-
-/// Logical size of `n` physical pixels at the current total UI scale
-/// (system scale x the --dpi multiplier): a 1px separator must cover a
-/// whole number of device pixels, otherwise it lands on a fractional
-/// device width and renders as a blurry gray hairline.
-pub(crate) fn phys_px(state: &Explorer, n: f32) -> f32 {
-    let scale = if state.system_scale > 0.0 {
-        state.system_scale * state.dpi_multiplier()
-    } else {
-        1.0
-    };
-    n / scale
-}
-
-/// Clamp a dropdown menu anchor x so the menu stays inside the window.
-pub(crate) fn menu_anchor(state: &Explorer, x: f32) -> f32 {
-    let (_, fr, _, fl) = frame_insets(state);
-    x.clamp(4.0, (state.win_w - fl - fr - 220.0).max(4.0))
-}
-
-// ---------------- address bar ----------------
-
-
