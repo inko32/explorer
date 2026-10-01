@@ -340,6 +340,10 @@ pub struct ButtonSpec {
     pub label: Option<String>,
     pub image: Option<String>,
     pub keytip: Option<String>,
+    /// Tooltip description (`UI_PKEY_TooltipDescription`).
+    pub tooltip: Option<String>,
+    /// Shortcut shown in the tooltip title ("Ctrl+D").
+    pub shortcut: Option<String>,
     pub width: Option<f32>,
 }
 
@@ -354,6 +358,8 @@ pub struct SplitSpec {
     /// Two-part split chrome (main action + dropdown arrow). Default
     /// off: the whole button opens the menu as one element.
     pub separate: bool,
+    pub tooltip: Option<String>,
+    pub shortcut: Option<String>,
     pub items: Vec<MenuItemSpec>,
 }
 
@@ -597,10 +603,21 @@ fn button_seeds(
     label: Option<String>,
     image: Option<String>,
     keytip: Option<String>,
+    tooltip: Option<String>,
+    shortcut: Option<String>,
 ) -> Vec<(PropertyKey, PropValue)> {
     let mut seeds = vec![];
     if let Some(l) = label {
+        if let Some(sc) = shortcut {
+            seeds.push((
+                PropertyKey::TooltipTitle,
+                PropValue::Str(format!("{l} ({sc})")),
+            ));
+        }
         seeds.push((PropertyKey::Label, PropValue::Str(l)));
+    }
+    if let Some(t) = tooltip {
+        seeds.push((PropertyKey::TooltipDescription, PropValue::Str(t)));
     }
     if let Some(k) = keytip {
         seeds.push((PropertyKey::Keytip, PropValue::Str(k)));
@@ -632,13 +649,15 @@ fn resolve_ref(
     label: Option<String>,
     image: Option<String>,
     keytip: Option<String>,
+    tooltip: Option<String>,
+    shortcut: Option<String>,
     extra: Vec<(PropertyKey, PropValue)>,
 ) -> std::result::Result<(), String> {
     if let Some(c) = cmd_slot.clone() {
         let cmd = c.resolve(commands)?;
         // write the resolved id back into the spec
         *cmd_slot = Some(CommandRef::Id(cmd));
-        let mut seeds = button_seeds(label, image, keytip);
+        let mut seeds = button_seeds(label, image, keytip, tooltip, shortcut);
         seeds.extend(extra);
         add_command(out, seen, cmd, ty, seeds);
     }
@@ -654,6 +673,7 @@ fn collect_control(
     match control {
         ControlSpec::Button(b) => {
             let (label, image, keytip) = (b.label.take(), b.image.take(), b.keytip.take());
+            let (tooltip, shortcut) = (b.tooltip.take(), b.shortcut.take());
             resolve_ref(
                 commands,
                 &mut b.command,
@@ -663,11 +683,14 @@ fn collect_control(
                 label,
                 image,
                 keytip,
+                tooltip,
+                shortcut,
                 vec![],
             )?;
         }
         ControlSpec::ToggleButton(b) => {
             let (label, image, keytip) = (b.label.take(), b.image.take(), b.keytip.take());
+            let (tooltip, shortcut) = (b.tooltip.take(), b.shortcut.take());
             resolve_ref(
                 commands,
                 &mut b.command,
@@ -677,11 +700,14 @@ fn collect_control(
                 label,
                 image,
                 keytip,
+                tooltip,
+                shortcut,
                 vec![],
             )?;
         }
         ControlSpec::SplitButton(s) | ControlSpec::DropDownButton(s) => {
             let (label, image, keytip) = (s.label.take(), s.image.take(), s.keytip.take());
+            let (tooltip, shortcut) = (s.tooltip.take(), s.shortcut.take());
             resolve_ref(
                 commands,
                 &mut s.command,
@@ -691,6 +717,8 @@ fn collect_control(
                 label,
                 image,
                 keytip,
+                tooltip,
+                shortcut,
                 vec![],
             )?;
             for item in &mut s.items {
@@ -708,6 +736,8 @@ fn collect_control(
                 label,
                 None,
                 keytip,
+                None,
+                None,
                 vec![],
             )?;
         }
@@ -722,6 +752,8 @@ fn collect_control(
                 label,
                 None,
                 keytip,
+                None,
+                None,
                 vec![],
             )?;
         }
@@ -746,6 +778,8 @@ fn collect_control(
                 None,
                 None,
                 keytip,
+                None,
+                None,
                 extra,
             )?;
         }
@@ -760,6 +794,8 @@ fn collect_control(
                 label,
                 image,
                 keytip,
+                None,
+                None,
                 vec![(PropertyKey::ColorMode, PropValue::ColorMode(c.mode))],
             )?;
         }
@@ -774,6 +810,8 @@ fn collect_control(
                 label,
                 None,
                 keytip,
+                None,
+                None,
                 vec![],
             )?;
         }

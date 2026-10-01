@@ -145,6 +145,8 @@ pub struct State {
     pub hover_pos: Point,
     /// Tooltip currently displayed (command id).
     pub tooltip: Option<u32>,
+    /// Rect of the element the tooltip belongs to (window coordinates).
+    pub tooltip_anchor: Option<iced::Rectangle>,
     pub popup: Option<Popup>,
     /// Actual on-screen bounds of the open popup overlay (window
     /// coordinates). Differs from `popup.origin/size` when a dropdown
@@ -190,6 +192,7 @@ impl Default for State {
             hover_since: None,
             hover_pos: Point::ORIGIN,
             tooltip: None,
+            tooltip_anchor: None,
             popup: None,
             popup_bounds: None,
             edit: None,

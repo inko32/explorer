@@ -282,6 +282,18 @@ fn draw_menu_level_offset(
     level: usize,
     _base_cmd: u32,
 ) {
+    // icon column is always reserved; a vertical separator runs through
+    // the whole menu dividing icons from text
+    quad(
+        scene,
+        Rectangle::new(
+            Point::new(origin.x + 26.0, origin.y + 2.0),
+            Size::new(1.0, menu_height(ctx, items) - 4.0),
+        ),
+        Fill::Color(ctx.theme.group_separator),
+        None,
+        0.0,
+    );
     let mut y = origin.y + 2.0;
     for (idx, item) in items.iter().enumerate() {
         if item.separator_before {
@@ -309,10 +321,8 @@ fn draw_menu_level_offset(
         } else {
             Target::MenuItem(cmd)
         };
-        hover_row(ctx, scene, row, target.clone(), enabled);
-        if enabled {
-            scene.push(Node::new(row, Cmd::Hit).target(target).tip(cmd));
-        }
+        hover_row(ctx, scene, row, target.clone(), true);
+        scene.push(Node::new(row, Cmd::Hit).target(target).tip(cmd));
         // icon
         let image = item
             .image
@@ -329,7 +339,7 @@ fn draw_menu_level_offset(
         svg(
             scene,
             Rectangle::new(
-                Point::new(origin.x + 8.0, y + 4.5),
+                Point::new(origin.x + 5.0, y + 4.5),
                 Size::new(16.0, 16.0),
             ),
             image,
@@ -1203,7 +1213,9 @@ fn minimized_tab_scene(ctx: &Ctx, tab: usize, width: f32) -> Scene {
 // ---------------------------------------------------------------------------
 // tooltip
 
-pub fn tooltip_scene(ctx: &Ctx, cmd: u32, cursor: Point) -> Scene {
+/// Tooltip panel, local coordinates; the widget positions it below the
+/// command pane at the related button's left side.
+pub fn tooltip_scene(ctx: &Ctx, cmd: u32) -> Scene {
     let (title, desc) = ctx.tooltip(cmd);
     let width = 220.0f32;
     let desc_lines = if desc.is_empty() {
@@ -1219,8 +1231,8 @@ pub fn tooltip_scene(ctx: &Ctx, cmd: u32, cursor: Point) -> Scene {
     }
     h += 4.0;
 
-    let origin = Point::new(cursor.x + 14.0, cursor.y + 16.0);
-    let mut scene = Scene::new(Size::ZERO);
+    let origin = Point::ORIGIN;
+    let mut scene = Scene::new(Size::new(width, h));
     let panel_rect = Rectangle::new(origin, Size::new(width, h));
     scene.push(Node::new(
         panel_rect,
@@ -1366,7 +1378,6 @@ where
             iced::Event::Mouse(mouse::Event::CursorMoved { position }) => {
                 let target =
                     self.scene.hit(local(position)).and_then(|n| n.target.clone());
-                eprintln!("[overlay] move pos={position:?} origin={:?} target={target:?}", layout.position());
                 if let Some(p) = self.state.popup.as_mut() {
                     if p.hover != target {
                         shell.request_redraw();
@@ -1375,11 +1386,15 @@ where
                 }
                 // preview on gallery item hover
                 self.handle_preview(&target, shell);
-                if let Some(tip) =
-                    self.scene.hit(local(position)).and_then(|n| n.tip)
-                {
-                    self.state.tooltip = Some(tip);
-                    self.state.hover_pos = position;
+                if let Some(node) = self.scene.hit(local(position)) {
+                    if let Some(tip) = node.tip {
+                        if self.state.tooltip != Some(tip) {
+                            shell.request_redraw();
+                        }
+                        self.state.tooltip = Some(tip);
+                        self.state.tooltip_anchor =
+                            Some(super::translate_rect(node.rect, origin));
+                    }
                 }
                 shell.capture_event();
             }

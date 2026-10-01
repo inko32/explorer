@@ -330,7 +330,8 @@ fn push_button(
     radius: f32,
 ) -> bool {
     let enabled = ctx.enabled(cmd);
-    let hover = enabled && ctx.hovered(&target);
+    // disabled buttons still highlight and show their tooltip on hover
+    let hover = ctx.hovered(&target);
     let pressed = enabled && ctx.pressed(&target);
     let theme = ctx.theme;
     let (fill, border) = if pressed {
@@ -345,7 +346,7 @@ fn push_button(
     } else {
         (Fill::Color(Color::TRANSPARENT), None)
     };
-    let mut node = Node::new(
+    let node = Node::new(
         rect,
         Cmd::Quad {
             fill,
@@ -353,10 +354,8 @@ fn push_button(
             radius,
         },
     )
-    .target(target);
-    if enabled {
-        node = node.tip(cmd);
-    }
+    .target(target)
+    .tip(cmd);
     scene.push(node);
     enabled
 }
@@ -467,7 +466,7 @@ fn tab_strip(
     let spec = ctx.spec();
     let selected = view.selected_tab();
 
-    let mut x = ctx.text_w("File", 12.5) + 26.0;
+    let mut x = (ctx.text_w("File", 12.5) + 26.0) * 8.0 / 7.0;
     let visible = visible_tabs(ctx);
     let mut contextual_run: Option<(ContextualColor, f32, f32, String)> = None;
     // Geometry of the active tab, for the connected line (Filled style).
@@ -645,7 +644,7 @@ fn tab_strip(
     // application menu: Win8 "File" tab (solid brand rectangle with a
     // caption, not an orb)
     let file_label = "File";
-    let file_w = ctx.text_w(file_label, 12.5) + 26.0;
+    let file_w = (ctx.text_w(file_label, 12.5) + 26.0) * 8.0 / 7.0;
     let file_rect = Rectangle::new(
         Point::new(0.0, strip_y),
         Size::new(file_w, STRIP_H - 1.0),
@@ -880,9 +879,13 @@ fn body(ctx: &Ctx, scene: &mut Scene, y: f32, width: f32) {
 pub enum ControlScale {
     /// Keep the size declared on the control.
     Declared,
+    /// First cascade stage: small-button captions hidden, sizes kept.
+    CaptionOff,
     /// Cap every control at this size (only shrinks; declared-small
     /// buttons stay small).
     Cap(CtrlSize),
+    /// Cap with small-button captions still hidden.
+    CapNoCaption(CtrlSize),
     /// `GroupSizeDefinition`: per-command overrides (resolved ids).
     Rules(Vec<(u32, CtrlSize)>),
 }
@@ -898,10 +901,18 @@ pub struct GroupPlan {
 }
 
 impl ControlScale {
+    /// Small-button captions hidden at this stage?
+    fn caption_off(&self) -> bool {
+        matches!(
+            self,
+            ControlScale::CaptionOff | ControlScale::CapNoCaption(_)
+        )
+    }
+
     fn for_command(&self, cmd: Option<u32>) -> Option<CtrlSize> {
         match self {
-            ControlScale::Declared => None,
-            ControlScale::Cap(s) => Some(*s),
+            ControlScale::Declared | ControlScale::CaptionOff => None,
+            ControlScale::Cap(s) | ControlScale::CapNoCaption(s) => Some(*s),
             ControlScale::Rules(rules) => {
                 cmd.and_then(|id| rules.iter().find(|(c, _)| *c == id).map(|(_, s)| *s))
             }
@@ -1092,6 +1103,7 @@ pub fn plan_groups(
         .collect();
     // Current ladder position per group (0 = declared layout).
     let mut pos: Vec<usize> = vec![0; tab.groups.len()];
+    let mut caption_off: Vec<bool> = vec![false; tab.groups.len()];
     let mut sized: Vec<(ControlScale, bool, f32)> = tab
         .groups
         .iter()
@@ -1112,13 +1124,41 @@ pub fn plan_groups(
             sized.iter().map(|(_, _, w)| *w + 6.0).sum::<f32>() - 6.0
         }
     };
-    // Cascade: walk the groups right-to-left; shrink the right-most
-    // group through its whole ladder before touching the next one.
+    // Cascade stage 1 (Win8): hide small-button captions, right to left,
+    // before any group shrinks.
+    for gi in (0..tab.groups.len()).rev() {
+        if total(&sized) <= avail {
+            break;
+        }
+        if has_caption_buttons(&tab.groups[gi]) {
+            caption_off[gi] = true;
+            sized[gi] = (
+                ControlScale::CaptionOff,
+                false,
+                measure_group_scaled(ctx, &tab.groups[gi], &ControlScale::CaptionOff),
+            );
+        }
+    }
+    // Cascade stage 2: walk the groups right-to-left; shrink the
+    // right-most group through its whole ladder before touching the next
+    // one. Captions stay off on groups already stage-1-cascaded.
     'outer: for gi in (0..tab.groups.len()).rev() {
         while total(&sized) > avail && pos[gi] < ladders[gi].len() {
             let step = pos[gi];
             pos[gi] += 1;
-            sized[gi] = scaled_group_width(ctx, tab, &tab.groups[gi], &ladders[gi][step]);
+            let (sc, popup, w) =
+                scaled_group_width(ctx, tab, &tab.groups[gi], &ladders[gi][step]);
+            let (sc, w) = if caption_off[gi] && !popup {
+                let sc = match sc {
+                    ControlScale::Cap(s) => ControlScale::CapNoCaption(s),
+                    other => other,
+                };
+                let w = measure_group_scaled(ctx, &tab.groups[gi], &sc);
+                (sc, w)
+            } else {
+                (sc, w)
+            };
+            sized[gi] = (sc, popup, w);
         }
         if total(&sized) <= avail {
             break 'outer;
@@ -1307,6 +1347,24 @@ pub fn tab_content(
     }
 }
 
+/// Does the group have text-captioned small/medium buttons (stage-1
+/// cascade hides their captions)?
+fn has_caption_buttons(group: &GroupSpec) -> bool {
+    fn walk(controls: &[ControlSpec]) -> bool {
+        controls.iter().any(|c| match c {
+            ControlSpec::Button(b) | ControlSpec::ToggleButton(b) => {
+                b.size != CtrlSize::Large && b.command.is_some()
+            }
+            ControlSpec::SplitButton(s) | ControlSpec::DropDownButton(s) => {
+                s.size != CtrlSize::Large && s.command.is_some()
+            }
+            ControlSpec::ControlGroup { controls } => walk(controls),
+            _ => false,
+        })
+    }
+    walk(&group.controls)
+}
+
 /// Rows (of 3) a control occupies.
 pub fn rows_of(control: &ControlSpec) -> usize {
     rows_of_scaled(control, &ControlScale::Declared)
@@ -1348,14 +1406,20 @@ pub fn width_of_scaled(
     let scaled_size = |declared: CtrlSize| {
         scale.effective(resolved_ref(control.command()), declared)
     };
+    let co = scale.caption_off();
     match control {
-        ControlSpec::Button(b) | ControlSpec::ToggleButton(b) => button_width_scaled(
-            ctx,
-            b,
-            scaled_size(b.size),
-        ),
+        ControlSpec::Button(b) | ControlSpec::ToggleButton(b) => {
+            if co && scaled_size(b.size) != CtrlSize::Large {
+                22.0
+            } else {
+                button_width_scaled(ctx, b, scaled_size(b.size))
+            }
+        }
         ControlSpec::SplitButton(s) | ControlSpec::DropDownButton(s) => {
             let size = scaled_size(s.size);
+            if co && size != CtrlSize::Large {
+                return 36.0;
+            }
             let w = button_width_scaled(
                 ctx,
                 &ButtonSpec {
@@ -1364,6 +1428,8 @@ pub fn width_of_scaled(
                     label: s.label.clone(),
                     image: s.image.clone(),
                     keytip: None,
+                    tooltip: None,
+                    shortcut: None,
                     width: None,
                 },
                 size,
@@ -1687,18 +1753,19 @@ pub fn build_control_scaled(
     let eff = |declared: CtrlSize| {
         scale.effective(resolved_ref(control.command()), declared)
     };
+    let co = scale.caption_off();
     match control {
         ControlSpec::Button(b) => {
             if let Some(cmd) = resolved(b.command.as_ref()) {
                 build_button_like(
-                    ctx, scene, rect, cmd, eff(b.size), false, compact,
+                    ctx, scene, rect, cmd, eff(b.size), false, compact, co,
                 );
             }
         }
         ControlSpec::ToggleButton(b) => {
             if let Some(cmd) = resolved(b.command.as_ref()) {
                 build_button_like(
-                    ctx, scene, rect, cmd, eff(b.size), true, compact,
+                    ctx, scene, rect, cmd, eff(b.size), true, compact, co,
                 );
             }
         }
@@ -1708,7 +1775,7 @@ pub fn build_control_scaled(
                     build_large_dropdown(ctx, scene, rect, cmd);
                 } else {
                     build_split(
-                        ctx, scene, rect, cmd, eff(s.size), true, compact,
+                        ctx, scene, rect, cmd, eff(s.size), true, compact, co,
                     );
                 }
             }
@@ -1719,7 +1786,7 @@ pub fn build_control_scaled(
                     build_large_dropdown(ctx, scene, rect, cmd);
                 } else {
                     build_split(
-                        ctx, scene, rect, cmd, eff(s.size), false, compact,
+                        ctx, scene, rect, cmd, eff(s.size), false, compact, co,
                     );
                 }
             }
@@ -1803,16 +1870,12 @@ fn large_content(
     }
     if let Some(c) = chevron_color {
         let n = lines.len().min(2) as f32;
-        chevron(
+        triangle_down(
             scene,
-            Rectangle::new(
-                Point::new(
-                    rect.x + (rect.width - 10.0) / 2.0,
-                    rect.y + LARGE_TEXT_Y + n * LARGE_LINE_H + 2.0,
-                ),
-                Size::new(10.0, 6.5),
-            ),
-            false,
+            rect.x + rect.width / 2.0,
+            rect.y + LARGE_TEXT_Y + n * LARGE_LINE_H + 2.0 + LARGE_LINE_H / 2.0 + 0.5,
+            7.0,
+            5.0,
             c,
         );
     }
@@ -1835,6 +1898,65 @@ fn build_large_dropdown(ctx: &Ctx, scene: &mut Scene, rect: Rectangle, cmd: u32)
     keytip_badge(ctx, scene, rect, cmd, false);
 }
 
+/// Advance width of the self-drawn arrow next to text (3px gap + 7px
+/// glyph) — used for centering exactly as if the arrow were a trailing
+/// character in the string.
+pub const ARROW_ADVANCE: f32 = 10.0;
+
+/// Self-drawn solid down-triangle (font-independent ▼), centered at
+/// (`cx`, `cy`) with the given glyph size.
+fn triangle_down(scene: &mut Scene, cx: f32, cy: f32, w: f32, h: f32, color: Color) {
+    let hex = format!(
+        "#{:02x}{:02x}{:02x}",
+        (color.r * 255.0) as u8,
+        (color.g * 255.0) as u8,
+        (color.b * 255.0) as u8
+    );
+    let svg = format!(
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 8'><path d='M0.5 0.5h9L5 7.5z' fill='{hex}'/></svg>"
+    );
+    scene.push(Node::new(
+        Rectangle::new(Point::new(cx - w / 2.0, cy - h / 2.0), Size::new(w, h)),
+        Cmd::Svg {
+            image: crate::ribbon::image::UiImage::Svg(svg),
+            tint: None,
+            opacity: 1.0,
+        },
+    ));
+}
+
+/// Draw `line` centered in `rect` with a self-drawn down triangle after
+/// it — the pair is centered as one unit, exactly like a string with a
+/// trailing arrow character (an empty `line` draws just the arrow).
+fn text_arrow(
+    ctx: &Ctx,
+    scene: &mut Scene,
+    rect: Rectangle,
+    line: &str,
+    size: f32,
+    color: Color,
+) {
+    let tw = if line.is_empty() {
+        0.0
+    } else {
+        ctx.text_w(line, size)
+    };
+    let total = tw + if line.is_empty() { 7.0 } else { ARROW_ADVANCE };
+    let x0 = rect.x + ((rect.width - total) / 2.0).max(0.0);
+    if !line.is_empty() {
+        text(
+            scene,
+            Rectangle::new(Point::new(x0, rect.y), Size::new(tw + 1.0, rect.height)),
+            line,
+            size,
+            color,
+            Horizontal::Left,
+            Vertical::Center,
+        );
+    }
+    triangle_down(scene, x0 + total - 3.5, rect.y + rect.height / 2.0 + 0.5, 7.0, 5.0, color);
+}
+
 fn resolved(c: Option<&crate::ribbon::spec::CommandRef>) -> Option<u32> {
     match c {
         Some(crate::ribbon::spec::CommandRef::Id(id)) => Some(*id),
@@ -1842,6 +1964,7 @@ fn resolved(c: Option<&crate::ribbon::spec::CommandRef>) -> Option<u32> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_button_like(
     ctx: &Ctx,
     scene: &mut Scene,
@@ -1850,6 +1973,7 @@ fn build_button_like(
     size: CtrlSize,
     toggle: bool,
     compact: bool,
+    caption_off: bool,
 ) {
     let checked = toggle && ctx.bool_value(cmd);
     let enabled = ctx.enabled(cmd);
@@ -1864,7 +1988,7 @@ fn build_button_like(
     } else {
         ctx.theme.text_disabled
     };
-    let show_label = !compact || size == CtrlSize::Small;
+    let show_label = (!compact || size == CtrlSize::Small) && !caption_off;
 
     match size {
         CtrlSize::Large if !compact => {
@@ -2004,49 +2128,39 @@ fn build_split_large(
     } else {
         ctx.theme.text_disabled
     };
-    let lines = wrap_balanced(ctx, &label, 11.0, 2);
+    // the arrow follows the label as if it were a trailing character
+    // ("Move\nto ▼", alone on the second line for single-line labels:
+    // "Paste\n▼") — self-drawn, so it works with any font
+    let mut lines = wrap_balanced(ctx, &label, 11.0, 2);
+    if lines.len() == 1 {
+        lines.push(String::new());
+    }
     let line_h = LARGE_LINE_H;
-    let n = lines.len();
+    let last = lines.len() - 1;
     for (i, line) in lines.iter().enumerate() {
         // same text offsets as plain large buttons
-        let ly = rect.y + LARGE_TEXT_Y + i as f32 * line_h;
-        text(
-            scene,
-            Rectangle::new(
-                Point::new(drop_rect.x, ly),
-                Size::new(drop_rect.width, line_h),
-            ),
-            line.clone(),
-            11.0,
-            text_color,
-            Horizontal::Center,
-            Vertical::Center,
+        let lrect = Rectangle::new(
+            Point::new(drop_rect.x, rect.y + LARGE_TEXT_Y + i as f32 * line_h),
+            Size::new(drop_rect.width, line_h),
         );
-        if i + 1 == n {
-            // chevron after the last line; a single-line label leaves it
-            // alone on the second line ("Paste\n▼")
-            let last_w = ctx.text_w(line, 11.0);
-            let chev_y = if n == 1 { ly + line_h } else { ly };
-            let chev_x = if n == 1 {
-                drop_rect.x + (drop_rect.width - 10.0) / 2.0
-            } else {
-                (drop_rect.x + (drop_rect.width + last_w) / 2.0 + 3.0)
-                    .min(drop_rect.x + drop_rect.width - 12.0)
-            };
-            chevron(
+        if i == last {
+            text_arrow(ctx, scene, lrect, line, 11.0, text_color);
+        } else {
+            text(
                 scene,
-                Rectangle::new(
-                    Point::new(chev_x, chev_y + (line_h - 6.5) / 2.0),
-                    Size::new(10.0, 6.5),
-                ),
-                false,
-                if enabled { ctx.theme.text } else { ctx.theme.text_disabled },
+                lrect,
+                line.clone(),
+                11.0,
+                text_color,
+                Horizontal::Center,
+                Vertical::Center,
             );
         }
     }
     keytip_badge(ctx, scene, rect, cmd, false);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_split(
     ctx: &Ctx,
     scene: &mut Scene,
@@ -2055,6 +2169,7 @@ fn build_split(
     size: CtrlSize,
     has_main: bool,
     compact: bool,
+    caption_off: bool,
 ) {
     if size == CtrlSize::Large && !compact {
         build_split_large(ctx, scene, rect, cmd, has_main);
@@ -2069,7 +2184,7 @@ fn build_split(
         Point::new(rect.x + main_rect.width, rect.y),
         Size::new(drop_w, rect.height),
     );
-    build_button_like(ctx, scene, main_rect, cmd, size, false, compact);
+    build_button_like(ctx, scene, main_rect, cmd, size, false, compact, caption_off);
     // dropdown zone
     let target = if has_main { Target::SplitDrop(cmd) } else { Target::DropDown(cmd) };
     let enabled = ctx.enabled(cmd);
@@ -2468,7 +2583,7 @@ fn build_gallery(
 ) {
     if g.popup {
         // dropdown gallery: button-like with chevron
-        build_split(ctx, scene, rect, cmd, CtrlSize::Small, false, false);
+        build_split(ctx, scene, rect, cmd, CtrlSize::Small, false, false, false);
         return;
     }
     let enabled = ctx.enabled(cmd);

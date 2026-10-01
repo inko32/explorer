@@ -88,7 +88,7 @@ application_menu:
 # (the switch — only one QAT bar is shown at a time)
 quick_access:
   commands: [cmdUndo, cmdRedo, cmdDelete]
-  dock: bottom
+  dock: top
 
 help_button: cmdHelp
 
@@ -161,12 +161,14 @@ tabs:
             image: paste
             label: Paste
             keytip: "V"
+            tooltip: "Paste the clipboard contents here"
+            shortcut: "Ctrl+V"
             items:
               - { command: cmdPasteSpecial, image: paste_special, label: Paste special }
-          - { type: button, command: cmdCut, size: small, image: cut, label: Cut, keytip: "X" }
-          - { type: button, command: cmdCopy, size: small, image: copy, label: Copy, keytip: "C" }
-          - { type: button, command: cmdUndo, size: small, image: undo, label: Undo, keytip: "U" }
-          - { type: button, command: cmdRedo, size: small, image: redo, label: Redo, keytip: "R" }
+          - { type: button, command: cmdCut, size: small, image: cut, label: Cut, keytip: "X", tooltip: "Cut the selection to the clipboard", shortcut: "Ctrl+X" }
+          - { type: button, command: cmdCopy, size: small, image: copy, label: Copy, keytip: "C", tooltip: "Copy the selection to the clipboard", shortcut: "Ctrl+C" }
+          - { type: button, command: cmdUndo, size: small, image: undo, label: Undo, keytip: "U", tooltip: "Undo the last operation", shortcut: "Ctrl+Z" }
+          - { type: button, command: cmdRedo, size: small, image: redo, label: Redo, keytip: "R", tooltip: "Redo the last undone operation", shortcut: "Ctrl+Y" }
 
       - id: organize
         label: Organize
@@ -199,15 +201,17 @@ tabs:
             image: delete
             label: Delete
             keytip: "D"
+            tooltip: "Move the selection to the trash"
+            shortcut: "Del"
             items:
-              - { command: cmdDeletePermanent, image: delete, label: Delete permanently }
-          - { type: button, command: cmdRename, size: large, image: rename, label: Rename, keytip: "N" }
+              - { command: cmdDeletePermanent, image: delete, label: Delete permanently, tooltip: "Permanently delete the selection" }
+          - { type: button, command: cmdRename, size: large, image: rename, label: Rename, keytip: "N", tooltip: "Rename the selected item", shortcut: "F2" }
 
       - id: new
         label: New
         image: new_folder
         controls:
-          - { type: button, command: cmdNewFolder, size: large, image: new_folder, label: New folder, keytip: "W" }
+          - { type: button, command: cmdNewFolder, size: large, image: new_folder, label: New folder, keytip: "W", tooltip: "Create a new folder here", shortcut: "Ctrl+Shift+N" }
           - { type: button, command: cmdNewItem, size: small, image: new, label: New item }
 
       - id: open
@@ -223,9 +227,9 @@ tabs:
         label: Select
         image: select_all
         controls:
-          - { type: button, command: cmdSelectAll, size: small, image: select_all, label: Select all, keytip: "SA" }
-          - { type: button, command: cmdSelectNone, size: small, image: select_none, label: Select none }
-          - { type: button, command: cmdInvertSelection, size: small, image: invert_sel, label: Invert selection }
+          - { type: button, command: cmdSelectAll, size: small, image: select_all, label: Select all, keytip: "SA", tooltip: "Select all items", shortcut: "Ctrl+A" }
+          - { type: button, command: cmdSelectNone, size: small, image: select_none, label: Select none, tooltip: "Clear the selection" }
+          - { type: button, command: cmdInvertSelection, size: small, image: invert_sel, label: Invert selection, tooltip: "Invert the selection" }
 
   # ------------------------------------------------------------ Share
   - id: share
@@ -260,8 +264,8 @@ tabs:
         label: Layout
         image: view_details
         controls:
-          - { type: toggle_button, command: cmdViewDetails, size: large, image: view_details, label: Details, keytip: "D" }
-          - { type: toggle_button, command: cmdViewLarge, size: large, image: view_large, label: Large icons, keytip: "L" }
+          - { type: toggle_button, command: cmdViewDetails, size: large, image: view_details, label: Details, keytip: "D", tooltip: "Show items in a detailed list" }
+          - { type: toggle_button, command: cmdViewLarge, size: large, image: view_large, label: Large icons, keytip: "L", tooltip: "Show items as large icons" }
 
       - id: current_view
         label: Current view
@@ -275,9 +279,9 @@ tabs:
             label: Sort by
             keytip: "SO"
             items:
-              - { command: cmdSortName, image: sort_by, label: Name }
-              - { command: cmdSortSize, image: sort_by, label: Size }
-              - { command: cmdSortModified, image: sort_by, label: Date modified }
+              - { command: cmdSortName, image: sort_by, label: Name, tooltip: "Sort by name" }
+              - { command: cmdSortSize, image: sort_by, label: Size, tooltip: "Sort by size" }
+              - { command: cmdSortModified, image: sort_by, label: Date modified, tooltip: "Sort by modification date" }
           - { type: button, command: cmdGroupBy, size: small, image: sort_by, label: Group by }
           - { type: button, command: cmdSizeColumns, size: small, image: view_details, label: Size columns to fit }
 
@@ -287,15 +291,15 @@ tabs:
         controls:
           - { type: button, command: cmdToggleCheckboxes, size: small, image: select_none, label: Item check boxes }
           - { type: button, command: cmdToggleExtensions, size: small, image: edit, label: File name extensions }
-          - { type: toggle_button, command: cmdToggleHidden, size: small, image: view_details, label: Hidden items, keytip: "H" }
+          - { type: toggle_button, command: cmdToggleHidden, size: small, image: view_details, label: Hidden items, keytip: "H", tooltip: "Show or hide hidden items" }
 
       - id: options
         label: Options
         image: gear
         controls:
-          - { type: toggle_button, command: cmdToggleDark, size: small, image: gear, label: Dark mode, keytip: "DK" }
-          - { type: toggle_button, command: cmdToggleBorder, size: small, image: gear, label: Custom border }
-          - { type: toggle_button, command: cmdToggleFrame, size: small, image: gear, label: Win8 frame }
+          - { type: toggle_button, command: cmdToggleDark, size: small, image: gear, label: Dark mode, keytip: "DK", tooltip: "Switch between light and dark mode" }
+          - { type: toggle_button, command: cmdToggleBorder, size: small, image: gear, label: Custom border, tooltip: "Use the custom window border" }
+          - { type: toggle_button, command: cmdToggleFrame, size: small, image: gear, label: Win8 frame, tooltip: "Switch between Win8 and Win10 frame styles" }
           - { type: button, command: cmdFolderOptions, size: small, image: gear, label: Folder options }
 
   # ------------------------------------------------------------ Contextual: Drive Tools
@@ -311,7 +315,7 @@ tabs:
         image: properties
         controls:
           - { type: button, command: cmdDriveProperties, size: small, image: properties, label: Properties }
-          - { type: button, command: cmdOpenTerminal, size: small, image: terminal, label: Open terminal, keytip: "T" }
+          - { type: button, command: cmdOpenTerminal, size: small, image: terminal, label: Open terminal, keytip: "T", tooltip: "Open a terminal in this folder" }
 
   # ------------------------------------------------------------ Contextual: Picture Tools
   - id: picture_tools
@@ -341,4 +345,4 @@ tabs:
         image: extract
         controls:
           - { type: button, command: cmdExtractHere, size: small, image: extract, label: Extract here, keytip: "E" }
-          - { type: button, command: cmdOpenTerminal, size: small, image: terminal, label: Open terminal }
+          - { type: button, command: cmdOpenTerminal, size: small, image: terminal, label: Open terminal, tooltip: "Open a terminal in this folder" }
