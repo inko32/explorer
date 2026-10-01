@@ -207,6 +207,7 @@ where
                     state.hover = new_hover.clone();
                     state.hover_since = Some(Instant::now());
                     state.tooltip = None;
+                    state.tooltip_anchor = None;
                     shell.request_redraw();
                 }
                 // tooltip
@@ -216,6 +217,8 @@ where
                             && state.tooltip.is_none()
                         {
                             state.tooltip = Some(tip);
+                            state.tooltip_anchor = Some(translate_rect(node.rect, origin));
+                            shell.request_redraw();
                             self.fw.view_log(
                                 EventType::TooltipShown,
                                 if matches!(new_hover, Some(Qat(_))) {
@@ -492,8 +495,19 @@ where
                         state,
                         measure,
                     };
-                    popup::tooltip_scene(&ctx, tip, state.hover_pos)
+                    popup::tooltip_scene(&ctx, tip)
                 };
+                // top = bottom of the command pane, left = the related
+                // button's left side
+                let ribbon_bottom =
+                    layout.position().y + crate::ribbon::widget::layout::ribbon_height(&self.fw.view());
+                let tooltip_origin = Point::new(
+                    state
+                        .tooltip_anchor
+                        .map(|r| r.x)
+                        .unwrap_or(state.hover_pos.x),
+                    ribbon_bottom + 1.0,
+                );
                 return Some(overlay::Element::new(Box::new(
                     popup::RibbonOverlay::<Message, Th, Renderer> {
                         fw: self.fw,
@@ -501,7 +515,7 @@ where
                         state,
                         scene,
                         tooltip: true,
-                        origin: Point::ORIGIN,
+                        origin: tooltip_origin,
                         width_hint: 0.0,
                         mapper: self.on_event.as_deref(),
                         _phantom: std::marker::PhantomData,
@@ -921,9 +935,20 @@ pub(crate) fn activate<Message>(
 ) {
     let view = fw.view();
     let below = Point::new(anchor.x, anchor.y + anchor.height + 1.0);
+    // disabled commands never execute (their buttons still hover and
+    // show tooltips)
+    let gated = match target {
+        Qat(c) | Exec(c) | SplitMain(c) | Help(c) | Toggle(c) | MenuItem(c) => Some(*c),
+        _ => None,
+    };
+    if let Some(c) = gated {
+        if !fw.command_enabled(c) {
+            return;
+        }
+    }
     match target {
         AppMenu => {
-            open_popup(state, PopupKind::AppMenu, below, 0.0);
+            open_popup(state, PopupKind::AppMenu, below, anchor.width);
             fw.view_log(EventType::ApplicationMenuOpened, EventLocation::ApplicationMenu, 0);
         }
         Tab(i) => {
@@ -1307,7 +1332,7 @@ pub(crate) fn activate<Message>(
             close_all_popups(state);
         }
         Overflow => {
-            open_popup(state, PopupKind::Overflow, below, 0.0);
+            open_popup(state, PopupKind::Overflow, below, anchor.width);
         }
         OverflowGroup(tab, group) => {
             // A popup opened from the overflow « menu flies out to the
@@ -1333,7 +1358,7 @@ pub(crate) fn activate<Message>(
             );
         }
         QatMenu => {
-            open_popup(state, PopupKind::QatMenu, below, 0.0);
+            open_popup(state, PopupKind::QatMenu, below, anchor.width);
         }
         QatMenuItem(cmd) => {
             let mut qat = view.qat_commands();

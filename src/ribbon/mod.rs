@@ -447,6 +447,9 @@ impl CommandHandler for ExplorerHandler {
                 ))
             }
             PropertyKey::TooltipTitle => Some(PropValue::Str(command_name(command))),
+            PropertyKey::TooltipDescription if command == cmd::HELP => {
+                Some(PropValue::Str("Show help (F1)".into()))
+            }
             _ => None,
         })
     }
@@ -637,24 +640,15 @@ impl Ribbon {
             CtxTab::Archive => ctx.inside_archive,
             CtxTab::Main => false,
         };
+        let _ = activates;
         let view = self.framework.view();
         let selected = view.selected_tab();
-        let selected_kind = self.tabs.get(selected).map(|t| t.ctx);
-        let want = self
-            .tabs
-            .iter()
-            .position(|t| t.ctx != CtxTab::Main && activates(t.ctx));
-        match want {
-            Some(i) => view.select_tab(i),
-            None => {
-                if let Some(kind) = selected_kind {
-                    if !visible(kind) {
-                        if let Some(home) =
-                            self.tabs.iter().position(|t| t.id == "home")
-                        {
-                            view.select_tab(home);
-                        }
-                    }
+        // never jump to a contextual tab on selection changes; only fall
+        // back to Home when the active tab's context disappears
+        if let Some(kind) = self.tabs.get(selected).map(|t| t.ctx) {
+            if !visible(kind) {
+                if let Some(home) = self.tabs.iter().position(|t| t.id == "home") {
+                    view.select_tab(home);
                 }
             }
         }
