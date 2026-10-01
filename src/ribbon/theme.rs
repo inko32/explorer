@@ -139,10 +139,13 @@ pub struct Theme {
     /// Application menu orb gradient (top, bottom).
     pub orb: (Color, Color),
     pub hover_bg: Color,
-    /// `Some(color)` draws a border around hovered buttons (Win7);
+    /// `Some(color)` draws a border around hovered buttons (Win7/8);
     /// Windows 10 uses `None`.
     pub hover_border: Option<Color>,
     pub pressed_bg: Color,
+    /// Border for pressed/activated buttons (falls back to
+    /// `hover_border` when `None`).
+    pub pressed_border: Option<Color>,
     pub checked_bg: Color,
     pub checked_border: Option<Color>,
     pub popup_bg: Color,
@@ -193,6 +196,7 @@ impl Theme {
             hover_bg: rgb(0xDADADA),
             hover_border: None,
             pressed_bg: rgb(0xC8C8C8),
+            pressed_border: None,
             checked_bg: tint(accent, 0.80),
             checked_border: None,
             popup_bg: Color::WHITE,
@@ -236,6 +240,7 @@ impl Theme {
             hover_bg: rgb(0xDADADA),
             hover_border: None,
             pressed_bg: rgb(0xC8C8C8),
+            pressed_border: None,
             checked_bg: tint(accent, 0.80),
             checked_border: None,
             popup_bg: Color::WHITE,
@@ -273,6 +278,7 @@ impl Theme {
             hover_bg: rgb(0xE3F0FA),
             hover_border: Some(rgb(0x6BAAD3)),
             pressed_bg: rgb(0xC4E0F3),
+            pressed_border: Some(rgb(0x6BAAD3)),
             checked_bg: rgb(0xFCE096),
             checked_border: Some(rgb(0xE5C365)),
             popup_bg: rgb(0xFCFCFC),

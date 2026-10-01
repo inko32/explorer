@@ -101,7 +101,7 @@ where
         } else {
             960.0
         };
-        let (scene, _) = {
+        let (scene, tabs_layout) = {
             let cache = &state.measure_cache;
             let renderer_ref = &_renderer;
             let measure = &|s: &str, size: f32| {
@@ -121,6 +121,12 @@ where
             };
             layout::ribbon_scene(&ctx, width)
         };
+        self.fw.view().set_tab_rects(
+            tabs_layout
+                .iter()
+                .map(|t| (t.index, t.rect.x, t.rect.width))
+                .collect(),
+        );
         let size = scene.size;
         state.scene = Some(scene);
         ilayout::Node::new(size)
@@ -406,6 +412,7 @@ where
                 cache.borrow_mut().insert(key, w);
                 w
             };
+            state.popup_drawing = true;
             let (scene, origin) = {
                 let ctx = Ctx {
                     fw: self.fw,
@@ -436,16 +443,19 @@ where
                     }
                     (Some(scene), None) => (scene, popup.origin),
                     (None, _) => {
+                        state.popup_drawing = false;
                         close_all_popups(state);
                         state.popup_bounds = None;
                         return None;
                     }
                 }
             };
+            state.popup_drawing = false;
             if let Some(p) = &mut state.popup {
                 p.size = scene.size;
             }
             state.popup_bounds = Some((origin, scene.size));
+            let width_hint = popup.width_hint;
             return Some(overlay::Element::new(Box::new(
                 popup::RibbonOverlay::<Message, Th, Renderer> {
                     fw: self.fw,
@@ -454,6 +464,7 @@ where
                     scene,
                     tooltip: false,
                     origin,
+                    width_hint,
                     mapper: self.on_event.as_deref(),
                     _phantom: std::marker::PhantomData,
                 },
@@ -491,6 +502,7 @@ where
                         scene,
                         tooltip: true,
                         origin: Point::ORIGIN,
+                        width_hint: 0.0,
                         mapper: self.on_event.as_deref(),
                         _phantom: std::marker::PhantomData,
                     },

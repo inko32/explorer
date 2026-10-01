@@ -163,6 +163,9 @@ pub struct State {
     pub previewed: Option<(u32, usize)>,
     /// Gallery item previewed from the ribbon strip.
     pub previewed_strip: Option<(u32, usize)>,
+    /// Transient: set while a popup scene is being built — hover queries
+    /// then match the popup hover instead of the main-scene hover.
+    pub popup_drawing: bool,
     /// Groups hidden into the overflow chevron: (tab, indices).
     pub overflow_hidden: std::cell::RefCell<Option<Vec<usize>>>,
     pub overflow_tab: std::cell::RefCell<Option<usize>>,
@@ -197,6 +200,7 @@ impl Default for State {
             keytip_buffer: String::new(),
             previewed: None,
             previewed_strip: None,
+            popup_drawing: false,
             overflow_hidden: std::cell::RefCell::new(None),
             overflow_tab: std::cell::RefCell::new(None),
             measure_cache: std::cell::RefCell::new(std::collections::HashMap::new()),

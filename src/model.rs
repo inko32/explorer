@@ -66,10 +66,15 @@ pub enum Message {
     WindowResized(f32, f32),
     /// Switch between the self-rendered border and native decorations.
     ToggleSelfBorder,
+    /// Pressed a contextual title-bar block: activate its tab AND let the
+    /// band drag the window (a plain click without movement still switches).
+    BlockPress(usize),
     /// Begin a compositor-driven edge resize (custom border mode).
     StartResize(crate::border::ResizeDir),
     /// Switch between the Win8 (double) and Win10 (1px) window borders.
     ToggleFrameStyle,
+    /// Toggle the QAT between the title bar ("above") and below the ribbon.
+    ToggleQatDock,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -749,6 +754,13 @@ impl Explorer {
                 }
                 iced::Task::none()
             }
+            Message::BlockPress(tab) => {
+                self.ribbon.framework().view().select_tab(tab);
+                if let Some(id) = self.window {
+                    return iced::window::drag(id);
+                }
+                iced::Task::none()
+            }
             Message::StartResize(dir) => {
                 if let Some(id) = self.window {
                     return dir.task(id);
@@ -779,6 +791,16 @@ impl Explorer {
                     self.status = format!("permanently deleted {ok} item(s)");
                     self.request_listing();
                 }
+                iced::Task::none()
+            }
+            Message::ToggleQatDock => {
+                let view = self.ribbon.framework().view();
+                use crate::ribbon::enums::ControlDock;
+                let dock = match view.qat_dock() {
+                    ControlDock::Top => ControlDock::Bottom,
+                    ControlDock::Bottom => ControlDock::Top,
+                };
+                view.set_qat_dock(dock);
                 iced::Task::none()
             }
             Message::ToggleFrameStyle => {

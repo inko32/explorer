@@ -161,6 +161,10 @@ pub struct ViewState {
     pub(crate) modes: i32,
     /// `IUIContextualUI` request, consumed by the widget.
     pub(crate) pending_popup: Option<(u32, f32, f32)>,
+    /// Last laid-out tab rectangles (spec tab index, x, width), written
+    /// by the widget on every layout — the window chrome (title bar)
+    /// aligns its contextual blocks with these.
+    pub(crate) tab_rects: Vec<(usize, f32, f32)>,
     pub(crate) event_logger: Option<Rc<RefCell<dyn FnMut(EventType, EventLocation, u32)>>>,
 }
 
@@ -173,6 +177,7 @@ impl Default for ViewState {
             qat_dock: ControlDock::Top,
             modes: 1,
             pending_popup: None,
+            tab_rects: Vec::new(),
             event_logger: None,
         }
     }
@@ -202,9 +207,7 @@ impl RibbonView {
     pub fn get_height(&self) -> u32 {
         let s = self.inner.borrow();
         let mut h = TAB_STRIP_HEIGHT;
-        if s.qat_dock == ControlDock::Top {
-            h += QAT_ROW_HEIGHT;
-        }
+        // docked "top" lives in the window title bar (no ribbon row)
         if !s.minimized {
             h += RIBBON_BODY_HEIGHT;
         }
@@ -243,6 +246,15 @@ impl RibbonView {
     }
     pub(crate) fn set_modes_internal(&self, modes: i32) {
         self.inner.borrow_mut().modes = modes;
+    }
+
+    /// Tab rectangles from the last layout (spec tab index, x, width).
+    pub fn tab_rects(&self) -> Vec<(usize, f32, f32)> {
+        self.inner.borrow().tab_rects.clone()
+    }
+
+    pub(crate) fn set_tab_rects(&self, rects: Vec<(usize, f32, f32)>) {
+        self.inner.borrow_mut().tab_rects = rects;
     }
 
     pub(crate) fn show_context_popup(&self, command: u32, x: f32, y: f32) {
