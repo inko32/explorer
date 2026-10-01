@@ -95,7 +95,7 @@ fn load_ui_creates_commands_and_view() {
     // every command got a handler via OnCreateUICommand
     assert!(fw.commands().len() > 40, "expected many commands, got {}", fw.commands().len());
     let view = fw.get_view(0).unwrap();
-    assert_eq!(view.get_height(), 26 + 22 + 92); // strip + qat + body
+    assert_eq!(view.get_height(), 26 + 92); // strip + body (top QAT lives in the title bar)
     fw.destroy();
     drop(handler);
 }
@@ -163,7 +163,7 @@ fn settings_stream_round_trip() {
     assert!(view2.minimized());
     assert_eq!(view2.selected_tab(), 2);
     assert_eq!(view2.qat_commands(), vec![12, 18]);
-    assert_eq!(view2.get_height(), 26 + 22); // minimized: no body
+    assert_eq!(view2.get_height(), 26); // minimized: no body, no top-QAT row
 }
 
 #[test]

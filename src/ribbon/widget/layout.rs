@@ -57,6 +57,30 @@ pub fn wrap_width(ctx: &Ctx, s: &str, size: f32, max_w: f32) -> Vec<String> {
     lines
 }
 
+/// Balanced word wrap: split into up to `max_lines` lines so the widest
+/// line (and thus the button width) is as small as possible. Large
+/// ribbon buttons wrap this way ("Move\nto", "File name\nextensions").
+pub fn wrap_balanced(ctx: &Ctx, s: &str, size: f32, max_lines: usize) -> Vec<String> {
+    let words: Vec<&str> = s.split(' ').collect();
+    if words.len() < 2 || max_lines < 2 {
+        return vec![s.to_string()];
+    }
+    if max_lines == 2 {
+        let mut best: Option<(f32, usize)> = None;
+        for i in 1..words.len() {
+            let w = ctx
+                .text_w(&words[..i].join(" "), size)
+                .max(ctx.text_w(&words[i..].join(" "), size));
+            if best.map(|(bw, _)| w < bw).unwrap_or(true) {
+                best = Some((w, i));
+            }
+        }
+        let i = best.map(|(_, i)| i).unwrap_or(1);
+        return vec![words[..i].join(" "), words[i..].join(" ")];
+    }
+    wrap_width(ctx, s, size, 76.0)
+}
+
 /// Greedy word wrap by character count (no renderer at hand).
 pub fn wrap(s: &str, max_chars: usize) -> Vec<String> {
     let mut lines = Vec::new();
@@ -162,7 +186,11 @@ impl<'a> Ctx<'a> {
     }
 
     pub fn hovered(&self, t: &Target) -> bool {
-        self.state.hover.as_ref() == Some(t)
+        if self.state.popup_drawing {
+            self.state.popup_hover() == Some(t)
+        } else {
+            self.state.hover.as_ref() == Some(t)
+        }
     }
 
     pub fn pressed(&self, t: &Target) -> bool {
@@ -306,7 +334,10 @@ fn push_button(
     let pressed = enabled && ctx.pressed(&target);
     let theme = ctx.theme;
     let (fill, border) = if pressed {
-        (Fill::Color(theme.pressed_bg), theme.hover_border.map(|c| (c, 1.0)))
+        (
+            Fill::Color(theme.pressed_bg),
+            theme.pressed_border.or(theme.hover_border).map(|c| (c, 1.0)),
+        )
     } else if hover {
         (Fill::Color(theme.hover_bg), theme.hover_border.map(|c| (c, 1.0)))
     } else if checked {
@@ -375,9 +406,6 @@ pub fn tab_label(_ctx: &Ctx, tab: &TabSpec) -> String {
 
 pub fn ribbon_height(view: &RibbonView) -> f32 {
     let mut h = STRIP_H;
-    if view.qat_dock() == ControlDock::Top {
-        h += QAT_H;
-    }
     if !view.minimized() {
         h += BODY_H;
     }
@@ -394,10 +422,8 @@ pub fn ribbon_scene(ctx: &Ctx, width: f32) -> (Scene, Vec<TabLayout>) {
     let mut scene = Scene::new(Size::ZERO);
     let mut y = 0.0;
 
-    if view.qat_dock() == ControlDock::Top {
-        qat_row(ctx, &mut scene, y, width);
-        y += QAT_H;
-    }
+    // QAT docked "top" lives in the window title bar (border.rs); the
+    // ribbon draws no row for it. Docked "bottom" is drawn below the body.
 
     let strip_y = y;
     // tab strip background
@@ -441,7 +467,7 @@ fn tab_strip(
     let spec = ctx.spec();
     let selected = view.selected_tab();
 
-    let mut x = 6.0 + ORB_SIZE + 10.0;
+    let mut x = ctx.text_w("File", 12.5) + 26.0;
     let visible = visible_tabs(ctx);
     let mut contextual_run: Option<(ContextualColor, f32, f32, String)> = None;
     // Geometry of the active tab, for the connected line (Filled style).
@@ -450,9 +476,12 @@ fn tab_strip(
     for &idx in &visible {
         let tab = &spec.tabs[idx];
         let label = tab_label(ctx, tab);
-        let w = ctx.text_w(&label, 12.5) + 26.0;
+        // contextual tabs reserve ~1ch before/after the label, matching
+        // the title-bar block above them
+        let w = ctx.text_w(&label, 12.5) + 26.0
+            + if tab.contextual.is_some() { 12.0 } else { 0.0 };
         let rect =
-            Rectangle::new(Point::new(x, strip_y + 1.0), Size::new(w, STRIP_H + 2.0));
+            Rectangle::new(Point::new(x, strip_y + 1.0), Size::new(w, STRIP_H - 1.0));
         let is_active = idx == selected;
         let accent = tab
             .contextual
@@ -501,10 +530,7 @@ fn tab_strip(
         scene.push(node);
         text(
             scene,
-            Rectangle::new(
-                Point::new(x, strip_y + 3.0),
-                Size::new(w, STRIP_H - 6.0),
-            ),
+            Rectangle::new(Point::new(x, strip_y), Size::new(w, STRIP_H)),
             label,
             12.5,
             text_color,
@@ -542,8 +568,12 @@ fn tab_strip(
             }
         }
 
-        // contextual set tracking
-        match (&tab.contextual, &mut contextual_run) {
+        // contextual set tracking (underline themes draw the set bar +
+        // name; Filled themes show contextual chrome on the tab itself
+        // and in the window title bar)
+        let track_set = ctx.theme.tab_style != crate::ribbon::theme::TabStyle::Filled;
+        let set_name = if track_set { tab.contextual.as_ref() } else { None };
+        match (set_name, &mut contextual_run) {
             (Some(name), run @ None) => {
                 *run = Some((
                     accent.unwrap_or(ContextualColor::Blue),
@@ -569,6 +599,7 @@ fn tab_strip(
                 finish_contextual(ctx, scene, strip_y, contextual_run.take());
             }
         }
+        let _ = track_set;
 
         tabs_layout.push(TabLayout {
             index: idx,
@@ -611,32 +642,37 @@ fn tab_strip(
         }
     }
 
-    // application menu orb
-    let orb = Rectangle::new(
-        Point::new(6.0, strip_y + 2.0),
-        Size::new(ORB_SIZE, ORB_SIZE),
+    // application menu: Win8 "File" tab (solid brand rectangle with a
+    // caption, not an orb)
+    let file_label = "File";
+    let file_w = ctx.text_w(file_label, 12.5) + 26.0;
+    let file_rect = Rectangle::new(
+        Point::new(0.0, strip_y),
+        Size::new(file_w, STRIP_H - 1.0),
     );
     let hover = ctx.hovered(&Target::AppMenu);
     quad(
         scene,
-        orb,
-        if hover {
-            Fill::Color(crate::ribbon::theme::shade(
-                ctx.theme.orb.1,
-                0.85,
-            ))
+        file_rect,
+        Fill::Color(if hover {
+            crate::ribbon::theme::tint(ctx.theme.orb.0, 0.12)
         } else {
-            Fill::Gradient(ctx.theme.orb.0, ctx.theme.orb.1)
-        },
+            ctx.theme.orb.0
+        }),
         None,
-        ctx.theme.orb_radius,
+        0.0,
+    );
+    text(
+        scene,
+        file_rect,
+        file_label,
+        12.5,
+        Color::WHITE,
+        Horizontal::Center,
+        Vertical::Center,
     );
     scene.push(
-        Node::new(orb, Cmd::Svg {
-            image: crate::ribbon::image::UiImage::Icon("orb"),
-            tint: None,
-            opacity: 1.0,
-        })
+        Node::new(file_rect, Cmd::Hit)
         .target(Target::AppMenu)
         .tip(orb_tip(ctx)),
     );
@@ -645,7 +681,7 @@ fn tab_strip(
             Rectangle::with_size(Size::new(18.0, 13.0)),
             Cmd::KeytipBadge {
                 text: "F".into(),
-                anchor: Point::new(orb.x + ORB_SIZE - 2.0, orb.y - 2.0),
+                anchor: Point::new(file_rect.x + file_w - 2.0, file_rect.y - 2.0),
             },
         ));
     }
@@ -1006,10 +1042,16 @@ fn scale_ladder(group: &GroupSpec, policy: Option<&ScalingSpec>) -> Vec<GroupSca
     ladder
 }
 
-/// Width of a collapsed (popup) group button: icon + label + chevron.
+/// Width of a collapsed (popup) group button — sized like a large
+/// button (wrapped label + padding).
 fn popup_group_width(ctx: &Ctx, group: &GroupSpec) -> f32 {
     let label = group.label.clone().unwrap_or_else(|| group.id.clone());
-    (ctx.text_w(&label, 11.0) + 34.0).max(56.0)
+    let lines = wrap_balanced(ctx, &label, 11.0, 2);
+    let max_line = lines
+        .iter()
+        .map(|l| ctx.text_w(l, 11.0))
+        .fold(0.0f32, f32::max);
+    max_line.max(40.0) + 12.0
 }
 
 /// Width of a group under a given scale.
@@ -1214,18 +1256,17 @@ pub fn tab_content(
             Some(plan),
         );
         x += plan.w + 6.0;
-        if pos + 1 < placed.len() {
-            quad(
-                scene,
-                Rectangle::new(
-                    Point::new(x - 4.0, content_y),
-                    Size::new(1.0, BODY_H - 8.0),
-                ),
-                Fill::Color(ctx.theme.group_separator),
-                None,
-                0.0,
-            );
-        }
+        // Win8: a separator closes every group, the last one included
+        quad(
+            scene,
+            Rectangle::new(
+                Point::new(x - 4.0, content_y),
+                Size::new(1.0, BODY_H - 8.0),
+            ),
+            Fill::Color(ctx.theme.group_separator),
+            None,
+            0.0,
+        );
     }
     if allow_overflow {
         if hidden.is_empty() {
@@ -1313,18 +1354,23 @@ pub fn width_of_scaled(
             b,
             scaled_size(b.size),
         ),
-        ControlSpec::SplitButton(s) | ControlSpec::DropDownButton(s) => button_width_scaled(
-            ctx,
-            &ButtonSpec {
-                command: s.command.clone(),
-                size: s.size,
-                label: s.label.clone(),
-                image: s.image.clone(),
-                keytip: None,
-                width: None,
-            },
-            scaled_size(s.size),
-        ),
+        ControlSpec::SplitButton(s) | ControlSpec::DropDownButton(s) => {
+            let size = scaled_size(s.size);
+            let w = button_width_scaled(
+                ctx,
+                &ButtonSpec {
+                    command: s.command.clone(),
+                    size: s.size,
+                    label: s.label.clone(),
+                    image: s.image.clone(),
+                    keytip: None,
+                    width: None,
+                },
+                size,
+            );
+            // the bottom strip binds "label ▾": leave room for the chevron
+            if size == CtrlSize::Large { w + 12.0 } else { w }
+        }
         ControlSpec::ComboBox(b) => b.width.unwrap_or(110.0),
         ControlSpec::Spinner(sp) => sp.width.unwrap_or(90.0),
         ControlSpec::FontControl(b) => b.width.unwrap_or(150.0),
@@ -1358,12 +1404,12 @@ fn button_width_scaled(ctx: &Ctx, b: &ButtonSpec, size: CtrlSize) -> f32 {
         .unwrap_or_default();
     match size {
         CtrlSize::Large => {
-            let lines = wrap_width(ctx, &label, 11.0, 76.0);
+            let lines = wrap_balanced(ctx, &label, 11.0, 2);
             let max_line = lines
                 .iter()
                 .map(|l| ctx.text_w(l, 11.0))
                 .fold(0.0f32, f32::max);
-            max_line.max(40.0) + 12.0
+            max_line.max(28.0) + 12.0
         }
         CtrlSize::Medium => {
             let lines = wrap_width(ctx, &label, 11.0, 64.0);
@@ -1470,8 +1516,9 @@ fn build_group(
     if plan.popup {
         // Collapsed group (Windows `Group Size="Popup"`): a single
         // vertical button with the group icon, label and chevron that
-        // opens the full group in a popup.
-        let rect = Rectangle::new(Point::new(x, y), Size::new(width, CONTENT_H));
+        // opens the full group in a popup. It fills the whole command
+        // pane — there is no separate group caption under it.
+        let rect = Rectangle::new(Point::new(x, y), Size::new(width, BODY_H - 10.0));
         let target = Target::OverflowGroup(tab_idx, group_idx);
         let hover = ctx.hovered(&target);
         quad(
@@ -1491,36 +1538,10 @@ fn build_group(
             .clone()
             .map(crate::ribbon::image::UiImage::Named)
             .unwrap_or_default();
-        svg_node(
-            scene,
-            Rectangle::new(
-                Point::new(rect.x + (rect.width - 32.0) / 2.0, rect.y + 4.0),
-                Size::new(32.0, 32.0),
-            ),
-            img,
-            1.0,
-        );
         let label = group.label.clone().unwrap_or_else(|| group.id.clone());
-        text(
-            scene,
-            Rectangle::new(
-                Point::new(rect.x, rect.y + 40.0),
-                Size::new(rect.width, 12.0),
-            ),
-            label,
-            10.5,
-            ctx.theme.text,
-            Horizontal::Center,
-            Vertical::Center,
-        );
-        chevron(
-            scene,
-            Rectangle::new(
-                Point::new(rect.x + rect.width / 2.0 - 4.0, rect.y + 54.0),
-                Size::new(8.0, 5.0),
-            ),
-            false,
-            ctx.theme.group_label,
+        large_content(
+            ctx, scene, rect, img, &label, ctx.theme.text, 1.0,
+            Some(ctx.theme.group_label),
         );
         return;
     }
@@ -1577,11 +1598,13 @@ fn build_group(
         .label
         .clone()
         .unwrap_or_else(|| group.id.clone());
+    // caption centered between the group's separators: the zone runs
+    // from 4px left of the content to 2px right of it
     text(
         scene,
         Rectangle::new(
-            Point::new(x, footer_y),
-            Size::new(width - 18.0, FOOTER_H - 2.0),
+            Point::new(x - 3.0, footer_y),
+            Size::new(width + 6.0, FOOTER_H - 2.0),
         ),
         label,
         10.5,
@@ -1681,16 +1704,24 @@ pub fn build_control_scaled(
         }
         ControlSpec::SplitButton(s) => {
             if let Some(cmd) = resolved(s.command.as_ref()) {
-                build_split(
-                    ctx, scene, rect, cmd, eff(s.size), true, compact,
-                );
+                if eff(s.size) == CtrlSize::Large && !s.separate && !compact {
+                    build_large_dropdown(ctx, scene, rect, cmd);
+                } else {
+                    build_split(
+                        ctx, scene, rect, cmd, eff(s.size), true, compact,
+                    );
+                }
             }
         }
         ControlSpec::DropDownButton(s) => {
             if let Some(cmd) = resolved(s.command.as_ref()) {
-                build_split(
-                    ctx, scene, rect, cmd, eff(s.size), false, compact,
-                );
+                if eff(s.size) == CtrlSize::Large && !compact {
+                    build_large_dropdown(ctx, scene, rect, cmd);
+                } else {
+                    build_split(
+                        ctx, scene, rect, cmd, eff(s.size), false, compact,
+                    );
+                }
             }
         }
         ControlSpec::ComboBox(b) => {
@@ -1722,6 +1753,86 @@ pub fn build_control_scaled(
             build_control_group(ctx, scene, controls, rect, loc, compact);
         }
     }
+}
+
+/// Shared large-button geometry: a 32px icon at the top, a balanced
+/// two-line label under it, an optional chevron below the label. Large
+/// buttons, large dropdown buttons and collapsed (popup) groups all use
+/// these offsets so their icons and text align.
+pub const LARGE_ICON_Y: f32 = 3.0;
+pub const LARGE_TEXT_Y: f32 = 38.0;
+pub const LARGE_LINE_H: f32 = 12.0;
+
+#[allow(clippy::too_many_arguments)]
+fn large_content(
+    ctx: &Ctx,
+    scene: &mut Scene,
+    rect: Rectangle,
+    img: crate::ribbon::image::UiImage,
+    label: &str,
+    text_color: Color,
+    opacity: f32,
+    chevron_color: Option<Color>,
+) {
+    svg_node(
+        scene,
+        Rectangle::new(
+            Point::new(
+                rect.x + (rect.width - 32.0) / 2.0,
+                rect.y + LARGE_ICON_Y,
+            ),
+            Size::new(32.0, 32.0),
+        ),
+        img,
+        opacity,
+    );
+    let lines = wrap_balanced(ctx, label, 11.0, 2);
+    for (i, line) in lines.iter().take(2).enumerate() {
+        text(
+            scene,
+            Rectangle::new(
+                Point::new(rect.x, rect.y + LARGE_TEXT_Y + i as f32 * LARGE_LINE_H),
+                Size::new(rect.width, LARGE_LINE_H),
+            ),
+            line.clone(),
+            11.0,
+            text_color,
+            Horizontal::Center,
+            Vertical::Center,
+        );
+    }
+    if let Some(c) = chevron_color {
+        let n = lines.len().min(2) as f32;
+        chevron(
+            scene,
+            Rectangle::new(
+                Point::new(
+                    rect.x + (rect.width - 10.0) / 2.0,
+                    rect.y + LARGE_TEXT_Y + n * LARGE_LINE_H + 2.0,
+                ),
+                Size::new(10.0, 6.5),
+            ),
+            false,
+            c,
+        );
+    }
+}
+
+/// Large menu-only button (`drop_down_button`, or `split_button` with
+/// the default single-element chrome): one target opening the menu,
+/// content shared with large buttons plus the chevron.
+fn build_large_dropdown(ctx: &Ctx, scene: &mut Scene, rect: Rectangle, cmd: u32) {
+    let enabled = ctx.enabled(cmd);
+    push_button(ctx, scene, rect, Target::DropDown(cmd), cmd, false, ctx.theme.button_radius);
+    let (color, opacity) = if enabled {
+        (ctx.theme.text, 1.0)
+    } else {
+        (ctx.theme.text_disabled, 0.35)
+    };
+    let img = ctx.large_image(cmd).unwrap_or_default();
+    let label = ctx.label(cmd);
+    large_content(ctx, scene, rect, img, &label, color, opacity, Some(color));
+    keytip_badge(ctx, scene, rect, cmd, false);
 }
 
 fn resolved(c: Option<&crate::ribbon::spec::CommandRef>) -> Option<u32> {
@@ -1758,36 +1869,7 @@ fn build_button_like(
     match size {
         CtrlSize::Large if !compact => {
             let img = ctx.large_image(cmd).unwrap_or_default();
-            svg_node(
-                scene,
-                Rectangle::new(
-                    Point::new(
-                        rect.x + (rect.width - 32.0) / 2.0,
-                        rect.y + 3.0,
-                    ),
-                    Size::new(32.0, 32.0),
-                ),
-                img,
-                opacity,
-            );
-            let lines = wrap_width(ctx, &label, 11.0, rect.width - 4.0);
-            let line_h = 11.0f32;
-            let total = lines.len().min(3) as f32 * line_h;
-            let start_y = rect.y + rect.height - 3.0 - total;
-            for (i, line) in lines.iter().take(3).enumerate() {
-                text(
-                    scene,
-                    Rectangle::new(
-                        Point::new(rect.x, start_y + i as f32 * line_h),
-                        Size::new(rect.width, line_h),
-                    ),
-                    line.clone(),
-                    11.0,
-                    text_color,
-                    Horizontal::Center,
-                    Vertical::Center,
-                );
-            }
+            large_content(ctx, scene, rect, img, &label, text_color, opacity, None);
         }
         _ => {
             // small / medium / compact rows: icon left, label right
@@ -1830,6 +1912,141 @@ fn build_button_like(
     keytip_badge(ctx, scene, rect, cmd, false);
 }
 
+/// Large split button (Paste, Move to): the icon sits on top in the main
+/// zone; the bottom strip carries "label ▾" as one bound unit — the
+/// chevron belongs to the text, not to a separate arrow zone at the
+/// right. Hovering either part fills that part; the shared border and the
+/// divider appear whenever either part is active.
+fn build_split_large(
+    ctx: &Ctx,
+    scene: &mut Scene,
+    rect: Rectangle,
+    cmd: u32,
+    has_main: bool,
+) {
+    let strip_h = rect.height - LARGE_TEXT_Y;
+    let enabled = ctx.enabled(cmd);
+    let main_t = if has_main { Target::SplitMain(cmd) } else { Target::DropDown(cmd) };
+    let drop_t = if has_main { Target::SplitDrop(cmd) } else { Target::DropDown(cmd) };
+    let main_hover = enabled && (ctx.hovered(&main_t) || ctx.pressed(&main_t));
+    let drop_hover = enabled && (ctx.hovered(&drop_t) || ctx.pressed(&drop_t));
+    let main_pressed = enabled && ctx.pressed(&main_t);
+    let drop_pressed = enabled && ctx.pressed(&drop_t);
+    let main_rect = Rectangle::new(
+        rect.position(),
+        Size::new(rect.width, rect.height - strip_h),
+    );
+    let drop_rect = Rectangle::new(
+        Point::new(rect.x, rect.y + rect.height - strip_h),
+        Size::new(rect.width, strip_h),
+    );
+    let theme = ctx.theme;
+    let part_fill = |hover: bool, pressed: bool| {
+        if pressed {
+            Fill::Color(theme.pressed_bg)
+        } else if hover {
+            Fill::Color(theme.hover_bg)
+        } else {
+            Fill::Color(Color::TRANSPARENT)
+        }
+    };
+    // fills per part
+    quad(scene, main_rect, part_fill(main_hover, main_pressed), None, 0.0);
+    quad(scene, drop_rect, part_fill(drop_hover, drop_pressed), None, 0.0);
+    // bound chrome: shared border + divider whenever either part is active
+    if main_hover || drop_hover {
+        let border_c = theme
+            .pressed_border
+            .filter(|_| main_pressed || drop_pressed)
+            .or(theme.hover_border);
+        quad(
+            scene,
+            rect,
+            Fill::Color(Color::TRANSPARENT),
+            border_c.map(|c| (c, 1.0)),
+            theme.button_radius,
+        );
+        if let Some(c) = border_c {
+            quad(
+                scene,
+                Rectangle::new(
+                    Point::new(rect.x, drop_rect.y),
+                    Size::new(rect.width, 1.0),
+                ),
+                Fill::Color(c),
+                None,
+                0.0,
+            );
+        }
+    }
+    scene.push(Node::new(main_rect, Cmd::Hit).target(main_t).tip(cmd));
+    scene.push(Node::new(drop_rect, Cmd::Hit).target(drop_t).tip(cmd));
+    // icon in the main zone, same offset as every large button
+    let opacity = if enabled { 1.0 } else { 0.35 };
+    let img = ctx.large_image(cmd).unwrap_or_default();
+    svg_node(
+        scene,
+        Rectangle::new(
+            Point::new(
+                main_rect.x + (main_rect.width - 32.0) / 2.0,
+                main_rect.y + LARGE_ICON_Y,
+            ),
+            Size::new(32.0, 32.0),
+        ),
+        img,
+        opacity,
+    );
+    // wrapped "label ▾" as one bound unit: minimal-width wrap, the
+    // chevron follows the last line ("Paste\n▼", "Move\nto ▾")
+    let label = ctx.label(cmd);
+    let text_color = if enabled {
+        ctx.theme.text
+    } else {
+        ctx.theme.text_disabled
+    };
+    let lines = wrap_balanced(ctx, &label, 11.0, 2);
+    let line_h = LARGE_LINE_H;
+    let n = lines.len();
+    for (i, line) in lines.iter().enumerate() {
+        // same text offsets as plain large buttons
+        let ly = rect.y + LARGE_TEXT_Y + i as f32 * line_h;
+        text(
+            scene,
+            Rectangle::new(
+                Point::new(drop_rect.x, ly),
+                Size::new(drop_rect.width, line_h),
+            ),
+            line.clone(),
+            11.0,
+            text_color,
+            Horizontal::Center,
+            Vertical::Center,
+        );
+        if i + 1 == n {
+            // chevron after the last line; a single-line label leaves it
+            // alone on the second line ("Paste\n▼")
+            let last_w = ctx.text_w(line, 11.0);
+            let chev_y = if n == 1 { ly + line_h } else { ly };
+            let chev_x = if n == 1 {
+                drop_rect.x + (drop_rect.width - 10.0) / 2.0
+            } else {
+                (drop_rect.x + (drop_rect.width + last_w) / 2.0 + 3.0)
+                    .min(drop_rect.x + drop_rect.width - 12.0)
+            };
+            chevron(
+                scene,
+                Rectangle::new(
+                    Point::new(chev_x, chev_y + (line_h - 6.5) / 2.0),
+                    Size::new(10.0, 6.5),
+                ),
+                false,
+                if enabled { ctx.theme.text } else { ctx.theme.text_disabled },
+            );
+        }
+    }
+    keytip_badge(ctx, scene, rect, cmd, false);
+}
+
 fn build_split(
     ctx: &Ctx,
     scene: &mut Scene,
@@ -1839,6 +2056,10 @@ fn build_split(
     has_main: bool,
     compact: bool,
 ) {
+    if size == CtrlSize::Large && !compact {
+        build_split_large(ctx, scene, rect, cmd, has_main);
+        return;
+    }
     let drop_w = 14.0f32;
     let main_rect = Rectangle::new(
         rect.position(),

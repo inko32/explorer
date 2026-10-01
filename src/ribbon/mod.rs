@@ -661,6 +661,93 @@ impl Ribbon {
     }
 }
 
+/// A contextual tab-set block for the window title bar (Win8 chrome):
+/// the colored block sits exactly above its tabs on the ribbon strip.
+pub struct ContextualBlock {
+    pub label: String,
+    pub color: iced::Color,
+    /// x/width in ribbon-widget coordinates (= title-bar content coords).
+    pub x: f32,
+    pub w: f32,
+    pub first_tab: usize,
+    pub last_tab: usize,
+}
+
+impl Ribbon {
+    /// Visible contextual sets with their on-strip geometry (empty when
+    /// no contextual tab is available).
+    pub fn contextual_blocks(&self) -> Vec<ContextualBlock> {
+        let Ok(spec) = self.framework.spec() else {
+            return Vec::new();
+        };
+        let rects = self.framework.view().tab_rects();
+        let mut out: Vec<ContextualBlock> = Vec::new();
+        for (i, tab) in spec.tabs.iter().enumerate() {
+            let Some(name) = &tab.contextual else { continue };
+            // hidden tabs have no rect in the last layout
+            let Some((_, x, w)) = rects.iter().find(|(idx, _, _)| idx == &i)
+            else {
+                continue;
+            };
+            let color = tab
+                .contextual
+                .as_deref()
+                .and_then(ContextualColor::from_name)
+                .or_else(|| {
+                    tab.context_color
+                        .as_deref()
+                        .and_then(ContextualColor::from_name)
+                })
+                .unwrap_or(ContextualColor::Blue)
+                .accent();
+            if let Some(last) = out.last_mut() {
+                if last.label == *name && last.last_tab + 1 == i {
+                    last.w = x + w - last.x;
+                    last.last_tab = i;
+                    continue;
+                }
+            }
+            out.push(ContextualBlock {
+                label: name.clone(),
+                color,
+                x: *x,
+                w: *w,
+                first_tab: i,
+                last_tab: i,
+            });
+        }
+        out
+    }
+}
+
+impl Ribbon {
+    /// QAT docked into the window title bar ("show above the ribbon")?
+    pub fn qat_docked_top(&self) -> bool {
+        self.framework.view().qat_dock() == crate::ribbon::enums::ControlDock::Top
+    }
+
+    /// QAT buttons for the title bar: (command, icon name, enabled).
+    pub fn qat_buttons(&self) -> Vec<(u32, String, bool)> {
+        self.framework
+            .view()
+            .qat_commands()
+            .iter()
+            .map(|&cmd| {
+                let icon = match self.framework.property_or(
+                    cmd,
+                    PropertyKey::SmallImage,
+                    PropValue::Image(UiImage::Icon("blank")),
+                ) {
+                    PropValue::Image(UiImage::Named(n)) => n,
+                    PropValue::Image(UiImage::Icon(n)) => n.to_string(),
+                    _ => "blank".into(),
+                };
+                (cmd, icon, self.framework.command_enabled(cmd))
+            })
+            .collect()
+    }
+}
+
 /// Load the ribbon markup: a user file at `~/.config/explorer/ribbon.yaml`
 /// overrides the embedded copy (same override path as before).
 fn load_yaml() -> String {
@@ -697,8 +784,11 @@ pub fn theme(dark: bool) -> Theme {
         t.group_separator = rgb(0x505050);
         t.tab_line = rgb(0x505050);
         t.hover_bg = rgb(0x3A4046);
+        t.hover_border = Some(rgb(0x4A90D9));
         t.pressed_bg = rgb(0x4A525A);
+        t.pressed_border = Some(rgb(0x5A89C0));
         t.checked_bg = rgb(0x3D5A78);
+        t.checked_border = Some(rgb(0x5A89C0));
         t.popup_bg = rgb(0x383838);
         t.popup_border = rgb(0x505050);
         t.tooltip_bg = rgb(0x383838);

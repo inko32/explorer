@@ -351,6 +351,9 @@ pub struct SplitSpec {
     pub label: Option<String>,
     pub image: Option<String>,
     pub keytip: Option<String>,
+    /// Two-part split chrome (main action + dropdown arrow). Default
+    /// off: the whole button opens the menu as one element.
+    pub separate: bool,
     pub items: Vec<MenuItemSpec>,
 }
 

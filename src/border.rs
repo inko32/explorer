@@ -228,6 +228,106 @@ pub(crate) fn resize_frame(margin: f32) -> Element<'static, Message> {
 /// plain drag band: window icon, centered title, caption space.
 pub(crate) const TITLEBAR_H: f32 = 30.0;
 
+/// Contextual tab-set blocks (Win8): a pastel accent block per visible
+/// contextual set, bottom-aligned in the title bar, positioned exactly
+/// above its ribbon tabs (geometry published by the ribbon widget).
+fn contextual_blocks(state: &Explorer) -> Element<'static, Message> {
+    let selected = state.ribbon.framework().view().selected_tab();
+    let mut r = row![].height(Length::Fixed(TITLEBAR_H));
+    let mut prev_end = 0.0f32;
+    for b in state.ribbon.contextual_blocks() {
+        // reserve ~1 character of space before and after the set label
+        let bx = (b.x - 6.0).max(0.0);
+        let bw = b.w + 12.0;
+        let gap = (bx - prev_end).max(0.0);
+        if gap > 0.0 {
+            r = r.push(Space::new().width(Length::Fixed(gap)));
+        }
+        prev_end = bx + bw;
+        let accent = b.color;
+        let active = selected >= b.first_tab && selected <= b.last_tab;
+        fn tint(c: Color, t: f32) -> Color {
+            Color::from_rgb(
+                c.r + (1.0 - c.r) * t,
+                c.g + (1.0 - c.g) * t,
+                c.b + (1.0 - c.b) * t,
+            )
+        }
+        let label_color = Color::from_rgb(accent.r * 0.6, accent.g * 0.6, accent.b * 0.6);
+        let solid = container(
+            container(
+                text(b.label.clone()).size(12.0).color(label_color).width(Length::Shrink),
+            )
+            .width(Length::Fixed(bw))
+            .height(Length::Fixed(24.0))
+            .center_x(Length::Fixed(bw))
+            .center_y(Length::Fixed(24.0)),
+        )
+        .width(Length::Fixed(bw))
+        .height(Length::Fixed(24.0))
+        .style(move |_| container::Style {
+            background: Some(tint(accent, if active { 0.45 } else { 0.62 }).into()),
+            ..Default::default()
+        });
+        let block = container(solid)
+            .width(Length::Fixed(bw))
+            .height(Length::Fixed(TITLEBAR_H))
+            .align_y(iced::Alignment::End);
+        r = r.push(
+            mouse_area(block).on_press(Message::BlockPress(b.first_tab)),
+        );
+    }
+    r.into()
+}
+
+/// Title-bar QAT ("show above the ribbon"): icon buttons right of the
+/// window icon, framed by thin separators; the chevron docks the QAT
+/// back below the command pane.
+fn titlebar_qat(state: &Explorer, skin: skin::Skin) -> Element<'static, Message> {
+    let vline = || {
+        container(
+            container(Space::new().width(Length::Fixed(1.0)).height(Length::Fixed(15.0)))
+                .style(|_| container::Style {
+                    background: Some(Color::from_rgba(1.0, 1.0, 1.0, 0.35).into()),
+                    ..Default::default()
+                }),
+        )
+        .width(Length::Fixed(6.0))
+        .center_x(Length::Fixed(6.0))
+    };
+    let mut qat = row![].spacing(2).align_y(iced::Alignment::Center);
+    qat = qat.push(vline());
+    for (cmd, icon_name, _enabled) in state.ribbon.qat_buttons() {
+        qat = qat.push(
+            mouse_area(
+                container(crate::icon::view(&icon_name, 16.0, &skin))
+                    .width(Length::Fixed(22.0))
+                    .height(Length::Fixed(22.0))
+                    .center_x(Length::Fixed(22.0))
+                    .center_y(Length::Fixed(22.0)),
+            )
+            .on_press(Message::Ribbon(crate::ribbon::RibbonEvent::Execute {
+                command: cmd,
+                verb: crate::ribbon::enums::ExecutionVerb::Execute,
+                key: None,
+                value: None,
+            })),
+        );
+    }
+    qat = qat.push(
+        mouse_area(
+            container(crate::icon::view("chevron_down", 10.0, &skin))
+                .width(Length::Fixed(14.0))
+                .height(Length::Fixed(22.0))
+                .center_x(Length::Fixed(14.0))
+                .center_y(Length::Fixed(22.0)),
+        )
+        .on_press(Message::ToggleQatDock),
+    );
+    qat = qat.push(vline());
+    container(qat).height(Length::Fill).center_y(Length::Fill).into()
+}
+
 pub(crate) fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     let icon_zone_w: f32 = 28.0; // window icon zone at the bar's left
     let captions_w = match state.frame_style {
@@ -252,13 +352,19 @@ pub(crate) fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Messag
     .on_press(Message::TitlebarPress)
     .on_double_click(Message::TitlebarDoubleClick)
     .into();
-    container(
+    let mut head = row![
+        container(icon("folder", 16.0, skin))
+            .width(Length::Fixed(icon_zone_w))
+            .height(Length::Fill)
+            .center_x(Length::Fixed(icon_zone_w))
+            .center_y(Length::Fill),
+    ];
+    if state.ribbon.qat_docked_top() {
+        head = head.push(dbg("titlebar_qat", titlebar_qat(state, skin)));
+    }
+    let base = container(
         row![
-            container(icon("folder", 16.0, skin))
-                .width(Length::Fixed(icon_zone_w))
-                .height(Length::Fill)
-                .center_x(Length::Fixed(icon_zone_w))
-                .center_y(Length::Fill),
+            head,
             drag_title,
             mouse_area(Space::new().width(Length::Fill).height(Length::Fixed(TITLEBAR_H)))
                 .on_press(Message::TitlebarPress)
@@ -269,6 +375,6 @@ pub(crate) fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Messag
     )
     .width(Length::Fill)
     .height(Length::Fixed(TITLEBAR_H))
-    .style(bg(skin.accent))
-    .into()
+    .style(bg(skin.accent));
+    stack![base, dbg("ctx_blocks", contextual_blocks(state))].into()
 }

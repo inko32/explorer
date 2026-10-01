@@ -1285,6 +1285,8 @@ pub struct RibbonOverlay<'a, Message, Th, Renderer> {
     pub scene: Scene,
     pub tooltip: bool,
     pub origin: Point,
+    /// Width of the clicked anchor element (0 = point-like anchor).
+    pub width_hint: f32,
     pub mapper: Option<&'a dyn Fn(RibbonEvent) -> Message>,
     pub _phantom: std::marker::PhantomData<(Th, Renderer)>,
 }
@@ -1301,7 +1303,16 @@ where
     fn layout(&mut self, _renderer: &Renderer, bounds: Size) -> iced::advanced::layout::Node {
         let size = self.scene.size;
         let mut pos = self.origin;
-        pos.x = pos.x.min((bounds.width - size.width - 4.0).max(2.0));
+        if pos.x + size.width > bounds.width - 2.0 {
+            // out of the window on the right: align the menu's right
+            // border with the clicked element's right border
+            let right_aligned = self.origin.x + self.width_hint - size.width;
+            pos.x = if right_aligned >= 2.0 {
+                right_aligned
+            } else {
+                (bounds.width - size.width - 2.0).max(2.0)
+            };
+        }
         if pos.y + size.height > bounds.height - 2.0 {
             // flip above the origin if there is more space
             let above = self.origin.y - size.height;
@@ -1355,6 +1366,7 @@ where
             iced::Event::Mouse(mouse::Event::CursorMoved { position }) => {
                 let target =
                     self.scene.hit(local(position)).and_then(|n| n.target.clone());
+                eprintln!("[overlay] move pos={position:?} origin={:?} target={target:?}", layout.position());
                 if let Some(p) = self.state.popup.as_mut() {
                     if p.hover != target {
                         shell.request_redraw();
