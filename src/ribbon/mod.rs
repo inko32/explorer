@@ -742,6 +742,33 @@ impl Ribbon {
     }
 }
 
+impl Ribbon {
+    /// Window-size sacrifice thresholds (ribbon_below, nav_below,
+    /// nav_resize_below), from the ribbon markup.
+    pub fn sacrifice(&self) -> (f32, f32, f32, f32) {
+        match self.framework.spec() {
+            Ok(spec) => (
+                spec.sacrifice.ribbon_below,
+                spec.sacrifice.nav_below,
+                spec.sacrifice.nav_resize_below,
+                spec.sacrifice.search_below,
+            ),
+            Err(_) => (120.0, 600.0, 900.0, 400.0),
+        }
+    }
+}
+
+impl Ribbon {
+    /// Height of the navigation band (nav buttons / address / search),
+    /// from the ribbon markup.
+    pub fn band_height(&self) -> f32 {
+        match self.framework.spec() {
+            Ok(spec) => spec.metrics.band_height,
+            Err(_) => 20.0,
+        }
+    }
+}
+
 /// Load the ribbon markup: a user file at `~/.config/explorer/ribbon.yaml`
 /// overrides the embedded copy (same override path as before).
 fn load_yaml() -> String {

@@ -232,6 +232,11 @@ pub(crate) const TITLEBAR_H: f32 = 30.0;
 /// contextual set, bottom-aligned in the title bar, positioned exactly
 /// above its ribbon tabs (geometry published by the ribbon widget).
 fn contextual_blocks(state: &Explorer) -> Element<'static, Message> {
+    let (_, fr, _, fl) = frame_insets(state);
+    if state.win_w - fl - fr < state.ribbon.sacrifice().0 * state.dpi_multiplier() {
+        // ribbon sacrificed: no tabs, no blocks
+        return Space::new().width(Length::Fixed(0.0)).height(Length::Fixed(0.0)).into();
+    }
     let selected = state.ribbon.framework().view().selected_tab();
     let mut r = row![].height(Length::Fixed(TITLEBAR_H));
     let mut prev_end = 0.0f32;
@@ -359,7 +364,10 @@ pub(crate) fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Messag
             .center_x(Length::Fixed(icon_zone_w))
             .center_y(Length::Fill),
     ];
-    if state.ribbon.qat_docked_top() {
+    let (_, fr2, _, fl2) = frame_insets(state);
+    if state.ribbon.qat_docked_top()
+        && state.win_w - fl2 - fr2 >= state.ribbon.sacrifice().0 * state.dpi_multiplier()
+    {
         head = head.push(dbg("titlebar_qat", titlebar_qat(state, skin)));
     }
     let base = container(

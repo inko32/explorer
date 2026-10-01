@@ -10,10 +10,10 @@ use crate::border::frame_insets;
 use crate::model::{Explorer, Message};
 use crate::ui_common::{bg, dbg, icon, skin, CHROME_BTN};
 
-fn nav_circle(icon_name: &'static str, enabled: bool, msg: Message, skin: skin::Skin) -> Element<'static, Message> {
-    let btn = button(crate::icon::view(icon_name, 18.0, &skin))
-        .width(Length::Fixed(30.0))
-        .height(Length::Fixed(30.0))
+fn nav_circle(icon_name: &'static str, enabled: bool, msg: Message, skin: skin::Skin, inner: f32) -> Element<'static, Message> {
+    let btn = button(crate::icon::view(icon_name, (inner * 0.67).round().max(6.0), &skin))
+        .width(Length::Fixed(inner))
+        .height(Length::Fixed(inner))
         .style(move |_t, status| button::Style {
             background: match (enabled, status) {
                 (true, button::Status::Hovered) => Some(skin.nav_hover.into()),
@@ -29,7 +29,7 @@ fn nav_circle(icon_name: &'static str, enabled: bool, msg: Message, skin: skin::
                     _ => skin.sep,
                 },
                 width: 1.0,
-                radius: 15.0.into(),
+                radius: (inner / 2.0).into(),
             },
             shadow: Default::default(),
             snap: true,
@@ -44,10 +44,13 @@ fn nav_circle(icon_name: &'static str, enabled: bool, msg: Message, skin: skin::
 pub(crate) fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     let (_, fr, _, fl) = frame_insets(state);
     let content_w = (state.win_w - fl - fr).max(320.0);
-    let search_w = (content_w * state.search_share).clamp(120.0, content_w - 280.0);
-    let refresh = button(icon("refresh", 16.0, skin))
-        .width(Length::Fixed(24.0))
-        .height(Length::Fixed(24.0))
+    let search_w = (content_w * state.search_share).clamp(120.0, (content_w - 280.0).max(120.0));
+    // inner bar size derives from the band height (8px band padding)
+    let inner = (state.ribbon.band_height() - 8.0).max(12.0);
+    let text_sz = (inner * 0.55).round().max(8.0);
+    let refresh = button(icon("refresh", (inner * 0.67).round().max(6.0), skin))
+        .width(Length::Fixed(inner))
+        .height(Length::Fixed(inner))
         .style(move |_t, status| button::Style {
             background: match status {
                 button::Status::Hovered => Some(skin.hover.into()),
@@ -60,6 +63,8 @@ pub(crate) fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Mes
         })
         .on_press(Message::Refresh);
 
+    let mult = state.dpi_multiplier();
+    let show_search = content_w >= state.ribbon.sacrifice().3 * mult;
     let mut crumbs = row![].spacing(2).align_y(iced::Alignment::Center);
     let segs: Vec<String> = {
         let mut v = vec!["Computer".to_string()];
@@ -72,9 +77,9 @@ pub(crate) fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Mes
     };
     for (i, seg) in segs.iter().enumerate() {
         let is_last = i == segs.len() - 1;
-        let seg_text = text(seg.clone()).size(12.0).color(skin.text);
+        let seg_text = text(seg.clone()).size(text_sz).color(skin.text);
         let cell: Element<Message> = container(seg_text)
-            .padding([2.0, 6.0])
+            .padding([0.0, 4.0])
             .style(move |_t: &iced::Theme| container::Style {
                 background: None,
                 ..Default::default()
@@ -101,7 +106,7 @@ pub(crate) fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Mes
         };
         crumbs = crumbs.push(cell_el);
         if !is_last {
-            crumbs = crumbs.push(icon("chevron_right", 9.0, skin));
+            crumbs = crumbs.push(icon("chevron_right", (inner * 0.5).round().max(5.0), skin));
         }
     }
 
@@ -111,7 +116,7 @@ pub(crate) fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Mes
             .padding([0.0, 4.0]),
     )
     .width(Length::Fill)
-    .height(Length::Fixed(30.0))
+    .height(Length::Fixed(inner))
     .style(move |_t: &iced::Theme| container::Style {
         background: Some(skin.window_bg.into()),
         border: iced::Border {
@@ -124,11 +129,11 @@ pub(crate) fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Mes
 
     // search box: placeholder left, recessed magnifier button at the right
     // end (Win8: light-blue tint + thin divider)
-    let search_btn = container(icon("search", 13.0, skin))
-        .width(Length::Fixed(CHROME_BTN))
+    let search_btn = container(icon("search", (inner * 0.67).round().max(6.0), skin))
+        .width(Length::Fixed(inner + 2.0))
         .height(Length::Fill)
-        .center_x(Length::Fixed(CHROME_BTN))
-        .center_y(Length::Fixed(30.0))
+        .center_x(Length::Fixed(inner + 2.0))
+        .center_y(Length::Fixed(inner))
         .style(move |_t: &iced::Theme| container::Style {
             background: Some(skin.search_btn_bg.into()),
             border: iced::Border {
@@ -141,7 +146,7 @@ pub(crate) fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Mes
     let search = container(
         row![
             text(format!("Search {}", state.title()))
-                .size(12.0)
+                .size(text_sz)
                 .color(skin.disabled),
             Space::new().width(Length::Fill),
             search_btn,
@@ -149,8 +154,8 @@ pub(crate) fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Mes
         .align_y(iced::Alignment::Center),
     )
     .width(Length::Fixed(search_w))
-    .height(Length::Fixed(30.0))
-    .padding(iced::Padding { top: 0.0, right: 0.0, bottom: 0.0, left: 8.0 })
+    .height(Length::Fixed(inner))
+    .padding(iced::Padding { top: 0.0, right: 0.0, bottom: 0.0, left: 4.0 })
     .style(move |_t: &iced::Theme| container::Style {
         background: Some(skin.window_bg.into()),
         border: iced::Border {
@@ -164,29 +169,28 @@ pub(crate) fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Mes
     // invisible splitter: the natural gap between the bars IS the drag
     // target (halved: 15 -> 8 px total); only the cursor betrays it
     let splitter = mouse_area(
-        Space::new().width(Length::Fixed(4.0)).height(Length::Fixed(30.0)),
+        Space::new().width(Length::Fixed(4.0)).height(Length::Fixed(inner)),
     )
     .on_press(Message::BeginBarSplit)
     .on_enter(Message::SplitterHover(true))
     .on_exit(Message::SplitterHover(false))
     .interaction(iced::mouse::Interaction::ResizingHorizontally);
-    container(
-        row![
-            nav_circle("back", !state.back_is_empty(), Message::Back, skin),
-            nav_circle("forward", !state.forward_is_empty(), Message::Forward, skin),
-            nav_circle("up", state.cwd.parent().is_some(), Message::Up, skin),
-            crumb_bar,
-            splitter,
-            search,
-        ]
-        .spacing(2)
-        .align_y(iced::Alignment::Center)
-        .padding(6),
-    )
-    .width(Length::Fill)
-    .height(Length::Fixed(40.0))
-    .style(bg(skin.toolbar_bg))
-    .into()
+    let mut band = row![
+        nav_circle("back", !state.back_is_empty(), Message::Back, skin, inner),
+        nav_circle("forward", !state.forward_is_empty(), Message::Forward, skin, inner),
+        nav_circle("up", state.cwd.parent().is_some(), Message::Up, skin, inner),
+        crumb_bar,
+    ];
+    if show_search {
+        band = band.push(splitter).push(search);
+    }
+    container(band.spacing(2).align_y(iced::Alignment::Center))
+        .width(Length::Fill)
+        .height(Length::Fixed(state.ribbon.band_height()))
+        .center_y(Length::Fixed(state.ribbon.band_height()))
+        .padding([0.0, 4.0])
+        .style(bg(skin.toolbar_bg))
+        .into()
 }
 
 // ---------------- nav pane ----------------

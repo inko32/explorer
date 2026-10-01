@@ -6,6 +6,10 @@ use iced::widget::{column, container, mouse_area, row, scrollable, text, Space};
 use iced::{Color, Element, Length};
 
 use crate::model::{Explorer, Message};
+
+/// Full navigation pane width (shrinks proportionally below the yaml
+/// `sacrifice.nav_resize_below` content width).
+pub(crate) const NAV_W: f32 = 210.0;
 use crate::ui_common::{bg, dbg, icon, skin};
 
 fn nav_item(
@@ -44,7 +48,7 @@ fn nav_item(
     }
 }
 
-pub(crate) fn nav_pane(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
+pub(crate) fn nav_pane(state: &Explorer, skin: skin::Skin, width: f32) -> Element<'_, Message> {
     let home = std::env::var_os("HOME").map(PathBuf::from);
     let mut list = column![].spacing(0).padding(4);
 
@@ -107,7 +111,7 @@ pub(crate) fn nav_pane(state: &Explorer, skin: skin::Skin) -> Element<'_, Messag
     list = list.push(nav_item("Network".to_string(), "network", false, None, skin));
 
     container(list)
-        .width(Length::Fixed(210.0))
+        .width(Length::Fixed(width))
         .height(Length::Fill)
         .style(bg(skin.nav_bg))
         .into()

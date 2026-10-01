@@ -70,6 +70,12 @@ type SeenMap = std::collections::HashMap<u32, CommandType>;
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct RibbonSpec {
+    /// Window-size sacrifices (explorer extension): below
+    /// `ribbon_below` content width the ribbon is hidden entirely,
+    /// below `nav_below` the navigation pane is hidden.
+    pub sacrifice: SacrificeSpec,
+    /// UI metrics (explorer extension).
+    pub metrics: MetricsSpec,
     /// Symbolic command name -> numeric id.
     pub commands: std::collections::BTreeMap<String, u32>,
     pub application_menu: Option<AppMenuSpec>,
@@ -87,6 +93,51 @@ pub struct RibbonSpec {
     /// plus ordered fallback sizes tried as the window narrows.
     pub scaling: Vec<ScalingSpec>,
     pub tabs: Vec<TabSpec>,
+}
+
+/// UI metrics (explorer extension of the markup).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct MetricsSpec {
+    /// Height of the navigation band (nav buttons, address bar, search
+    /// box): the inner 12px elements are centered in it.
+    pub band_height: f32,
+}
+
+impl Default for MetricsSpec {
+    fn default() -> Self {
+        Self { band_height: 20.0 }
+    }
+}
+
+/// Window-size sacrifice thresholds (explorer extension of the markup).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct SacrificeSpec {
+    /// Below this content width the ribbon (pane, tabs, title-bar QAT,
+    /// contextual blocks) is hidden entirely.
+    pub ribbon_below: f32,
+    /// Below this content width the navigation pane is hidden (the file
+    /// view resizes accordingly).
+    pub nav_below: f32,
+    /// Below this content width the navigation pane starts shrinking
+    /// proportionally (keeping its share of the width) instead of
+    /// staying at its full width.
+    pub nav_resize_below: f32,
+    /// Below this content width the search box is hidden (the address
+    /// bar takes the whole band).
+    pub search_below: f32,
+}
+
+impl Default for SacrificeSpec {
+    fn default() -> Self {
+        Self {
+            ribbon_below: 120.0,
+            nav_below: 600.0,
+            nav_resize_below: 900.0,
+            search_below: 400.0,
+        }
+    }
 }
 
 /// One `ControlSizeDefinition` rule: set `size` for the named commands

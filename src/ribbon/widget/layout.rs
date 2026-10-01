@@ -879,13 +879,9 @@ fn body(ctx: &Ctx, scene: &mut Scene, y: f32, width: f32) {
 pub enum ControlScale {
     /// Keep the size declared on the control.
     Declared,
-    /// First cascade stage: small-button captions hidden, sizes kept.
-    CaptionOff,
     /// Cap every control at this size (only shrinks; declared-small
     /// buttons stay small).
     Cap(CtrlSize),
-    /// Cap with small-button captions still hidden.
-    CapNoCaption(CtrlSize),
     /// `GroupSizeDefinition`: per-command overrides (resolved ids).
     Rules(Vec<(u32, CtrlSize)>),
 }
@@ -895,24 +891,19 @@ pub enum ControlScale {
 pub struct GroupPlan {
     pub gi: usize,
     pub scale: ControlScale,
+    /// Right-most columns with small-button captions hidden (cascade
+    /// stage 2).
+    pub caption_cols: usize,
     /// Collapsed to a popup group button.
     pub popup: bool,
     pub w: f32,
 }
 
 impl ControlScale {
-    /// Small-button captions hidden at this stage?
-    fn caption_off(&self) -> bool {
-        matches!(
-            self,
-            ControlScale::CaptionOff | ControlScale::CapNoCaption(_)
-        )
-    }
-
     fn for_command(&self, cmd: Option<u32>) -> Option<CtrlSize> {
         match self {
-            ControlScale::Declared | ControlScale::CaptionOff => None,
-            ControlScale::Cap(s) | ControlScale::CapNoCaption(s) => Some(*s),
+            ControlScale::Declared => None,
+            ControlScale::Cap(s) => Some(*s),
             ControlScale::Rules(rules) => {
                 cmd.and_then(|id| rules.iter().find(|(c, _)| *c == id).map(|(_, s)| *s))
             }
@@ -1071,12 +1062,13 @@ fn scaled_group_width(
     tab: &TabSpec,
     group: &GroupSpec,
     scale: &GroupScale,
+    caption_cols: usize,
 ) -> (ControlScale, bool, f32) {
     let (sc, popup) = resolve_scale(ctx, tab, group, scale);
     let w = if popup {
         popup_group_width(ctx, group)
     } else {
-        measure_group_scaled(ctx, group, &sc)
+        measure_group_scaled(ctx, group, &sc, caption_cols)
     };
     (sc, popup, w)
 }
@@ -1103,8 +1095,11 @@ pub fn plan_groups(
         .collect();
     // Current ladder position per group (0 = declared layout).
     let mut pos: Vec<usize> = vec![0; tab.groups.len()];
-    let mut caption_off: Vec<bool> = vec![false; tab.groups.len()];
-    let mut sized: Vec<(ControlScale, bool, f32)> = tab
+    // Stage 1 floor per group (large->small), stage 2 captionless
+    // columns per group.
+    let mut floor: Vec<Option<ControlScale>> = vec![None; tab.groups.len()];
+    let mut caption_cols: Vec<usize> = vec![0; tab.groups.len()];
+    let mut sized: Vec<(ControlScale, usize, bool, f32)> = tab
         .groups
         .iter()
         .map(|g| {
@@ -1112,65 +1107,102 @@ pub fn plan_groups(
             // (Windows uses it to cap a group below its declared
             // maximum). It can only shrink, never enlarge controls.
             match scaling_of(ctx.spec(), g).and_then(|p| p.ideal.first()) {
-                Some(scale) => scaled_group_width(ctx, tab, g, scale),
-                None => (ControlScale::Declared, false, measure_group(ctx, g)),
+                Some(scale) => {
+                    let (sc, popup, w) = scaled_group_width(ctx, tab, g, scale, 0);
+                    (sc, 0, popup, w)
+                }
+                None => (
+                    ControlScale::Declared,
+                    0,
+                    false,
+                    measure_group_scaled(ctx, g, &ControlScale::Declared, 0),
+                ),
             }
         })
         .collect();
-    let total = |sized: &[(ControlScale, bool, f32)]| -> f32 {
+    let total = |sized: &[(ControlScale, usize, bool, f32)]| -> f32 {
         if sized.is_empty() {
             0.0
         } else {
-            sized.iter().map(|(_, _, w)| *w + 6.0).sum::<f32>() - 6.0
+            sized.iter().map(|(_, _, _, w)| *w + 6.0).sum::<f32>() - 6.0
         }
     };
-    // Cascade stage 1 (Win8): hide small-button captions, right to left,
-    // before any group shrinks.
+    // Cascade stage 1: groups with at least two large buttons shrink
+    // them to small, right to left.
     for gi in (0..tab.groups.len()).rev() {
         if total(&sized) <= avail {
             break;
         }
-        if has_caption_buttons(&tab.groups[gi]) {
-            caption_off[gi] = true;
+        if large_count(&tab.groups[gi]) >= 2 {
+            let sc = ControlScale::Cap(CtrlSize::Small);
+            floor[gi] = Some(sc.clone());
             sized[gi] = (
-                ControlScale::CaptionOff,
+                sc.clone(),
+                0,
                 false,
-                measure_group_scaled(ctx, &tab.groups[gi], &ControlScale::CaptionOff),
+                measure_group_scaled(ctx, &tab.groups[gi], &sc, 0),
             );
         }
     }
-    // Cascade stage 2: walk the groups right-to-left; shrink the
-    // right-most group through its whole ladder before touching the next
-    // one. Captions stay off on groups already stage-1-cascaded.
+    // Cascade stage 2: hide small-button captions, right to left, one
+    // column at a time (the right-most column first).
+    'stage2: for gi in (0..tab.groups.len()).rev() {
+        if total(&sized) <= avail {
+            break 'stage2;
+        }
+        let sc = sized[gi].0.clone();
+        let (_, ncols) = columns_of(&tab.groups[gi], &sc);
+        for off in (caption_cols[gi] + 1)..=ncols {
+            if total(&sized) <= avail {
+                break 'stage2;
+            }
+            caption_cols[gi] = off;
+            sized[gi] = (
+                sc.clone(),
+                off,
+                false,
+                measure_group_scaled(ctx, &tab.groups[gi], &sc, off),
+            );
+        }
+    }
+    // Cascade stage 3: walk the groups right-to-left; shrink the
+    // right-most group through its whole ladder before touching the
+    // next one. Stage 1/2 results are preserved.
     'outer: for gi in (0..tab.groups.len()).rev() {
         while total(&sized) > avail && pos[gi] < ladders[gi].len() {
             let step = pos[gi];
             pos[gi] += 1;
             let (sc, popup, w) =
-                scaled_group_width(ctx, tab, &tab.groups[gi], &ladders[gi][step]);
-            let (sc, w) = if caption_off[gi] && !popup {
-                let sc = match sc {
-                    ControlScale::Cap(s) => ControlScale::CapNoCaption(s),
-                    other => other,
-                };
-                let w = measure_group_scaled(ctx, &tab.groups[gi], &sc);
-                (sc, w)
-            } else {
-                (sc, w)
+                scaled_group_width(ctx, tab, &tab.groups[gi], &ladders[gi][step], caption_cols[gi]);
+            // never grow back past the stage-1 floor
+            let sc = match (&floor[gi], &sc) {
+                (Some(f), ControlScale::Declared) => f.clone(),
+                (Some(f), ControlScale::Cap(s))
+                    if matches!(s, CtrlSize::Large | CtrlSize::Medium) =>
+                {
+                    f.clone()
+                }
+                (Some(_), ControlScale::Rules(_)) => floor[gi].clone().unwrap(),
+                _ => sc,
             };
-            sized[gi] = (sc, popup, w);
+            let w = if popup {
+                w
+            } else {
+                measure_group_scaled(ctx, &tab.groups[gi], &sc, caption_cols[gi])
+            };
+            sized[gi] = (sc, caption_cols[gi], popup, w);
         }
         if total(&sized) <= avail {
             break 'outer;
         }
     }
-    let fits = |sized: &[(ControlScale, bool, f32)], n: usize| -> bool {
+    let fits = |sized: &[(ControlScale, usize, bool, f32)], n: usize| -> bool {
         if n == 0 {
             true
         } else {
             sized[..n]
                 .iter()
-                .map(|(_, _, w)| *w + 6.0)
+                .map(|(_, _, _, w)| *w + 6.0)
                 .sum::<f32>()
                 - 6.0
                 <= avail
@@ -1180,13 +1212,13 @@ pub fn plan_groups(
     // « overflow button reserves its own 26px so appearing does not
     // push more groups out.
     let mut n = tab.groups.len();
-    let fits_trim = |sized: &[(ControlScale, bool, f32)], n: usize| -> bool {
+    let fits_trim = |sized: &[(ControlScale, usize, bool, f32)], n: usize| -> bool {
         if n == 0 {
             true
         } else {
             sized[..n]
                 .iter()
-                .map(|(_, _, w)| *w + 6.0)
+                .map(|(_, _, _, w)| *w + 6.0)
                 .sum::<f32>()
                 - 6.0
                 <= avail - 26.0
@@ -1198,9 +1230,10 @@ pub fn plan_groups(
     let placed = sized[..n]
         .iter()
         .enumerate()
-        .map(|(gi, (sc, popup, w))| GroupPlan {
+        .map(|(gi, (sc, cc, popup, w))| GroupPlan {
             gi,
             scale: sc.clone(),
+            caption_cols: *cc,
             popup: *popup,
             w: *w,
         })
@@ -1274,6 +1307,7 @@ pub fn tab_content(
                 .map(|(gi, g)| GroupPlan {
                     gi,
                     scale: ControlScale::Declared,
+                    caption_cols: 0,
                     popup: false,
                     w: measure_group(ctx, g),
                 })
@@ -1347,22 +1381,99 @@ pub fn tab_content(
     }
 }
 
-/// Does the group have text-captioned small/medium buttons (stage-1
-/// cascade hides their captions)?
-fn has_caption_buttons(group: &GroupSpec) -> bool {
-    fn walk(controls: &[ControlSpec]) -> bool {
-        controls.iter().any(|c| match c {
-            ControlSpec::Button(b) | ControlSpec::ToggleButton(b) => {
-                b.size != CtrlSize::Large && b.command.is_some()
-            }
-            ControlSpec::SplitButton(s) | ControlSpec::DropDownButton(s) => {
-                s.size != CtrlSize::Large && s.command.is_some()
-            }
-            ControlSpec::ControlGroup { controls } => walk(controls),
-            _ => false,
-        })
+/// Does this control carry a hideable caption (small/medium labeled
+/// button)? Cascade stage 2 hides these column by column.
+fn has_caption(control: &ControlSpec, scale: &ControlScale) -> bool {
+    let eff = |declared: CtrlSize| {
+        scale.effective(resolved_ref(control.command()), declared)
+    };
+    match control {
+        ControlSpec::Button(b) | ControlSpec::ToggleButton(b) => {
+            eff(b.size) != CtrlSize::Large && b.command.is_some()
+        }
+        ControlSpec::SplitButton(s) | ControlSpec::DropDownButton(s) => {
+            eff(s.size) != CtrlSize::Large && s.command.is_some()
+        }
+        ControlSpec::ControlGroup { controls } => {
+            controls.iter().any(|c| has_caption(c, scale))
+        }
+        _ => false,
+    }
+}
+
+/// Declared-size large buttons in the group (stage 1 shrinks whole
+/// groups with at least two of them).
+fn large_count(group: &GroupSpec) -> usize {
+    fn walk(controls: &[ControlSpec]) -> usize {
+        controls
+            .iter()
+            .map(|c| match c {
+                ControlSpec::Button(b) | ControlSpec::ToggleButton(b)
+                    if b.size == CtrlSize::Large =>
+                {
+                    1
+                }
+                ControlSpec::SplitButton(s) | ControlSpec::DropDownButton(s)
+                    if s.size == CtrlSize::Large =>
+                {
+                    1
+                }
+                ControlSpec::ColorPicker(c) if c.size == CtrlSize::Large => 1,
+                ControlSpec::ControlGroup { controls } => walk(controls),
+                _ => 0,
+            })
+            .sum()
     }
     walk(&group.controls)
+}
+
+/// Rows per column when packing a group's controls: a stack of exactly
+/// four single-row controls packs 2+2 (even columns).
+fn rows_per_col(group: &GroupSpec, scale: &ControlScale) -> usize {
+    if group.controls.len() == 4
+        && group
+            .controls
+            .iter()
+            .all(|c| rows_of_scaled(c, scale) == 1)
+    {
+        2
+    } else {
+        3
+    }
+}
+
+/// Column index of each control plus the column count (same packing as
+/// the builders use).
+fn columns_of(group: &GroupSpec, scale: &ControlScale) -> (Vec<usize>, usize) {
+    let per_col = rows_per_col(group, scale);
+    let mut cols = Vec::new();
+    let mut col = 0usize;
+    let mut used = 0usize;
+    for c in &group.controls {
+        let span = rows_of_scaled(c, scale);
+        if used + span > per_col && used > 0 {
+            col += 1;
+            used = 0;
+        }
+        cols.push(col);
+        used += span;
+    }
+    (cols, col + 1)
+}
+
+/// Caption hidden for a control in column `col` when the last
+/// `caption_cols` columns are captionless?
+fn caption_off(
+    cols: &[usize],
+    ncols: usize,
+    caption_cols: usize,
+    i: usize,
+    control: &ControlSpec,
+    scale: &ControlScale,
+) -> bool {
+    caption_cols > 0
+        && cols[i] >= ncols.saturating_sub(caption_cols)
+        && has_caption(control, scale)
 }
 
 /// Rows (of 3) a control occupies.
@@ -1397,16 +1508,27 @@ pub fn width_of(ctx: &Ctx, control: &ControlSpec) -> f32 {
     width_of_scaled(ctx, control, &ControlScale::Declared)
 }
 
-/// Width of a control with a scale applied.
+/// Width of a control with a scale applied (captions shown).
 pub fn width_of_scaled(
     ctx: &Ctx,
     control: &ControlSpec,
     scale: &ControlScale,
 ) -> f32 {
+    width_of_c(ctx, control, scale, false)
+}
+
+/// Width of a control with a scale applied; `caption_off` hides the
+/// label of small/medium buttons (icon-only width).
+pub fn width_of_c(
+    ctx: &Ctx,
+    control: &ControlSpec,
+    scale: &ControlScale,
+    caption_off: bool,
+) -> f32 {
     let scaled_size = |declared: CtrlSize| {
         scale.effective(resolved_ref(control.command()), declared)
     };
-    let co = scale.caption_off();
+    let co = caption_off;
     match control {
         ControlSpec::Button(b) | ControlSpec::ToggleButton(b) => {
             if co && scaled_size(b.size) != CtrlSize::Large {
@@ -1434,8 +1556,12 @@ pub fn width_of_scaled(
                 },
                 size,
             );
-            // the bottom strip binds "label ▾": leave room for the chevron
-            if size == CtrlSize::Large { w + 12.0 } else { w }
+            // leave room for the dropdown part: the "label ▾" strip on
+            // large buttons, the 14px arrow zone on small/medium ones
+            match size {
+                CtrlSize::Large => w + 12.0,
+                _ => w + 14.0,
+            }
         }
         ControlSpec::ComboBox(b) => b.width.unwrap_or(110.0),
         ControlSpec::Spinner(sp) => sp.width.unwrap_or(90.0),
@@ -1448,7 +1574,7 @@ pub fn width_of_scaled(
         ControlSpec::ControlGroup { controls } => {
             let max = controls
                 .iter()
-                .map(|c| width_of_scaled(ctx, c, scale))
+                .map(|c| width_of_c(ctx, c, scale, co))
                 .fold(40.0f32, f32::max);
             max + 12.0
         }
@@ -1510,31 +1636,36 @@ pub fn measure_group_pub(ctx: &Ctx, group: &GroupSpec) -> f32 {
 }
 
 fn measure_group(ctx: &Ctx, group: &GroupSpec) -> f32 {
-    measure_group_scaled(ctx, group, &ControlScale::Declared)
+    measure_group_scaled(ctx, group, &ControlScale::Declared, 0)
 }
 
-/// Width of a group with a scale applied (`SizeDefinition`).
+/// Width of a group with a scale applied (`SizeDefinition`); the last
+/// `caption_cols` columns render captionless (cascade stage 2).
 pub fn measure_group_scaled(
     ctx: &Ctx,
     group: &GroupSpec,
     scale: &ControlScale,
+    caption_cols: usize,
 ) -> f32 {
-    let mut cols: Vec<f32> = Vec::new();
+    let per_col = rows_per_col(group, scale);
+    let (cols, ncols) = columns_of(group, scale);
+    let mut col_ws: Vec<f32> = Vec::new();
     let mut cur_w = 0.0f32;
     let mut used = 0usize;
-    for control in &group.controls {
+    for (i, control) in group.controls.iter().enumerate() {
         let span = rows_of_scaled(control, scale);
-        if used + span > 3 && used > 0 {
-            cols.push(cur_w);
+        if used + span > per_col && used > 0 {
+            col_ws.push(cur_w);
             cur_w = 0.0;
             used = 0;
         }
-        cur_w = cur_w.max(width_of_scaled(ctx, control, scale));
+        let co = caption_off(&cols, ncols, caption_cols, i, control, scale);
+        cur_w = cur_w.max(width_of_c(ctx, control, scale, co));
         used += span;
     }
-    cols.push(cur_w);
-    let sum: f32 = cols.iter().sum();
-    sum + 2.0 * (cols.len().saturating_sub(1)) as f32 + 8.0
+    col_ws.push(cur_w);
+    let sum: f32 = col_ws.iter().sum();
+    sum + 2.0 * (col_ws.len().saturating_sub(1)) as f32 + 8.0
 }
 
 /// The group plan used while building (declared sizes by default).
@@ -1542,6 +1673,7 @@ fn plan_or_default(plan: Option<&GroupPlan>, gi: usize, w: f32) -> GroupPlan {
     plan.cloned().unwrap_or(GroupPlan {
         gi,
         scale: ControlScale::Declared,
+        caption_cols: 0,
         popup: false,
         w,
     })
@@ -1612,17 +1744,19 @@ fn build_group(
         return;
     }
     let scale = &plan.scale;
-    // controls in columns
+    // controls in columns (a stack of four single-row controls packs 2+2)
+    let per_col = rows_per_col(group, scale);
+    let (cols, ncols) = columns_of(group, scale);
     let mut col_x = x + 4.0;
     let mut used = 0usize;
     let mut col_width = 0.0f32;
-    let mut pending: Vec<(&ControlSpec, f32, f32)> = Vec::new();
+    let mut pending: Vec<(&ControlSpec, f32, f32, bool)> = Vec::new();
 
     let flush = |scene: &mut Scene,
                      col_x: f32,
                      col_width: f32,
-                     pending: &mut Vec<(&ControlSpec, f32, f32)>| {
-        for (control, rel_y, h) in pending.drain(..) {
+                     pending: &mut Vec<(&ControlSpec, f32, f32, bool)>| {
+        for (control, rel_y, h, co) in pending.drain(..) {
             let rect = Rectangle::new(
                 Point::new(col_x, y + rel_y),
                 Size::new(col_width, h),
@@ -1638,22 +1772,24 @@ fn build_group(
                 },
                 false,
                 scale,
+                co,
             );
         }
     };
 
-    for control in &group.controls {
+    for (i, control) in group.controls.iter().enumerate() {
         let span = rows_of_scaled(control, scale);
-        if used + span > 3 && used > 0 {
+        if used + span > per_col && used > 0 {
             flush(scene, col_x, col_width, &mut pending);
             col_x += col_width + 2.0;
             col_width = 0.0;
             used = 0;
         }
         let h = span as f32 * ROW_H;
-        let w = width_of_scaled(ctx, control, scale);
+        let co = caption_off(&cols, ncols, plan.caption_cols, i, control, scale);
+        let w = width_of_c(ctx, control, scale, co);
         col_width = col_width.max(w);
-        pending.push((control, used as f32 * ROW_H, h));
+        pending.push((control, used as f32 * ROW_H, h, co));
         used += span;
     }
     flush(scene, col_x, col_width, &mut pending);
@@ -1735,7 +1871,7 @@ pub fn build_control(
     loc: ControlLoc,
     compact: bool,
 ) {
-    build_control_scaled(ctx, scene, control, rect, loc, compact, &ControlScale::Declared);
+    build_control_scaled(ctx, scene, control, rect, loc, compact, &ControlScale::Declared, false);
 }
 
 /// Build one control with a group scale applied (`SizeDefinition`
@@ -1749,11 +1885,11 @@ pub fn build_control_scaled(
     loc: ControlLoc,
     compact: bool,
     scale: &ControlScale,
+    co: bool,
 ) {
     let eff = |declared: CtrlSize| {
         scale.effective(resolved_ref(control.command()), declared)
     };
-    let co = scale.caption_off();
     match control {
         ControlSpec::Button(b) => {
             if let Some(cmd) = resolved(b.command.as_ref()) {
@@ -1817,7 +1953,7 @@ pub fn build_control_scaled(
             }
         }
         ControlSpec::ControlGroup { controls } => {
-            build_control_group(ctx, scene, controls, rect, loc, compact);
+            build_control_group(ctx, scene, controls, rect, loc, compact, co);
         }
     }
 }
@@ -2725,6 +2861,7 @@ fn build_control_group(
     rect: Rectangle,
     loc: ControlLoc,
     compact: bool,
+    co: bool,
 ) {
     quad(
         scene,
@@ -2740,7 +2877,9 @@ fn build_control_group(
             Point::new(rect.x + 4.0, rect.y + 3.0 + i as f32 * inner_h),
             Size::new(rect.width - 8.0, inner_h - 2.0),
         );
-        build_control(ctx, scene, control, crect, loc, compact);
+        build_control_scaled(
+            ctx, scene, control, crect, loc, compact, &ControlScale::Declared, co,
+        );
     }
 }
 

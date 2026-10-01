@@ -10,19 +10,45 @@ use crate::ui_common::{dbg, skin, UI_DEBUG};
 pub fn view(state: &Explorer) -> Element<'_, Message> {
     UI_DEBUG.store(state.ui_debug, std::sync::atomic::Ordering::Relaxed);
     let skin = if state.dark { skin::DARK } else { skin::LIGHT };
+    let (ft, fr, fb, fl) = crate::border::frame_insets(state);
+    let content_w = state.win_w - fl - fr;
+    // thresholds are in ribbon layout units; win_w is in compositor
+    // units — the --dpi multiplier separates the two
+    let mult = state.dpi_multiplier();
+    let (min_ribbon_w, min_nav_w, nav_resize_below, _) = state.ribbon.sacrifice();
+    let (min_ribbon_w, min_nav_w, nav_resize_below) = (
+        min_ribbon_w * mult,
+        min_nav_w * mult,
+        nav_resize_below * mult,
+    );
     let mut root = column![];
     if state.self_border {
         root = root.push(dbg("titlebar", crate::border::titlebar(state, skin)));
     }
-    // the rs-ribbon widget owns its tab strip, QAT, application menu,
-    // dropdowns, keytips and minimize chrome
-    root = root.push(dbg("ribbon", crate::ribbon::view(state)));
+    // sacrifice the ribbon entirely when the window is resized too small
+    if content_w >= min_ribbon_w {
+        root = root.push(dbg("ribbon", crate::ribbon::view(state)));
+    }
     root = root.push(dbg("address_bar", crate::navigation::address_bar(state, skin)));
-    let nav = dbg("nav_pane", crate::nav_pane::nav_pane(state, skin));
     let fv = dbg("file_view", crate::folder::file_view(state, skin));
-    root = root.push(dbg("main_row", row![nav, fv].height(Length::Fill)));
+    // sacrifice the navigation pane when the window gets too narrow
+    if content_w >= min_nav_w {
+        // below nav_resize_below the nav pane shrinks proportionally,
+        // keeping its share of the content width
+        let nav_w = if content_w >= nav_resize_below {
+            crate::nav_pane::NAV_W
+        } else {
+            (content_w * crate::nav_pane::NAV_W / nav_resize_below).max(110.0)
+        };
+        let nav = dbg("nav_pane", crate::nav_pane::nav_pane(state, skin, nav_w));
+        root = root.push(dbg("main_row", row![nav, fv].height(Length::Fill)));
+    } else {
+        root = root.push(dbg(
+            "main_row",
+            container(fv).width(Length::Fill).height(Length::Fill),
+        ));
+    }
     root = root.push(dbg("statusbar", crate::status::statusbar(state, skin)));
-    let (ft, fr, fb, fl) = crate::border::frame_insets(state);
     let framed: Element<Message> = if state.self_border {
         // Win8: two-tone frame — deep 1px outer edge (#368BE9), light fill
         // (#6BADF6); total insets unchanged (2/6/6/6). Win10: 1px dark.

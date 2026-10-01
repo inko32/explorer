@@ -10,6 +10,7 @@ use crate::model::Message;
 /// status-bar view switcher) — one size everywhere.
 pub(crate) const CHROME_BTN: f32 = 26.0;
 
+
 pub mod skin {
     use iced::color;
 
