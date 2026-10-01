@@ -875,7 +875,7 @@ impl Explorer {
                 // search right edge sits at content_w - 6 (band padding); the
                 // splitter center is 4px left of the search left edge (half
                 // the 4px splitter + 2px row spacing) -> offset 6 + 4 = 10
-                let search_w = (content_w - (x - fl) - 10.0).clamp(120.0, content_w - 280.0);
+                let search_w = (content_w - (x - fl) - 10.0).clamp(120.0, (content_w - 280.0).max(120.0));
                 self.search_share = (search_w / content_w).clamp(0.08, 0.6);
                 iced::Task::none()
             }

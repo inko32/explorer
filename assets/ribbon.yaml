@@ -76,6 +76,18 @@ commands:
   cmdCtxArchive: 120
   cmdExtractHere: 121
 
+# window-size sacrifices: below ribbon_below content width the ribbon
+# is hidden entirely, below nav_below the navigation pane is hidden
+# (the file view resizes accordingly)
+sacrifice:
+  ribbon_below: 240
+  nav_below: 460
+
+# UI metrics (explorer extension)
+metrics:
+  # height of the navigation band (nav buttons, address bar, search box)
+  band_height: 32
+
 application_menu:
   command: cmdAppMenu
   items:

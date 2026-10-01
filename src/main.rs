@@ -91,7 +91,7 @@ fn main() -> iced::Result {
     })
     .window(iced::window::Settings {
         size: window_size(),
-        min_size: Some(iced::Size::new(560.0, 360.0)),
+        min_size: Some(iced::Size::new(160.0, 120.0)),
         decorations: false, // border module draws our frame
         resizable: true,
         visible: true,
@@ -119,9 +119,9 @@ fn set_size(value: &str) {
     let (w, h) = value
         .split_once('x')
         .and_then(|(w, h)| Some((w.parse::<f32>().ok()?, h.parse::<f32>().ok()?)))
-        .filter(|(w, h)| *w >= 480.0 && *h >= 300.0 && *w <= 10000.0 && *h <= 10000.0)
+        .filter(|(w, h)| *w >= 160.0 && *h >= 120.0 && *w <= 10000.0 && *h <= 10000.0)
         .unwrap_or_else(|| {
-            eprintln!("invalid --size value '{value}' (expected like 1152x720, min 480x300)");
+            eprintln!("invalid --size value '{value}' (expected like 1152x720, min 160x120)");
             std::process::exit(2);
         });
     std::env::set_var("EXPLORER_SIZE", format!("{w}x{h}"));
