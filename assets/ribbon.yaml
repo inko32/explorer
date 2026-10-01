@@ -1,163 +1,337 @@
-# Ribbon definition — the ribbon is DATA, not code (docs/ribbon-details.txt).
-# Edit this file to add/remove tabs, groups, buttons, contextual tabs.
+# Ribbon definition — explorer markup for the rs-ribbon framework
+# (the YAML equivalent of Windows ribbon `.ribbon` XML resources; schema
+# documented in vendor/rs-ribbon/src/spec.rs).
 #
-# Widths are AUTOMATIC: buttons size from their icon + label, groups from
-# their content. If you ever need to force a size, `width: <px>` is still
-# accepted on any command or group as a manual override.
-#
-# A command is either:
-#   internal: <name>   → mapped to an internal action (see src/ribbon.rs)
-#   shell: "<script>"  → run via `sh -c` (always sh -c, never a bare binary,
-#                        for future Windows migration). Placeholders:
-#                        {cwd} {selection} {selection_count}
-#
-# Contextual tabs appear when their `when` expression matches the context
-# { cwd, selection }. Predicates: is_drive, inside_archive, has_archive,
-# has_image, has_video, has_audio, has_selection, is_empty. Combine with
-# and/or/not and parentheses.
-
-tabs:
-  - id: file
-    label: File
-    kind: file
-  - id: home
-    label: Home
-    groups:
-      - label: Clipboard
-        rows: 3
-        commands:
-          - { id: paste, label: Paste, icon: paste, size: big }
-          - { id: cut, label: Cut, icon: cut, size: small }
-          - { id: copy, label: Copy, icon: copy, size: small }
-          - { id: copy_path, label: Copy path, icon: copy_path, size: small, enabled: false }
-          - { id: paste_shortcut, label: Paste shortcut, icon: paste_shortcut, size: small, enabled: false }
-      - label: Organize
-        commands:
-          - { id: move_to, label: Move to, icon: move_to, size: big, dropdown: [move_to_home, move_to_desktop] }
-          - { id: copy_to, label: Copy to, icon: copy_to, size: big, dropdown: [copy_to_home, copy_to_desktop] }
-          - { separator: true }
-          - { id: delete, label: Delete, icon: delete, size: big, dropdown: [delete_permanently] }
-          - { id: rename, label: Rename, icon: rename, size: big }
-      - label: New
-        commands:
-          - { id: new_folder, label: New folder, icon: new_folder, size: big }
-          - { id: new_item, label: New item, icon: new_item, size: small, enabled: false }
-          - { id: easy_access, label: Easy access, icon: easy_access, size: small, enabled: false }
-      - label: Open
-        commands:
-          - { id: properties, label: Properties, icon: properties, size: big, enabled: false }
-          - { id: open, label: Open, icon: open, size: small, enabled: false }
-          - { id: edit, label: Edit, icon: edit, size: small, enabled: false }
-          - { id: history, label: History, icon: history, size: small, enabled: false }
-      - label: Select
-        commands:
-          - { id: select_all, label: Select all, icon: select_all, size: small }
-          - { id: select_none, label: Select none, icon: select_none, size: small }
-          - { id: invert_selection, label: Invert selection, icon: invert_sel, size: small }
-  - id: share
-    label: Share
-    groups:
-      - label: Share with
-        commands:
-          - { id: share_nobody, label: Nobody, icon: properties, size: small, enabled: false }
-      - label: Send
-        commands:
-          - { id: share_email, label: Email, icon: copy_to, size: small, enabled: false }
-  - id: view
-    label: View
-    groups:
-      - label: Panes
-        rows: 2
-        commands:
-          - { id: toggle_nav, label: Navigation pane, icon: nav_pane, size: big, enabled: false, dropdown: [toggle_preview, toggle_details_pane] }
-          - { id: toggle_preview, label: Preview pane, icon: preview_pane, size: small, enabled: false }
-          - { id: toggle_details_pane, label: Details pane, icon: details_pane, size: small, enabled: false }
-      - label: Layout
-        kind: gallery
-        rows: 3
-        commands:
-          - { id: view_xl, label: Extra large icons, icon: view_large, size: small, enabled: false }
-          - { id: view_large, label: Large icons, icon: view_large, size: small }
-          - { id: view_medium, label: Medium icons, icon: view_large, size: small, enabled: false }
-          - { id: view_small, label: Small icons, icon: view_details, size: small, enabled: false }
-          - { id: view_list, label: List, icon: view_details, size: small, enabled: false }
-          - { id: view_details, label: Details, icon: view_details, size: small }
-          - { id: view_tiles, label: Tiles, icon: view_large, size: small, enabled: false }
-          - { id: view_content, label: Content, icon: view_details, size: small, enabled: false }
-      - label: Current view
-        rows: 3
-        commands:
-          - { id: sort_by, label: Sort by, icon: sort_by, size: big, dropdown: [sort_name, sort_size, sort_modified] }
-          - { id: group_by, label: Group by, icon: sort_by, size: small, enabled: false }
-          - { id: size_columns, label: Size columns to fit, icon: view_details, size: small, enabled: false }
-      - label: Show/hide
-        rows: 3
-        commands:
-          - { id: toggle_checkboxes, label: Item check boxes, kind: checkbox, enabled: false }
-          - { id: toggle_extensions, label: File name extensions, kind: checkbox, enabled: false }
-          - { id: toggle_hidden, label: Hidden items, kind: checkbox }
-      - label: Options
-        rows: 2
-        commands:
-          - { id: toggle_dark, label: Dark mode, kind: checkbox }
-          - { id: toggle_border, label: Custom border, kind: checkbox }
-          - { id: toggle_frame, label: Win8 frame, icon: gear, size: small }
-          - { id: folder_options, label: Folder options, icon: gear, size: small, enabled: false }
-
-contextual_tabs:
-  - id: drive_tools
-    label: Drive Tools
-    color: green
-    when: "is_drive"
-    groups:
-      - label: Drive
-        commands:
-          - { id: drive_properties, label: Properties, icon: properties, size: small, enabled: false }
-          - { id: open_terminal, label: Open terminal, icon: gear, size: small }
-  - id: picture_tools
-    label: Picture Tools
-    color: gold
-    when: "has_image"
-    groups:
-      - label: Manage
-        commands:
-          - { id: open_picture, label: Open, icon: open, size: small }
-          - { id: set_wallpaper, label: Set as wallpaper, icon: pictures, size: small, enabled: false }
-  - id: archive_tools
-    label: Archive Tools
-    color: orange
-    when: "inside_archive or has_archive"
-    activate_when: "inside_archive"
-    groups:
-      - label: Archive
-        commands:
-          - { id: extract_here, label: Extract here, icon: copy_to, size: small, enabled: false }
-          - { id: open_terminal, label: Open terminal, icon: gear, size: small }
+# The COMMANDING layer lives in src/ribbon.rs: every `commands:` name maps
+# to a numeric id, and the backend's CommandHandler (IUICommandHandler)
+# dispatches executions to explorer actions. Contextual tabs are governed
+# by UI_PKEY_ContextAvailable, published from the explorer context
+# (is_drive / has_image / inside_archive / has_archive) — like the native
+# ribbon framework.
 
 commands:
-  paste: { internal: paste }
-  cut: { internal: cut }
-  copy: { internal: copy }
-  delete: { internal: delete }
-  delete_permanently: { label: Delete permanently, internal: delete_permanent }
-  move_to_home: { label: Home, internal: "move_to:~/" }
-  move_to_desktop: { label: Desktop, internal: "move_to:~/Desktop" }
-  copy_to_home: { label: Home, internal: "copy_to:~/" }
-  copy_to_desktop: { label: Desktop, internal: "copy_to:~/Desktop" }
-  sort_name: { label: Name, internal: sort_name }
-  sort_size: { label: Size, internal: sort_size }
-  sort_modified: { label: Date modified, internal: sort_modified }
-  rename: { internal: rename }
-  new_folder: { internal: new_folder }
-  select_all: { internal: select_all }
-  select_none: { internal: select_none }
-  invert_selection: { internal: invert_selection }
-  view_large: { internal: view_large }
-  view_details: { internal: view_details }
-  toggle_hidden: { internal: toggle_hidden }
-  toggle_dark: { internal: toggle_dark }
-  toggle_border: { internal: toggle_border }
-  toggle_frame: { internal: toggle_frame }
-  open_picture: { internal: open }
-  open_terminal:
-    shell: "konsole --workdir {cwd}"
+  cmdAppMenu: 1
+  cmdNewWindow: 2
+  cmdOpenTerminal: 3
+  cmdExit: 9
+
+  cmdUndo: 18
+  cmdRedo: 19
+  cmdPaste: 20
+  cmdPasteSpecial: 21
+  cmdCut: 23
+  cmdCopy: 24
+
+  cmdMoveTo: 25
+  cmdMoveToHome: 26
+  cmdMoveToDesktop: 27
+  cmdCopyTo: 28
+  cmdCopyToHome: 29
+  cmdCopyToDesktop: 30
+  cmdDelete: 31
+  cmdDeletePermanent: 32
+  cmdRename: 33
+  cmdNewFolder: 34
+  cmdNewItem: 35
+  cmdProperties: 36
+  cmdOpen: 37
+  cmdEdit: 38
+  cmdHistory: 39
+
+  cmdSelectAll: 40
+  cmdSelectNone: 41
+  cmdInvertSelection: 42
+
+  cmdShareNobody: 50
+  cmdShareEmail: 51
+
+  cmdNavPane: 60
+  cmdPreviewPane: 61
+  cmdDetailsPane: 62
+  cmdViewDetails: 63
+  cmdViewLarge: 64
+  cmdSortBy: 65
+  cmdSortName: 66
+  cmdSortSize: 67
+  cmdSortModified: 68
+  cmdGroupBy: 69
+  cmdSizeColumns: 70
+  cmdToggleCheckboxes: 71
+  cmdToggleExtensions: 72
+  cmdToggleHidden: 73
+  cmdToggleDark: 74
+  cmdToggleBorder: 75
+  cmdToggleFrame: 76
+  cmdFolderOptions: 77
+
+  cmdHelp: 99
+
+  cmdCtxMenu: 140
+
+  cmdCtxDrive: 100
+  cmdDriveProperties: 101
+  cmdCtxPicture: 110
+  cmdOpenPicture: 111
+  cmdSetWallpaper: 112
+  cmdCtxArchive: 120
+  cmdExtractHere: 121
+
+application_menu:
+  command: cmdAppMenu
+  items:
+    - { command: cmdNewWindow, image: new, label: New window, keytip: "N" }
+    - { command: cmdOpenTerminal, image: terminal, label: Open terminal here, keytip: "T" }
+    - separator: true
+    - { command: cmdExit, image: exit, label: Exit, keytip: "X" }
+
+quick_access:
+  commands: [cmdUndo, cmdRedo, cmdDelete]
+  dock: top
+
+help_button: cmdHelp
+
+context_popups:
+  - command: cmdCtxMenu
+    items:
+      - { command: cmdCut, image: cut, label: Cut }
+      - { command: cmdCopy, image: copy, label: Copy }
+      - { command: cmdPaste, image: paste, label: Paste }
+
+size_definitions:
+  smallish:
+    - controls: [cmdCut, cmdCopy, cmdUndo, cmdRedo, cmdSelectAll, cmdSelectNone,
+                 cmdInvertSelection, cmdNavPane, cmdPreviewPane, cmdDetailsPane,
+                 cmdGroupBy, cmdSizeColumns, cmdToggleCheckboxes, cmdToggleExtensions,
+                 cmdToggleHidden, cmdToggleDark, cmdToggleBorder, cmdToggleFrame,
+                 cmdFolderOptions]
+      size: small
+  mediumish:
+    - controls: [cmdPaste, cmdMoveTo, cmdCopyTo, cmdDelete, cmdSortBy]
+      size: medium
+
+scaling:
+  - group: clipboard
+    ideal: [large]
+    scale: [mediumish, smallish, popup]
+  - group: organize
+    scale: [popup]
+  - group: new
+    scale: [popup]
+  - group: open
+    scale: [popup]
+  - group: select
+    scale: [popup]
+  - group: share_with
+    scale: [popup]
+  - group: send
+    scale: [popup]
+  - group: panes
+    scale: [popup]
+  - group: layout
+    scale: [popup]
+  - group: current_view
+    scale: [popup]
+  - group: show_hide
+    scale: [popup]
+  - group: options
+    scale: [popup]
+  - group: drive
+    scale: [popup]
+  - group: manage
+    scale: [popup]
+  - group: archive
+    scale: [popup]
+
+tabs:
+  # ------------------------------------------------------------ Home
+  - id: home
+    label: Home
+    keytip: "H"
+    groups:
+      - id: clipboard
+        label: Clipboard
+        image: paste
+        controls:
+          - type: split_button
+            command: cmdPaste
+            size: large
+            image: paste
+            label: Paste
+            keytip: "V"
+            items:
+              - { command: cmdPasteSpecial, image: paste_special, label: Paste special }
+          - { type: button, command: cmdCut, size: small, image: cut, label: Cut, keytip: "X" }
+          - { type: button, command: cmdCopy, size: small, image: copy, label: Copy, keytip: "C" }
+          - { type: button, command: cmdUndo, size: small, image: undo, label: Undo, keytip: "U" }
+          - { type: button, command: cmdRedo, size: small, image: redo, label: Redo, keytip: "R" }
+
+      - id: organize
+        label: Organize
+        image: copy_to
+        controls:
+          - type: split_button
+            command: cmdMoveTo
+            size: large
+            image: move_to
+            label: Move to
+            keytip: "M"
+            items:
+              - { command: cmdMoveToHome, image: open, label: Home }
+              - { command: cmdMoveToDesktop, image: open, label: Desktop }
+          - type: split_button
+            command: cmdCopyTo
+            size: large
+            image: copy_to
+            label: Copy to
+            keytip: "Y"
+            items:
+              - { command: cmdCopyToHome, image: open, label: Home }
+              - { command: cmdCopyToDesktop, image: open, label: Desktop }
+          - type: split_button
+            command: cmdDelete
+            size: large
+            image: delete
+            label: Delete
+            keytip: "D"
+            items:
+              - { command: cmdDeletePermanent, image: delete, label: Delete permanently }
+          - { type: button, command: cmdRename, size: large, image: rename, label: Rename, keytip: "N" }
+
+      - id: new
+        label: New
+        image: new_folder
+        controls:
+          - { type: button, command: cmdNewFolder, size: large, image: new_folder, label: New folder, keytip: "W" }
+          - { type: button, command: cmdNewItem, size: small, image: new, label: New item }
+
+      - id: open
+        label: Open
+        image: properties
+        controls:
+          - { type: button, command: cmdProperties, size: large, image: properties, label: Properties, keytip: "I" }
+          - { type: button, command: cmdOpen, size: small, image: open, label: Open }
+          - { type: button, command: cmdEdit, size: small, image: edit, label: Edit }
+          - { type: button, command: cmdHistory, size: small, image: history, label: History }
+
+      - id: select
+        label: Select
+        image: select_all
+        controls:
+          - { type: button, command: cmdSelectAll, size: small, image: select_all, label: Select all, keytip: "SA" }
+          - { type: button, command: cmdSelectNone, size: small, image: select_none, label: Select none }
+          - { type: button, command: cmdInvertSelection, size: small, image: invert_sel, label: Invert selection }
+
+  # ------------------------------------------------------------ Share
+  - id: share
+    label: Share
+    keytip: "S"
+    groups:
+      - id: share_with
+        label: Share with
+        image: properties
+        controls:
+          - { type: button, command: cmdShareNobody, size: small, image: properties, label: Nobody }
+      - id: send
+        label: Send
+        image: email
+        controls:
+          - { type: button, command: cmdShareEmail, size: small, image: email, label: Email }
+
+  # ------------------------------------------------------------ View
+  - id: view
+    label: View
+    keytip: "W"
+    groups:
+      - id: panes
+        label: Panes
+        image: nav_pane
+        controls:
+          - { type: button, command: cmdNavPane, size: large, image: nav_pane, label: Navigation pane, keytip: "P" }
+          - { type: button, command: cmdPreviewPane, size: small, image: preview_pane, label: Preview pane }
+          - { type: button, command: cmdDetailsPane, size: small, image: details_pane, label: Details pane }
+
+      - id: layout
+        label: Layout
+        image: view_details
+        controls:
+          - { type: toggle_button, command: cmdViewDetails, size: large, image: view_details, label: Details, keytip: "D" }
+          - { type: toggle_button, command: cmdViewLarge, size: large, image: view_large, label: Large icons, keytip: "L" }
+
+      - id: current_view
+        label: Current view
+        image: sort_by
+        controls:
+          - type: split_button
+            command: cmdSortBy
+            size: large
+            image: sort_by
+            label: Sort by
+            keytip: "SO"
+            items:
+              - { command: cmdSortName, image: sort_by, label: Name }
+              - { command: cmdSortSize, image: sort_by, label: Size }
+              - { command: cmdSortModified, image: sort_by, label: Date modified }
+          - { type: button, command: cmdGroupBy, size: small, image: sort_by, label: Group by }
+          - { type: button, command: cmdSizeColumns, size: small, image: view_details, label: Size columns to fit }
+
+      - id: show_hide
+        label: Show/hide
+        image: select_none
+        controls:
+          - { type: button, command: cmdToggleCheckboxes, size: small, image: select_none, label: Item check boxes }
+          - { type: button, command: cmdToggleExtensions, size: small, image: edit, label: File name extensions }
+          - { type: toggle_button, command: cmdToggleHidden, size: small, image: view_details, label: Hidden items, keytip: "H" }
+
+      - id: options
+        label: Options
+        image: gear
+        controls:
+          - { type: toggle_button, command: cmdToggleDark, size: small, image: gear, label: Dark mode, keytip: "DK" }
+          - { type: toggle_button, command: cmdToggleBorder, size: small, image: gear, label: Custom border }
+          - { type: toggle_button, command: cmdToggleFrame, size: small, image: gear, label: Win8 frame }
+          - { type: button, command: cmdFolderOptions, size: small, image: gear, label: Folder options }
+
+  # ------------------------------------------------------------ Contextual: Drive Tools
+  - id: drive_tools
+    label: Manage
+    keytip: "M"
+    contextual: Drive Tools
+    context_color: green
+    context_command: cmdCtxDrive
+    groups:
+      - id: drive
+        label: Drive
+        image: properties
+        controls:
+          - { type: button, command: cmdDriveProperties, size: small, image: properties, label: Properties }
+          - { type: button, command: cmdOpenTerminal, size: small, image: terminal, label: Open terminal, keytip: "T" }
+
+  # ------------------------------------------------------------ Contextual: Picture Tools
+  - id: picture_tools
+    label: Manage
+    keytip: "P"
+    contextual: Picture Tools
+    context_color: gold
+    context_command: cmdCtxPicture
+    groups:
+      - id: manage
+        label: Manage
+        image: pictures
+        controls:
+          - { type: button, command: cmdOpenPicture, size: small, image: open, label: Open, keytip: "O" }
+          - { type: button, command: cmdSetWallpaper, size: small, image: pictures, label: Set as wallpaper }
+
+  # ------------------------------------------------------------ Contextual: Archive Tools
+  - id: archive_tools
+    label: Manage
+    keytip: "A"
+    contextual: Archive Tools
+    context_color: orange
+    context_command: cmdCtxArchive
+    groups:
+      - id: archive
+        label: Archive
+        image: extract
+        controls:
+          - { type: button, command: cmdExtractHere, size: small, image: extract, label: Extract here, keytip: "E" }
+          - { type: button, command: cmdOpenTerminal, size: small, image: terminal, label: Open terminal }

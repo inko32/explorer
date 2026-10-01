@@ -6,7 +6,7 @@ description = "Windows 8 style file explorer for POSIX/Windows — iced spike"
 license = "MIT"
 
 [dependencies]
-iced = { version = "0.14", default-features = false, features = ["wgpu", "tiny-skia", "wayland", "crisp", "thread-pool", "svg", "image"] } # wgpu primary + tiny-skia fallback (D17); pick at runtime via --render
+iced = { version = "0.14", default-features = false, features = ["wgpu", "tiny-skia", "wayland", "crisp", "thread-pool", "svg", "image", "advanced"] } # wgpu primary + tiny-skia fallback (D17); pick at runtime via --render
 gio  = "0.21"  # GIO backend for the VFS (local fs, volumes, trash)
 glib = "0.21"  # gio companion
 serde = { version = "1", features = ["derive"] }

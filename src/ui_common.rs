@@ -2,20 +2,13 @@
 //! `--ui-debug` element outlines, and small element helpers used everywhere.
 
 use iced::widget::container;
-use iced::{Color, Element, Length};
+use iced::{Color, Element};
 
 use crate::model::Message;
 
 /// Square chrome tool button size (ribbon minimize/help, nav refresh,
 /// status-bar view switcher) — one size everywhere.
 pub(crate) const CHROME_BTN: f32 = 26.0;
-
-/// MS Paint `TPopupMenu.setWidth(140)` — the menu width floor.
-pub(crate) const MENU_W: f32 = 140.0;
-/// `TMenuItem`: 16 icon + iconTextGap 16 + `Insets(3,8,3,5)` → 22px rows.
-pub(crate) const MENU_ITEM_H: f32 = 22.0;
-/// `TMenuSection`: font 12 + 16 = 28 (two 1px lines + 26px content).
-pub(crate) const MENU_SECTION_H: f32 = 28.0;
 
 pub mod skin {
     use iced::color;

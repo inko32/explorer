@@ -342,6 +342,42 @@ fn icons() -> &'static Icons {
     ICONS.get_or_init(load)
 }
 
+/// A resolved icon at the handle level (for non-widget renderers, e.g.
+/// the ribbon scene graph): raster PNG variant or vector generator.
+#[derive(Clone)]
+pub enum IconHandle {
+    Png(iced::widget::image::Handle),
+    Svg(svg::Handle),
+}
+
+/// Handle for a named icon at the requested size, or `None` when the name
+/// is unknown (callers may fall back to their own glyph set). Same
+/// resolution order as [`view`] but without wrapping into an Element.
+pub fn handle(name: &str, size: u32, skin: &Skin) -> Option<IconHandle> {
+    let icons = icons();
+    if let Some(variants) = icons.pngs.get(name) {
+        // nearest variant >= requested, else the largest available
+        let handle = variants
+            .iter()
+            .find(|(s, _)| *s >= size)
+            .or(variants.last())
+            .map(|(_, h)| h.clone())
+            .unwrap();
+        return Some(IconHandle::Png(handle));
+    }
+    if let Some(def) = icons.defs.get(name) {
+        if def.svg.is_some() || def.file.is_none() {
+            return Some(IconHandle::Svg(crate::icons::builtin_svg(name, skin)));
+        }
+        return None; // registered as file but no PNG asset is present
+    }
+    // not in the registry — builtin generators may still know the name
+    if crate::icons::has_builtin(name) {
+        return Some(IconHandle::Svg(crate::icons::builtin_svg(name, skin)));
+    }
+    None
+}
+
 /// Render a named icon at the given size.
 pub fn view<Message: 'static>(name: &str, size: f32, skin: &Skin) -> Element<'static, Message> {
     let icons = icons();

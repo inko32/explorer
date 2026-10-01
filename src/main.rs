@@ -10,11 +10,9 @@ mod icons;
 mod model;
 mod nav_pane;
 mod navigation;
-// Ribbon backend — switchable; both backends stay compilable. The active
-// one provides `mod ribbon`; the other waits as backup (see
-// docs/RIBBON-MSPAINT.md for the noun mapping and port notes).
-#[path = "ribbon.rs"] // MS Paint style (active)
-// #[path = "ribbon_classic.rs"] // Win8 clone (backup)
+// Ribbon: the vendored rs-ribbon framework (Windows Ribbon Framework
+// re-implementation, vendor/rs-ribbon) + the explorer commanding layer
+// in ribbon.rs. The ribbon markup is assets/ribbon.yaml.
 mod ribbon;
 mod status;
 mod ui;
@@ -173,7 +171,6 @@ pub fn handle_key(event: iced::Event, renaming: bool) -> Option<Message> {
         return (key == Key::Named(Named::Escape)).then_some(Message::CancelRename);
     }
     match key {
-        Key::Named(Named::Escape) => Some(Message::CancelMenu),
         Key::Named(Named::F2) => Some(Message::RenameSelected),
         Key::Named(Named::Delete) => Some(Message::DeleteSelection),
         Key::Named(Named::Backspace) => Some(Message::Up),
