@@ -42,44 +42,34 @@ pub enum Message {
     InvertSelection,
     SetView(ViewMode),
     SetSort(SortBy),
-    /// Open a ribbon dropdown menu at (x, y content-relative).
-    OpenMenu { x: f32, y: f32, source: String, source_w: f32, items: Vec<MenuEntry> },
-    CloseMenu,
-    /// A dropdown menu item was picked.
-    MenuPick(String),
+    /// A ribbon framework event (IUICommandHandler::Execute and friends).
+    Ribbon(crate::ribbon::RibbonEvent),
+    /// Move/copy the selection to a destination directory (the ribbon
+    /// "Move to" / "Copy to" dropdowns).
+    TransferTo {
+        paths: Vec<PathBuf>,
+        dest: PathBuf,
+        cut: bool,
+    },
+    /// Run a shell script via `sh -c` (`{cwd}`/`{selection}` placeholders).
+    RunShell(String),
     /// Permanently delete the selection (no trash).
     DeletePermanent,
-    CancelMenu,
     ToggleHidden,
-    SetTab(String),
     RenameInput(String),
     Status(String),
     Event(iced::Event),
     FsEvent(FsEvent),
-    /// Ribbon command (YAML-defined): internal or `sh -c` shell.
-    RunCommand(String),
-    /// Ribbon radio-group selection (MS Paint `GroupTButtons` behavior):
-    /// `id` becomes the selected button of `group`, then the command runs.
-    RibbonSelect { group: String, id: String },
     /// Scroll offset + viewport height from the file list scrollable.
     Scrolled { y: f32, height: f32 },
     /// Window resized (for list virtualization viewport + title-bar layout).
     WindowResized(f32, f32),
     /// Switch between the self-rendered border and native decorations.
     ToggleSelfBorder,
-    /// Minimize the ribbon to its tab row (Win8 collapse chevron).
-    ToggleRibbonCollapse,
     /// Begin a compositor-driven edge resize (custom border mode).
     StartResize(crate::border::ResizeDir),
-    /// Pressed a contextual title-bar block: activate the tab AND let the
-    /// band drag the window (a plain click without movement still switches).
-    BlockPress(String),
     /// Switch between the Win8 (double) and Win10 (1px) window borders.
     ToggleFrameStyle,
-    /// Quick-access command invoked.
-    QuickAccess(String),
-    /// Title-bar layout measurement update.
-    TitleBarMetrics { tabs: f32, blocks_start: f32, blocks: f32 },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -93,27 +83,6 @@ pub enum SortBy {
     Name,
     Size,
     Modified,
-}
-
-/// An open ribbon dropdown menu (anchored below the ribbon body).
-#[derive(Clone, Debug)]
-pub struct OpenMenu {
-    pub x: f32,
-    /// Content-relative y (border inset is added at render time).
-    pub y: f32,
-    /// Command id of the button that opened it (stays active while open).
-    pub source: String,
-    /// Width of the source button (menu is at least this wide).
-    pub source_w: f32,
-    pub items: Vec<MenuEntry>,
-}
-
-/// A dropdown menu row: a command item or a section header
-/// (MS Paint `TMenuSection`; ribbon.yaml `">Name"` dropdown entries).
-#[derive(Clone, Debug)]
-pub enum MenuEntry {
-    Item(String),
-    Section(String),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -162,28 +131,12 @@ pub struct Explorer {
     pub self_border: bool,
     /// Win8 double border vs Win10 1px border.
     pub frame_style: FrameStyle,
-    /// Quick-access commands (icon ids) shown right of the title-bar icon.
-    pub quick_access: Vec<String>,
-    /// Measured width of the tab row (for title-bar layout).
-    pub tabs_w: f32,
-    /// Start-x of the first contextual title-bar block.
-    pub blocks_start: f32,
-    /// Total width of the contextual blocks.
-    pub blocks_w: f32,
-    /// Ribbon minimized to the tab row.
-    pub ribbon_collapsed: bool,
     pub clipboard: Option<(ClipMode, Vec<PathBuf>)>,
     pub view: ViewMode,
     pub sort: SortBy,
-    /// Currently open ribbon dropdown menu.
-    pub open_menu: Option<OpenMenu>,
     pub show_hidden: bool,
-    pub active_tab: String,
-    pub ribbon: crate::ribbon::RibbonConfig,
-    /// Ribbon radio-group selections: group name -> selected command id
-    /// (MS Paint `GroupTButtons`; written by RibbonSelect, read by the
-    /// ribbon backend for SELECTABLE buttons that declare a `group:`).
-    pub ribbon_sel: std::collections::HashMap<String, String>,
+    /// The ribbon (rs-ribbon framework + explorer commanding).
+    pub ribbon: crate::ribbon::Ribbon,
     pub scroll_y: f32,
     pub viewport_h: f32,
     /// Measured window width (resize events) for title-bar layout.
@@ -196,16 +149,6 @@ pub struct Explorer {
     pub volumes: Vec<fs::Volume>,
     sched: fs::Scheduler,
     pending_rename: Option<String>,
-}
-
-/// `~/` expansion for command targets.
-fn shellexpand_home(s: &str) -> String {
-    if let Some(rest) = s.strip_prefix("~/") {
-        if let Some(h) = std::env::var_os("HOME") {
-            return format!("{}/{rest}", h.to_string_lossy());
-        }
-    }
-    s.to_string()
 }
 
 /// Recursive copy (files + dirs); true on success.
@@ -274,19 +217,11 @@ impl Explorer {
             last_title_press: None,
             self_border: true,
             frame_style: FrameStyle::Win8,
-            quick_access: vec!["undo".into(), "redo".into()],
-            tabs_w: 0.0,
-            blocks_start: 0.0,
-            blocks_w: 0.0,
-            ribbon_collapsed: false,
             clipboard: None,
             view: ViewMode::Details,
             sort: SortBy::Name,
-            open_menu: None,
             show_hidden: false,
-            active_tab: "home".into(),
-            ribbon: crate::ribbon::load(),
-            ribbon_sel: std::collections::HashMap::new(),
+            ribbon: crate::ribbon::Ribbon::new(),
             scroll_y: 0.0,
             viewport_h: 600.0,
             win_w: 1152.0,
@@ -300,23 +235,9 @@ impl Explorer {
         };
         s.request_listing();
         s.sched.send(Job::Volumes);
-        s.sync_active_tab();
-        if let Ok(t) = std::env::var("EXPLORER_DEBUG_TAB") {
-            s.active_tab = t;
-        }
-        if let Ok(x) = std::env::var("EXPLORER_DEBUG_MENU") {
-            let x: f32 = x.parse().unwrap_or(400.0);
-            s.open_menu = Some(crate::model::OpenMenu {
-                x,
-                y: 59.0 + 6.0 + 23.0,
-                source: "sort_by".into(),
-                source_w: 140.0,
-                items: ["sort_name", "sort_size", "sort_modified"]
-                    .iter()
-                    .map(|s| crate::model::MenuEntry::Item(s.to_string()))
-                    .collect(),
-            });
-        }
+        let snap = s.ribbon_snapshot();
+        s.ribbon.sync(snap);
+        s.ribbon.auto_activate();
         s
     }
 
@@ -371,7 +292,6 @@ impl Explorer {
         self.selected.clear();
         self.renaming = None;
         self.scroll_y = 0.0;
-        self.sync_active_tab();
         self.request_listing();
     }
 
@@ -392,7 +312,7 @@ impl Explorer {
         });
     }
 
-    fn selected_paths(&self) -> Vec<PathBuf> {
+    pub(crate) fn selected_paths(&self) -> Vec<PathBuf> {
         self.selected.iter().filter_map(|&i| self.entries.get(i)).map(|e| e.path.clone()).collect()
     }
 
@@ -469,7 +389,6 @@ impl Explorer {
                                         self.selected.insert(i);
                                     }
                                 }
-                                self.sync_active_tab();
                             }
                             if let Some(name) = self.pending_rename.take() {
                                 if let Some(i) = self.entries.iter().position(|e| e.name == name) {
@@ -525,142 +444,33 @@ impl Explorer {
         }
     }
 
-    /// The context ribbon `when` rules evaluate against (D12).
+    /// The context the ribbon commanding layer evaluates against:
+    /// contextual-tab availability + enablement rules.
     pub fn context(&self) -> crate::ribbon::Context {
         let sel_has = |f: &dyn Fn(&fs::Entry) -> bool| {
             self.selected.iter().filter_map(|&i| self.entries.get(i)).any(f)
         };
-        let is_media = |exts: &[&str]| {
-            sel_has(&|e| {
-                e.name
-                    .rsplit_once('.')
-                    .map(|(_, x)| exts.contains(&x.to_lowercase().as_str()))
-                    .unwrap_or(false)
-            })
-        };
+        let has_image = sel_has(&|e: &fs::Entry| {
+            e.name
+                .rsplit_once('.')
+                .map(|(_, x)| {
+                    matches!(
+                        x.to_lowercase().as_str(),
+                        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "svg"
+                    )
+                })
+                .unwrap_or(false)
+        });
         crate::ribbon::Context {
             is_drive: self.cwd.parent().is_none() || self.volumes.iter().any(|v| v.mount == self.cwd),
             inside_archive: fs::archive::resolve(&self.cwd).is_some(),
             has_archive: sel_has(&|e: &fs::Entry| fs::archive::is_archive_path(&e.path)),
-            has_image: is_media(&["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg"]),
-            has_video: is_media(&["mp4", "mkv", "mov", "webm", "avi"]),
-            has_audio: is_media(&["mp3", "flac", "ogg", "wav", "m4a"]),
+            has_image,
             has_selection: !self.selected.is_empty(),
-            is_empty: self.selected.is_empty(),
         }
     }
 
-    /// Win8 behavior: when a contextual tab's context becomes true (cwd
-    /// change or new selection), activate it; fall back to Home when the
-    /// active tab disappears.
-    fn sync_active_tab(&mut self) {
-        let ctx = self.context();
-        let matching = self
-            .ribbon
-            .contextual_tabs
-            .iter()
-            .find(|t| {
-                let w = t.activate_when.as_deref().or(t.when.as_deref());
-                w.map(|w| crate::ribbon::eval_when(w, ctx)).unwrap_or(true)
-            });
-        if std::env::var("EXPLORER_DEBUG").is_ok() {
-            eprintln!("sync_active_tab: inside_archive={} matching={:?}", ctx.inside_archive, matching.map(|t| t.id.clone()));
-        }
-        match matching {
-            Some(t) => self.active_tab = t.id.clone(),
-            None => {
-                let visible = self.ribbon.tabs.iter().any(|t| t.id == self.active_tab)
-                    || self.ribbon.contextual_tabs.iter().any(|t| {
-                        t.id == self.active_tab
-                            && t.when.as_deref().map(|w| crate::ribbon::eval_when(w, ctx)).unwrap_or(true)
-                    });
-                if !visible {
-                    self.active_tab = "home".into();
-                }
-            }
-        }
-    }
 
-    fn run_command(&mut self, id: &str) -> iced::Task<Message> {
-        let Some(def) = self.ribbon.commands.get(id).cloned() else {
-            self.status = format!("unknown command '{id}'");
-            return iced::Task::none();
-        };
-        if let Some(internal) = def.internal {
-            let first = self.selected.iter().next().copied();
-            let msg = match internal.as_str() {
-                "paste" => Some(Message::Paste),
-                "cut" => Some(Message::CutSelection),
-                "copy" => Some(Message::CopySelection),
-                "delete" => Some(Message::DeleteSelection),
-                "rename" => Some(Message::RenameSelected),
-                "new_folder" => Some(Message::NewFolder),
-                "select_all" => Some(Message::SelectAll),
-                "select_none" => Some(Message::SelectNone),
-                "invert_selection" => Some(Message::InvertSelection),
-                "view_large" => Some(Message::SetView(ViewMode::Large)),
-                "view_details" => Some(Message::SetView(ViewMode::Details)),
-                "toggle_hidden" => Some(Message::ToggleHidden),
-                "toggle_dark" => Some(Message::ToggleDark),
-                "toggle_border" => Some(Message::ToggleSelfBorder),
-                "toggle_frame" => Some(Message::ToggleFrameStyle),
-                "delete_permanent" => Some(Message::DeletePermanent),
-                "sort_name" => Some(Message::SetSort(SortBy::Name)),
-                "sort_size" => Some(Message::SetSort(SortBy::Size)),
-                "sort_modified" => Some(Message::SetSort(SortBy::Modified)),
-                "open" => first.map(Message::Open),
-                other if other.starts_with("move_to:") || other.starts_with("copy_to:") => {
-                    let (mv, target) = other.split_at(if other.starts_with("move") { 8 } else { 8 });
-                    let target = shellexpand_home(target.trim());
-                    if fs::archive::resolve(&self.cwd).is_some() {
-                        self.status = "move/copy inside archives is not supported yet".into();
-                    } else {
-                        let dir = PathBuf::from(target);
-                        let mut ok = 0usize;
-                        for p in self.selected_paths() {
-                            let Some(name) = p.file_name() else { continue };
-                            let dst = dir.join(name);
-                            let r = if mv.starts_with("move") {
-                                std::fs::rename(&p, &dst).is_ok()
-                            } else {
-                                copy_rec(&p, &dst)
-                            };
-                            if r {
-                                ok += 1;
-                            }
-                        }
-                        self.status = format!("{ok} item(s) {} {dir:?}", if mv.starts_with("move") { "moved to" } else { "copied to" });
-                        self.request_listing();
-                    }
-                    None
-                }
-                other => {
-                    self.status = format!("'{other}' is not implemented");
-                    None
-                }
-            };
-            if let Some(m) = msg {
-                return self.update(m);
-            }
-            return iced::Task::none();
-        }
-        if let Some(script) = def.shell {
-            let expanded = self.expand_placeholders(&script);
-            match std::process::Command::new("sh")
-                .arg("-c")
-                .arg(expanded)
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()
-            {
-                Ok(_) => {}
-                Err(e) => self.status = format!("shell: {e}"),
-            }
-        }
-        iced::Task::none()
-    }
-
-    /// {cwd}, {selection}, {selection_count} — single-quoted for sh.
     fn expand_placeholders(&self, script: &str) -> String {
         fn q(s: &str) -> String {
             format!("'{}'", s.replace('\'', "'\\''"))
@@ -679,6 +489,21 @@ impl Explorer {
     }
 
     pub fn update(&mut self, message: Message) -> iced::Task<Message> {
+        // ribbon-originated events must not re-run contextual
+        // auto-activation (the user just clicked a tab)
+        let auto = !matches!(message, Message::Ribbon(_));
+        let task = self.handle(message);
+        // every model change refreshes the ribbon (enablement, toggle
+        // values, contextual-tab availability)
+        let snap = self.ribbon_snapshot();
+        self.ribbon.sync(snap);
+        if auto {
+            self.ribbon.auto_activate();
+        }
+        task
+    }
+
+    fn handle(&mut self, message: Message) -> iced::Task<Message> {
         match message {
             Message::WindowOpened(id) => {
                 self.window = Some(id);
@@ -740,7 +565,6 @@ impl Explorer {
             Message::Select(i) => {
                 self.selected.clear();
                 self.selected.insert(i);
-                self.sync_active_tab();
                 // double-click emulation: two presses on the same row within 400ms
                 let now = std::time::Instant::now();
                 if let Some((last_i, t)) = self.last_click {
@@ -840,10 +664,6 @@ impl Explorer {
                 iced::Task::none()
             }
             Message::CancelRename => {
-                if self.open_menu.is_some() {
-                    self.open_menu = None;
-                    return iced::Task::none();
-                }
                 self.renaming = None;
                 iced::Task::none()
             }
@@ -875,13 +695,58 @@ impl Explorer {
                 self.request_listing();
                 iced::Task::none()
             }
-            Message::SetTab(t) => {
-                self.active_tab = t;
-                self.ribbon_collapsed = false; // Win8: choosing a tab shows it
+            Message::Ribbon(ev) => {
+                // IUICommandHandler::Execute round-trip: the handler queued
+                // explorer messages; run them through the MVU loop.
+                self.ribbon.dispatch(&ev);
+                let msgs = self.ribbon.take_messages();
+                let mut tasks = Vec::new();
+                for m in msgs {
+                    tasks.push(self.update(m));
+                }
+                iced::Task::batch(tasks)
+            }
+            Message::TransferTo { paths, dest, cut } => {
+                if paths.is_empty() {
+                    return iced::Task::none();
+                }
+                if fs::archive::resolve(&self.cwd).is_some() {
+                    self.status = "move/copy inside archives is not supported yet".into();
+                    return iced::Task::none();
+                }
+                let mut ok = 0usize;
+                for p in &paths {
+                    let Some(name) = p.file_name() else { continue };
+                    let dst = dest.join(name);
+                    let r = if cut {
+                        std::fs::rename(p, &dst).is_ok()
+                    } else {
+                        copy_rec(p, &dst)
+                    };
+                    if r {
+                        ok += 1;
+                    }
+                }
+                self.status = format!(
+                    "{ok} item(s) {} {}",
+                    if cut { "moved to" } else { "copied to" },
+                    dest.display()
+                );
+                self.request_listing();
                 iced::Task::none()
             }
-            Message::ToggleRibbonCollapse => {
-                self.ribbon_collapsed = !self.ribbon_collapsed;
+            Message::RunShell(script) => {
+                let expanded = self.expand_placeholders(&script);
+                match std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg(expanded)
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn()
+                {
+                    Ok(_) => {}
+                    Err(e) => self.status = format!("shell: {e}"),
+                }
                 iced::Task::none()
             }
             Message::StartResize(dir) => {
@@ -889,39 +754,6 @@ impl Explorer {
                     return dir.task(id);
                 }
                 iced::Task::none()
-            }
-            Message::BlockPress(tab_id) => {
-                self.active_tab = tab_id;
-                self.ribbon_collapsed = false;
-                if let Some(id) = self.window {
-                    return iced::window::drag(id);
-                }
-                iced::Task::none()
-            }
-            Message::QuickAccess(id) => {
-                match id.as_str() {
-                    "undo" | "redo" => {} // TODO: operation history
-                    _ => {}
-                }
-                iced::Task::none()
-            }
-            Message::TitleBarMetrics { tabs, blocks_start, blocks } => {
-                self.tabs_w = tabs;
-                self.blocks_start = blocks_start;
-                self.blocks_w = blocks;
-                iced::Task::none()
-            }
-            Message::OpenMenu { x, y, source, source_w, items } => {
-                self.open_menu = Some(OpenMenu { x, y, source, source_w, items });
-                iced::Task::none()
-            }
-            Message::CloseMenu | Message::CancelMenu => {
-                self.open_menu = None;
-                iced::Task::none()
-            }
-            Message::MenuPick(id) => {
-                self.open_menu = None;
-                self.run_command(&id)
             }
             Message::SetSort(s) => {
                 self.sort = s;
@@ -955,13 +787,6 @@ impl Explorer {
                     FrameStyle::Win10 => FrameStyle::Win8,
                 };
                 iced::Task::none()
-            }
-            Message::RunCommand(id) => {
-                return self.run_command(&id);
-            }
-            Message::RibbonSelect { group, id } => {
-                self.ribbon_sel.insert(group, id.clone());
-                return self.run_command(&id);
             }
             Message::Scrolled { y, height } => {
                 self.scroll_y = y;

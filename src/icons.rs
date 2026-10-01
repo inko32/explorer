@@ -50,6 +50,21 @@ pub fn builtin_svg(name: &str, s: &Skin) -> svg::Handle {
     }
 }
 
+/// Does the builtin generator set know this name? (`builtin_svg` falls
+/// back to the file placeholder for anything else.)
+pub fn has_builtin(name: &str) -> bool {
+    matches!(
+        name,
+        "home" | "desktop" | "documents" | "downloads" | "pictures" | "music"
+            | "videos" | "recent" | "network" | "drive" | "back" | "forward"
+            | "up" | "refresh" | "search" | "chevron_down" | "undo" | "redo"
+            | "nav_pane" | "preview_pane" | "details_pane" | "sort_by"
+            | "chevron_right" | "help" | "minimize" | "maximize" | "restore"
+            | "close" | "minimize8" | "maximize8" | "close8" | "gear"
+            | "open" | "copy_path"
+    )
+}
+
 fn hex(c: Color) -> String {
     format!("#{:02x}{:02x}{:02x}", (c.r * 255.0) as u8, (c.g * 255.0) as u8, (c.b * 255.0) as u8)
 }

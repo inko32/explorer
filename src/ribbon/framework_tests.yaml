@@ -1,0 +1,375 @@
+# rs-ribbon demo — ribbon markup.
+#
+# This is the YAML equivalent of the Windows ribbon markup (`.ribbon` XML
+# compiled resources). Every control type and feature of the framework is
+# exercised here:
+#   * application menu (orb) with recent items + pinning
+#   * quick access toolbar (customizable, dockable top/bottom)
+#   * help button, minimize, keytips, overflow (resize the window!)
+#   * buttons / toggle buttons / split buttons / dropdown buttons
+#   * combo box (editable), spinner, font control, color pickers
+#   * in-ribbon gallery + dropdown gallery with categories
+#   * contextual tabs (governed by UI_PKEY_ContextAvailable)
+#   * application modes (IUIFramework::SetModes)
+#   * context popup menu (IUIContextualUI::ShowAtLocation)
+
+commands:
+  cmdAppMenu: 1
+  cmdNew: 10
+  cmdOpen: 11
+  cmdSave: 12
+  cmdSaveAs: 13
+  cmdPrint: 14
+  cmdPrintPreview: 15
+  cmdExit: 16
+  cmdRecent: 17
+  cmdUndo: 18
+  cmdRedo: 19
+
+  cmdPaste: 20
+  cmdPasteSpecial: 21
+  cmdPastePlain: 22
+  cmdCut: 23
+  cmdCopy: 24
+
+  cmdFont: 30
+  cmdGrowFont: 31
+  cmdShrinkFont: 32
+  cmdBold: 33
+  cmdItalic: 34
+  cmdUnderline: 35
+  cmdStrike: 36
+  cmdFontColor: 37
+  cmdHighlight: 38
+  cmdSubscript: 39
+  cmdSuperscript: 40
+  cmdClearFormat: 41
+  cmdFontDlg: 42
+
+  cmdAlignLeft: 50
+  cmdAlignCenter: 51
+  cmdAlignRight: 52
+  cmdJustify: 53
+  cmdBullets: 54
+  cmdNumbers: 55
+  cmdIndent: 56
+  cmdOutdent: 57
+
+  cmdFind: 60
+  cmdReplace: 61
+  cmdSelect: 62
+  cmdSelectAll: 63
+  cmdSelectNone: 64
+
+  cmdZoomCombo: 70
+  cmdZoomSpinner: 71
+
+  cmdTable: 80
+  cmdPicture: 81
+  cmdShapes: 82
+  cmdChart: 83
+  cmdTextBox: 84
+  cmdHyperlink: 85
+
+  cmdPrintQuick: 90
+  cmdPageSetup: 91
+
+  cmdHelp: 99
+
+  cmdCtxTable: 100
+  cmdCtxPicture: 101
+  cmdTableHeaderRow: 110
+  cmdTableBanded: 111
+  cmdTableInsert: 112
+  cmdTableDelete: 113
+  cmdTableMerge: 114
+  cmdTableRows: 115
+  cmdPicEffects: 120
+  cmdPicBorder: 121
+  cmdPicLayout: 122
+
+  cmdClipDlg: 130
+
+  cmdCtxMenu: 140
+  cmdCtxCut: 141
+  cmdCtxCopy: 142
+  cmdCtxPaste: 143
+
+application_menu:
+  command: cmdAppMenu
+  items:
+    - { command: cmdNew, image: new, keytip: "N" }
+    - { command: cmdOpen, image: open, keytip: "O" }
+    - separator: true
+    - { command: cmdSave, image: save, keytip: "S" }
+    - { command: cmdSaveAs, image: save_as, keytip: "A" }
+    - separator: true
+    - command: cmdPrint
+      image: print
+      keytip: "P"
+      items:
+        - { command: cmdPrint, image: print, label: Print, keytip: "P" }
+        - { command: cmdPrintPreview, image: print_preview, label: Print Preview, keytip: "V" }
+    - { command: cmdPrintPreview, image: print_preview, keytip: "V" }
+    - separator: true
+    - { command: cmdExit, image: exit, keytip: "X" }
+  recent_items: cmdRecent
+
+quick_access:
+  commands: [cmdSave, cmdUndo, cmdRedo]
+  dock: top
+
+help_button: cmdHelp
+
+context_popups:
+  - command: cmdCtxMenu
+    items:
+      - { command: cmdCtxCut, image: cut, label: Cut }
+      - { command: cmdCtxCopy, image: copy, label: Copy }
+      - { command: cmdCtxPaste, image: paste, label: Paste }
+
+# ------------------------------------------------------------------
+# Cascading (Windows ScalingPolicy / Ribbon.SizeDefinitions):
+# when the window narrows, groups shrink one step at a time through
+# their `scale` ladder (right-most policy group first), then collapse
+# to a popup group button; only groups that still do not fit move to
+# the overflow chevron.
+size_definitions:
+  # GroupSizeDefinition Size="Smallish": buttons shrink to small,
+  # the combo boxes stay untouched (not listed).
+  smallish:
+    - controls: [cmdCut, cmdCopy, cmdUndo, cmdRedo]
+      size: small
+  # GroupSizeDefinition Size="Mediumish": the Paste split button drops
+  # to medium (2 rows).
+  mediumish:
+    - controls: [cmdPaste]
+      size: medium
+
+scaling:
+  # Clipboard: ideal caps Paste at large; then Paste -> medium,
+  # everything small, then a collapsed popup group.
+  - group: clipboard
+    ideal: [large]
+    scale: [mediumish, smallish, popup]
+  # Font / Paragraph / Editing: no per-control template needed, the
+  # default ladder (medium -> small -> popup) applies.
+  - group: font
+    scale: [small, popup]
+  - group: paragraph
+    scale: [popup]
+  - group: editing
+    scale: [medium, popup]
+
+tabs:
+  # ------------------------------------------------------------ Home (mode bit 0)
+  - id: home
+    label: Home
+    keytip: "H"
+    modes: [0]
+    groups:
+      - id: clipboard
+        label: Clipboard
+        image: paste
+        command: cmdClipDlg
+        controls:
+          - type: split_button
+            command: cmdPaste
+            size: large
+            image: paste
+            label: Paste
+            keytip: "V"
+            items:
+              - { command: cmdPasteSpecial, image: paste_special, label: Paste Special }
+              - { command: cmdPastePlain, image: paste, label: Paste Unformatted }
+          - { type: button, command: cmdCut, size: small, image: cut, label: Cut, keytip: "X" }
+          - { type: button, command: cmdCopy, size: small, image: copy, label: Copy, keytip: "C" }
+          - { type: button, command: cmdUndo, size: small, image: undo, label: Undo, keytip: "U" }
+          - { type: button, command: cmdRedo, size: small, image: redo, label: Redo, keytip: "R" }
+
+      - id: font
+        label: Font
+        image: bold
+        command: cmdFontDlg
+        controls:
+          - { type: font_control, command: cmdFont, keytip: "FF", width: 150 }
+          - { type: button, command: cmdGrowFont, size: small, image: grow_font, label: Grow Font, keytip: "FG" }
+          - { type: button, command: cmdShrinkFont, size: small, image: shrink_font, label: Shrink Font, keytip: "K" }
+          - type: control_group
+            controls:
+              - { type: toggle_button, command: cmdBold, size: small, image: bold, label: Bold, keytip: "1" }
+              - { type: toggle_button, command: cmdItalic, size: small, image: italic, label: Italic, keytip: "2" }
+              - { type: toggle_button, command: cmdUnderline, size: small, image: underline, label: Underline, keytip: "3" }
+              - { type: toggle_button, command: cmdStrike, size: small, image: strike, label: Strikethrough, keytip: "4" }
+          - { type: button, command: cmdClearFormat, size: small, image: clear_format, label: Clear Formatting, keytip: "E" }
+          - { type: button, command: cmdSubscript, size: small, image: subscript, label: Subscript }
+          - { type: button, command: cmdSuperscript, size: small, image: superscript, label: Superscript }
+          - { type: color_picker, command: cmdFontColor, size: small, image: font_color, label: Font Color, keytip: "FC" }
+          - { type: color_picker, command: cmdHighlight, size: small, image: highlight, label: Text Highlight Color, keytip: "HL" }
+
+      - id: paragraph
+        label: Paragraph
+        image: align_left
+        controls:
+          - type: control_group
+            controls:
+              - { type: toggle_button, command: cmdAlignLeft, size: small, image: align_left, label: Align Left, keytip: "AL" }
+              - { type: toggle_button, command: cmdAlignCenter, size: small, image: align_center, label: Center, keytip: "AC" }
+              - { type: toggle_button, command: cmdAlignRight, size: small, image: align_right, label: Align Right, keytip: "AR" }
+              - { type: toggle_button, command: cmdJustify, size: small, image: justify, label: Justify, keytip: "AJ" }
+          - type: control_group
+            controls:
+              - { type: toggle_button, command: cmdBullets, size: small, image: bullet_list, label: Bullets, keytip: "B" }
+              - { type: toggle_button, command: cmdNumbers, size: small, image: number_list, label: Numbering, keytip: "N" }
+          - { type: button, command: cmdIndent, size: small, image: indent, label: Increase Indent }
+          - { type: button, command: cmdOutdent, size: small, image: outdent, label: Decrease Indent }
+
+      - id: editing
+        label: Editing
+        image: find
+        controls:
+          - { type: button, command: cmdFind, size: large, image: find, label: Find, keytip: "FD" }
+          - { type: button, command: cmdReplace, size: small, image: replace, label: Replace }
+          - type: drop_down_button
+            command: cmdSelect
+            size: small
+            image: select
+            label: Select
+            items:
+              - { command: cmdSelectAll, label: Select All }
+              - { command: cmdSelectNone, label: Select None }
+
+  # ------------------------------------------------------------ Insert (mode bit 0)
+  - id: insert
+    label: Insert
+    keytip: "N"
+    modes: [0]
+    groups:
+      - id: pages
+        label: Pages
+        image: textbox
+        controls:
+          - { type: button, command: cmdTextBox, size: large, image: textbox, label: Text Box, keytip: "X" }
+          - { type: button, command: cmdHyperlink, size: medium, image: hyperlink, label: Hyperlink, keytip: "I" }
+
+      - id: illustrations
+        label: Illustrations
+        image: picture
+        controls:
+          - type: in_ribbon_gallery
+            command: cmdPicture
+            label: Picture
+            popup: true
+            item_width: 36
+            item_height: 36
+            keytip: "P"
+          - type: in_ribbon_gallery
+            command: cmdShapes
+            label: Shapes
+            columns: 3
+            item_width: 34
+            item_height: 34
+            keytip: "SH"
+          - { type: button, command: cmdChart, size: large, image: chart, label: Chart, keytip: "C" }
+
+      - id: tables
+        label: Tables
+        image: table
+        controls:
+          - { type: button, command: cmdTable, size: large, image: table, label: Table, keytip: "T" }
+
+  # ------------------------------------------------------------ View (mode bit 0)
+  - id: view
+    label: View
+    keytip: "W"
+    modes: [0]
+    groups:
+      - id: zoom
+        label: Zoom
+        image: zoom_in
+        controls:
+          - { type: combo_box, command: cmdZoomCombo, width: 90, keytip: "ZC" }
+          - type: spinner
+            command: cmdZoomSpinner
+            width: 84
+            keytip: "ZS"
+            value: 100
+            min: 10
+            max: 400
+            increment: 10
+            decimal_places: 0
+            format: "{0}%"
+
+  # ------------------------------------------------------------ Print (mode bit 1)
+  - id: print
+    label: Print
+    keytip: "Q"
+    modes: [1]
+    groups:
+      - id: print
+        label: Print
+        image: print
+        controls:
+          - { type: button, command: cmdPrintQuick, size: large, image: print, label: Quick Print }
+          - { type: button, command: cmdPrintPreview, size: large, image: print_preview, label: Print Preview }
+      - id: setup
+        label: Page Setup
+        image: print_preview
+        controls:
+          - { type: button, command: cmdPageSetup, size: medium, image: print_preview, label: Page Setup }
+
+  # ------------------------------------------------------------ Contextual: Table Tools
+  - id: tableDesign
+    label: Design
+    keytip: "J"
+    contextual: Table Tools
+    context_command: cmdCtxTable
+    groups:
+      - id: tableOptions
+        label: Table Style Options
+        image: table
+        controls:
+          - { type: toggle_button, command: cmdTableHeaderRow, size: small, image: table, label: Header Row }
+          - { type: toggle_button, command: cmdTableBanded, size: small, image: bullet_list, label: Banded Rows }
+      - id: drawTable
+        label: Draw Borders
+        image: table
+        controls:
+          - { type: button, command: cmdTableInsert, size: medium, image: table, label: Insert Above }
+          - { type: button, command: cmdTableDelete, size: medium, image: close, label: Delete Row }
+          - { type: button, command: cmdTableMerge, size: medium, image: justify, label: Merge Cells }
+
+  - id: tableLayout
+    label: Layout
+    keytip: "L"
+    contextual: Table Tools
+    context_command: cmdCtxTable
+    groups:
+      - id: cellSize
+        label: Cell Size
+        image: table
+        controls:
+          - type: spinner
+            command: cmdTableRows
+            width: 70
+            value: 3
+            min: 1
+            max: 12
+            increment: 1
+            decimal_places: 0
+            format: "{0} rows"
+
+  # ------------------------------------------------------------ Contextual: Picture Tools
+  - id: pictureFormat
+    label: Format
+    keytip: "PI"
+    contextual: Picture Tools
+    context_command: cmdCtxPicture
+    groups:
+      - id: adjust
+        label: Adjust
+        image: picture
+        controls:
+          - { type: button, command: cmdPicEffects, size: large, image: picture, label: Artistic Effects }
+          - { type: button, command: cmdPicBorder, size: small, image: font_color, label: Picture Border }
+          - { type: button, command: cmdPicLayout, size: small, image: chart, label: Change Layout }

@@ -2,11 +2,10 @@
 //! ring, title bar (window icon, QAT, contextual blocks, title), and the
 //! caption buttons (_ [] X) overlay.
 
-use iced::widget::{button, column, container, mouse_area, row, stack, text, Space};
+use iced::widget::{button, container, mouse_area, row, stack, text, Space};
 use iced::{Color, Element, Length};
 
 use crate::model::{Explorer, Message};
-use crate::ribbon::{self, active_tab_geometry, main_tabs_width, tab_row_w, tab_width, visible_tabs, TabDef, TAB_ROW_H, TITLEBAR_H};
 use crate::ui_common::{bg, dbg, elide, icon, skin};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -222,203 +221,37 @@ pub(crate) fn resize_frame(margin: f32) -> Element<'static, Message> {
     .into()
 }
 
-// ---------------- --ui-debug element outlines ----------------
+// ---------------- title bar ----------------
 
+/// Title bar height — the ribbon no longer merges its tab row into the
+/// title bar (the rs-ribbon widget owns the tab strip), so the bar is a
+/// plain drag band: window icon, centered title, caption space.
+pub(crate) const TITLEBAR_H: f32 = 30.0;
 
 pub(crate) fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
-    // Win8: contextual tab labels are colored blocks on the title bar,
-    // right-aligned before the caption buttons. Title centers in the
-    // space left of them (so it shifts when they appear).
-    let qat_btn: f32 = 22.0; // QAT square button (also the chevron row height)
     let icon_zone_w: f32 = 28.0; // window icon zone at the bar's left
-    let mut ctx_blocks = row![].height(Length::Fixed(TITLEBAR_H));
-    let mut first_block = true;
-    for tab in visible_tabs(state) {
-        let Some(accent) = tab.color.as_deref().and_then(ribbon::color_by_name) else { continue };
-        if !first_block {
-            // space between two contextual blocks, aligning with the tab row
-            ctx_blocks = ctx_blocks.push(Space::new().width(Length::Fixed(ribbon::CTX_TAB_GAP)));
-        }
-        first_block = false;
-        let active = state.active_tab == tab.id;
-        let width = tab_width(&tab.label);
-        // Win8: pastel accent block at 90% of the title bar height, no edge
-        fn tint(accent: Color, t: f32) -> Color {
-            Color::from_rgb(
-                accent.r + (1.0 - accent.r) * t,
-                accent.g + (1.0 - accent.g) * t,
-                accent.b + (1.0 - accent.b) * t,
-            )
-        }
-        let label_color =
-            Color::from_rgb(accent.r * 0.75, accent.g * 0.75, accent.b * 0.75);
-        // The title-bar block is ALWAYS solid pastel (idle or active); the
-        // fade belongs to the contextual tab, never to this block. 80% of
-        // the 30px title bar (24px), lowered so its bottom edge is flush
-        // with the title-bar bottom = connects to the tab top.
-        let label = container(
-            text(tab.label.clone())
-                .size(12.0)
-                .color(label_color)
-                .width(Length::Shrink),
-        )
-        .width(Length::Fixed(width))
-        .center_x(Length::Fixed(width));
-        let solid = container(label)
-            .width(Length::Fixed(width))
-            .height(Length::Fixed(TAB_ROW_H))
-            .center_x(Length::Fixed(width))
-            .center_y(Length::Fixed(TAB_ROW_H))
-            .style(move |_| container::Style {
-                background: Some(tint(accent, if active { 0.45 } else { 0.62 }).into()),
-                ..Default::default()
-            });
-        // lowered: 24px solid block bottom-aligned in the 30px title bar
-        let block: Element<Message> = container(solid)
-            .width(Length::Fixed(width))
-            .height(Length::Fixed(TITLEBAR_H))
-            .align_y(iced::Alignment::End)
-            .into();
-        ctx_blocks = ctx_blocks.push(
-            dbg(
-                Box::leak(format!("ctx_block:{}", tab.label).into_boxed_str()),
-                mouse_area(block).on_press(Message::BlockPress(tab.id.clone())),
-            ),
-        );
-    }
-
-    // Quick-access buttons (Undo / Redo) framed by thin separators
-    let vline = || {
-        container(
-            container(Space::new().width(Length::Fixed(1.0)).height(Length::Fixed(15.0)))
-                .style(|_| container::Style {
-                    background: Some(Color::from_rgba(1.0, 1.0, 1.0, 0.35).into()),
-                    ..Default::default()
-                }),
-        )
-        .width(Length::Fixed(6.0))
-        .center_x(Length::Fixed(6.0))
-    };
-    let mut qat = row![].spacing(2).align_y(iced::Alignment::Center);
-    qat = qat.push(vline());
-    for q in &state.quick_access {
-        let id = q.clone();
-        qat = qat.push(
-            mouse_area(
-                container(crate::icon::view(q, 16.0, &skin))
-                    .width(Length::Fixed(qat_btn))
-                    .height(Length::Fixed(qat_btn))
-                    .center_x(Length::Fixed(qat_btn))
-                    .center_y(Length::Fixed(qat_btn)),
-            )
-            .on_press(Message::QuickAccess(id)),
-        );
-    }
-    qat = qat.push(
-        mouse_area(
-            container(crate::icon::view("chevron_down", 10.0, &skin))
-                .width(Length::Fixed(14.0))
-                .height(Length::Fixed(qat_btn))
-                .center_x(Length::Fixed(14.0))
-                .center_y(Length::Fixed(qat_btn)),
-        )
-        .on_press(Message::ToggleRibbonCollapse),
-    );
-    qat = qat.push(vline());
-    // exact: sep 6+2, per button qat_btn+2, chevron 14+2, sep 6
-    let qat_w: f32 = state.quick_access.len() as f32 * (qat_btn + 2.0) + 30.0;
-
-    // Win8: the contextual blocks sit exactly above their tab-row stubs
-    // (which start right after the main tabs); the title centers between
-    // the icon+QAT and the blocks. When the title is too long it elides
-    // and recenters AFTER the blocks: `... contextual  title  _^x`.
-    // Win8: min/max are 60% of the close button's width; Win10: uniform 46
     let captions_w = match state.frame_style {
         crate::model::FrameStyle::Win8 => 28.0 + 28.0 + 47.0 + 6.0,
         crate::model::FrameStyle::Win10 => 46.0 * 3.0,
     };
-    let n_ctx = visible_tabs(state)
-        .iter()
-        .filter(|t| t.color.is_some())
-        .count();
-    let blocks_w: f32 = if n_ctx == 0 {
-        0.0
-    } else {
-        visible_tabs(state)
-            .iter()
-            .filter(|t| t.color.is_some())
-            .map(|t| tab_width(&t.label))
-            .sum::<f32>()
-            + n_ctx.saturating_sub(1) as f32 * 5.0
-    };
-    // `icon | QAT | title  contextual  _^x`; the title lives in the zone
-    // above the main tabs. When it doesn't fit there it elides and moves
-    // AFTER the blocks: `icon | QAT | contextual  title  _^x`.
-    let title_w = state.title().chars().count() as f32 * 7.5 + 8.0;
-    let title_zone = (main_tabs_width(state) - 28.0 - qat_w).max(60.0);
-    let tight = blocks_w > 1.0 && title_w > title_zone - 8.0;
     let (_, fr, _, fl) = frame_insets(state);
-    let content_w = state.win_w - fr - fl;
-    if tight {
-        let elide_w = (content_w - 28.0 - qat_w - 138.0 - blocks_w - 16.0).max(30.0);
-        // blocks keep their aligned position above the tab stubs; the title
-        // moves right of them. Every non-interactive strip drags the window.
-        let gap_w = (main_tabs_width(state) - 28.0 - qat_w).max(0.0);
-        let drag_gap: Element<Message> = mouse_area(
-            Space::new().width(Length::Fixed(gap_w)).height(Length::Fixed(TITLEBAR_H)),
-        )
-        .on_press(Message::TitlebarPress)
-        .on_double_click(Message::TitlebarDoubleClick)
-        .into();
-        let title = container(
-            text(elide(&state.title(), elide_w))
+    let content_w = (state.win_w - fr - fl).max(240.0);
+    let title_w = (content_w - icon_zone_w - captions_w - 16.0).max(60.0);
+    let drag_title: Element<Message> = mouse_area(
+        container(
+            text(elide(&state.title(), title_w))
                 .size(12.0)
                 .color(skin.title_text)
                 .width(Length::Shrink),
         )
+        .width(Length::Fixed(title_w))
         .height(Length::Fill)
-        .center_y(Length::Fill);
-        let drag_title: Element<Message> = mouse_area(
-            container(title).width(Length::Fill).center_x(Length::Fill),
-        )
-        .on_press(Message::TitlebarPress)
-        .on_double_click(Message::TitlebarDoubleClick)
-        .into();
-        return container(
-            row![
-                container(icon("folder", 16.0, skin))
-                    .width(Length::Fixed(icon_zone_w))
-                    .height(Length::Fill)
-                    .center_x(Length::Fixed(icon_zone_w))
-                    .center_y(Length::Fill),
-                container(qat).width(Length::Fixed(qat_w)).height(Length::Fill).center_y(Length::Fill),
-                drag_gap,
-                ctx_blocks,
-                drag_title,
-                Space::new().width(Length::Fixed(captions_w)),
-            ]
-            .height(Length::Fixed(TITLEBAR_H)),
-        )
-        .width(Length::Fill)
-        .height(Length::Fixed(TITLEBAR_H))
-        .style(bg(skin.accent))
-        .into();
-    }
-
-    let title = container(
-        text(elide(&state.title(), title_zone - 8.0))
-            .size(12.0)
-            .color(skin.title_text)
-            .width(Length::Shrink),
+        .center_x(Length::Fixed(title_w))
+        .center_y(Length::Fill),
     )
-    .width(Length::Fixed(title_zone))
-    .height(Length::Fill)
-    .center_x(Length::Fixed(title_zone))
-    .center_y(Length::Fill);
-    let drag_title = mouse_area(title)
-        .on_press(Message::TitlebarPress)
-        .on_double_click(Message::TitlebarDoubleClick);
-
+    .on_press(Message::TitlebarPress)
+    .on_double_click(Message::TitlebarDoubleClick)
+    .into();
     container(
         row![
             container(icon("folder", 16.0, skin))
@@ -426,9 +259,7 @@ pub(crate) fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Messag
                 .height(Length::Fill)
                 .center_x(Length::Fixed(icon_zone_w))
                 .center_y(Length::Fill),
-            container(qat).width(Length::Fixed(qat_w)).height(Length::Fill).center_y(Length::Fill),
             drag_title,
-            ctx_blocks,
             mouse_area(Space::new().width(Length::Fill).height(Length::Fixed(TITLEBAR_H)))
                 .on_press(Message::TitlebarPress)
                 .on_double_click(Message::TitlebarDoubleClick),
@@ -441,6 +272,3 @@ pub(crate) fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Messag
     .style(bg(skin.accent))
     .into()
 }
-
-// ---------------- ribbon ----------------
-
