@@ -22,6 +22,13 @@ use super::state::EditState;
 use super::Target;
 
 pub const QAT_H: f32 = QAT_ROW_HEIGHT;
+
+/// Horizontal gap multiplier (yaml `metrics.gap_scale`): scales group
+/// edge padding (4px), the inter-group gap (6px) and the column gap
+/// (2px).
+pub fn gap(ctx: &Ctx) -> f32 {
+    ctx.spec().metrics.gap_scale
+}
 pub const STRIP_H: f32 = TAB_STRIP_HEIGHT;
 pub const BODY_H: f32 = RIBBON_BODY_HEIGHT;
 pub const FOOTER_H: f32 = 18.0;
@@ -475,10 +482,10 @@ fn tab_strip(
     for &idx in &visible {
         let tab = &spec.tabs[idx];
         let label = tab_label(ctx, tab);
-        // contextual tabs reserve ~1ch before/after the label, matching
-        // the title-bar block above them
+        // contextual tabs are as wide as their title-bar block (the
+        // block adds 3px per side)
         let w = ctx.text_w(&label, 12.5) + 26.0
-            + if tab.contextual.is_some() { 12.0 } else { 0.0 };
+            + if tab.contextual.is_some() { 24.0 } else { 0.0 };
         let rect =
             Rectangle::new(Point::new(x, strip_y + 1.0), Size::new(w, STRIP_H - 1.0));
         let is_active = idx == selected;
@@ -740,7 +747,7 @@ fn tab_strip(
             Point::new(min_rect.x + 3.0, min_rect.y + 5.0),
             Size::new(12.0, 8.0),
         ),
-        ctx.view().minimized(),
+        !ctx.view().minimized(),
         ctx.theme.text,
     );
     scene.push(Node::new(min_rect, Cmd::Hit).target(min_target));
@@ -1120,11 +1127,12 @@ pub fn plan_groups(
             }
         })
         .collect();
+    let g = gap(ctx);
     let total = |sized: &[(ControlScale, usize, bool, f32)]| -> f32 {
         if sized.is_empty() {
             0.0
         } else {
-            sized.iter().map(|(_, _, _, w)| *w + 6.0).sum::<f32>() - 6.0
+            sized.iter().map(|(_, _, _, w)| *w + 6.0 * g).sum::<f32>() - 6.0 * g
         }
     };
     // Cascade stage 1: groups with at least two large buttons shrink
@@ -1202,9 +1210,9 @@ pub fn plan_groups(
         } else {
             sized[..n]
                 .iter()
-                .map(|(_, _, _, w)| *w + 6.0)
+                .map(|(_, _, _, w)| *w + 6.0 * g)
                 .sum::<f32>()
-                - 6.0
+                - 6.0 * g
                 <= avail
         }
     };
@@ -1218,9 +1226,9 @@ pub fn plan_groups(
         } else {
             sized[..n]
                 .iter()
-                .map(|(_, _, _, w)| *w + 6.0)
+                .map(|(_, _, _, w)| *w + 6.0 * g)
                 .sum::<f32>()
-                - 6.0
+                - 6.0 * g
                 <= avail - 26.0
         }
     };
@@ -1329,12 +1337,13 @@ pub fn tab_content(
             false,
             Some(plan),
         );
-        x += plan.w + 6.0;
+        let g = gap(ctx);
+        x += plan.w + 6.0 * g;
         // Win8: a separator closes every group, the last one included
         quad(
             scene,
             Rectangle::new(
-                Point::new(x - 4.0, content_y),
+                Point::new(x - 4.0 * g, content_y),
                 Size::new(1.0, BODY_H - 8.0),
             ),
             Fill::Color(ctx.theme.group_separator),
@@ -1664,8 +1673,9 @@ pub fn measure_group_scaled(
         used += span;
     }
     col_ws.push(cur_w);
+    let g = gap(ctx);
     let sum: f32 = col_ws.iter().sum();
-    sum + 2.0 * (col_ws.len().saturating_sub(1)) as f32 + 8.0
+    sum + 2.0 * g * (col_ws.len().saturating_sub(1)) as f32 + 8.0 * g
 }
 
 /// The group plan used while building (declared sizes by default).
@@ -1744,10 +1754,11 @@ fn build_group(
         return;
     }
     let scale = &plan.scale;
+    let g = gap(ctx);
     // controls in columns (a stack of four single-row controls packs 2+2)
     let per_col = rows_per_col(group, scale);
     let (cols, ncols) = columns_of(group, scale);
-    let mut col_x = x + 4.0;
+    let mut col_x = x + 4.0 * g;
     let mut used = 0usize;
     let mut col_width = 0.0f32;
     let mut pending: Vec<(&ControlSpec, f32, f32, bool)> = Vec::new();
@@ -1781,7 +1792,7 @@ fn build_group(
         let span = rows_of_scaled(control, scale);
         if used + span > per_col && used > 0 {
             flush(scene, col_x, col_width, &mut pending);
-            col_x += col_width + 2.0;
+            col_x += col_width + 2.0 * g;
             col_width = 0.0;
             used = 0;
         }

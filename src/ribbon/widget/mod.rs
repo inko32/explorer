@@ -208,6 +208,10 @@ where
                     state.hover_since = Some(Instant::now());
                     state.tooltip = None;
                     state.tooltip_anchor = None;
+                    // the hover fill is baked into the scene at layout
+                    // time — invalidate so the highlight shows with the
+                    // entering move, not one event later
+                    shell.invalidate_layout();
                     shell.request_redraw();
                 }
                 // tooltip
@@ -256,6 +260,8 @@ where
                 if let Some(node) = &hit {
                     if let Some(t) = &node.target {
                         state.pressed = Some(t.clone());
+                        shell.invalidate_layout();
+                        shell.request_redraw();
                         // entering edit mode?
                         match t {
                             SpinnerText(cmd) => {
