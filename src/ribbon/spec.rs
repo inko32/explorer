@@ -100,13 +100,19 @@ pub struct RibbonSpec {
 #[serde(default)]
 pub struct MetricsSpec {
     /// Height of the navigation band (nav buttons, address bar, search
-    /// box): the inner 12px elements are centered in it.
+    /// box): the inner elements are centered in it.
     pub band_height: f32,
+    /// Horizontal gap multiplier for the ribbon (group edge padding,
+    /// inter-group and column gaps).
+    pub gap_scale: f32,
 }
 
 impl Default for MetricsSpec {
     fn default() -> Self {
-        Self { band_height: 20.0 }
+        Self {
+            band_height: 32.0,
+            gap_scale: 1.0,
+        }
     }
 }
 

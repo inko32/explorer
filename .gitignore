@@ -1,6 +1,7 @@
 /dist/
 /target/
 /real-win10/
+/win8_screenshots/
 *.bmp
 *.ppm
 *.log
