@@ -87,6 +87,11 @@ sacrifice:
 metrics:
   # height of the navigation band (nav buttons, address bar, search box)
   band_height: 32
+  # navigation pane tree rows: icon and text sizes derive from the height
+  tree_item_height: 22
+  tree_indention: 8
+  # tree label size = icon size x this factor
+  tree_font_scale: 0.7
 
 application_menu:
   command: cmdAppMenu
