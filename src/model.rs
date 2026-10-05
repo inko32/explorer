@@ -44,6 +44,12 @@ pub enum Message {
     SetSort(SortBy),
     /// A ribbon framework event (IUICommandHandler::Execute and friends).
     Ribbon(crate::ribbon::RibbonEvent),
+    /// Expand/collapse a folder or archive node in the navigation tree.
+    NavToggle(PathBuf),
+    /// Expand/collapse a navigation pane section (Favorites/Computer/Network).
+    NavSectionToggle(NavSection),
+    /// Scroll position of the navigation pane tree.
+    NavScrolled { y: f32, height: f32 },
     /// Move/copy the selection to a destination directory (the ribbon
     /// "Move to" / "Copy to" dropdowns).
     TransferTo {
@@ -104,6 +110,63 @@ pub enum ClipMode {
     Cut,
 }
 
+/// Navigation pane sections (foldable group headers without a backing
+/// location; "Computer" is the "/" tree node itself, not a section flag).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum NavSection {
+    Favorites,
+    Network,
+}
+
+/// Navigation tree state: which nodes are open and the cached
+/// folder/archive children of every listed node.
+pub struct NavTree {
+    pub favorites_open: bool,
+    pub network_open: bool,
+    /// Expanded folder/archive paths.
+    pub expanded: std::collections::BTreeSet<PathBuf>,
+    /// path -> its folder/archive children (filled from every List result).
+    pub children: std::collections::HashMap<PathBuf, Vec<fs::Entry>>,
+    /// Scroll offset + viewport height of the tree scrollable.
+    pub scroll_y: f32,
+    pub viewport_h: f32,
+}
+
+impl NavTree {
+    fn new() -> Self {
+        Self {
+            favorites_open: true,
+            network_open: false,
+            expanded: Default::default(),
+            children: Default::default(),
+            scroll_y: 0.0,
+            viewport_h: 0.0,
+        }
+    }
+
+    /// Keep only folders and archives, hidden entries out unless requested,
+    /// sorted folders-first by name (Windows tree order).
+    fn store(&mut self, path: &Path, entries: &[fs::Entry], show_hidden: bool) {
+        let mut v: Vec<fs::Entry> = entries
+            .iter()
+            .filter(|e| (show_hidden || !e.is_hidden)
+                && (e.is_dir() || fs::archive::is_archive_path(&e.path)))
+            .cloned()
+            .collect();
+        v.sort_by(|a, b| {
+            b.is_dir().cmp(&a.is_dir()).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        });
+        self.children.insert(path.to_path_buf(), v);
+    }
+
+    /// Request a listing for `path` when it is not cached yet.
+    fn ensure_listed(&self, sched: &fs::Scheduler, path: &Path) {
+        if !self.children.contains_key(path) {
+            sched.send(Job::List(path.to_path_buf()));
+        }
+    }
+}
+
 pub struct Explorer {
     pub window: Option<iced::window::Id>,
     pub cwd: PathBuf,
@@ -152,6 +215,11 @@ pub struct Explorer {
     pub last_click: Option<(usize, std::time::Instant)>,
     pub loading: bool,
     pub volumes: Vec<fs::Volume>,
+    /// Navigation pane tree (expanded nodes + cached children).
+    pub nav: NavTree,
+    /// The cwd changed but volumes/listings were not known yet: re-run
+    /// the nav-tree reveal when the data arrives.
+    request_reveal: bool,
     sched: fs::Scheduler,
     pending_rename: Option<String>,
 }
@@ -235,11 +303,14 @@ impl Explorer {
             last_click: None,
             loading: false,
             volumes: Vec::new(),
+            nav: NavTree::new(),
+            request_reveal: false,
             sched,
             pending_rename: None,
         };
         s.request_listing();
         s.sched.send(Job::Volumes);
+        s.nav_reveal_cwd();
         let snap = s.ribbon_snapshot();
         s.ribbon.sync(snap);
         s.ribbon.auto_activate();
@@ -287,9 +358,9 @@ impl Explorer {
         self.loading = true;
     }
 
-    fn navigate(&mut self, path: PathBuf) {
+    fn navigate(&mut self, path: PathBuf) -> iced::Task<Message> {
         if path == self.cwd {
-            return;
+            return iced::Task::none();
         }
         self.back.push(self.cwd.clone());
         self.forward.clear();
@@ -298,6 +369,83 @@ impl Explorer {
         self.renaming = None;
         self.scroll_y = 0.0;
         self.request_listing();
+        self.nav_reveal_cwd()
+    }
+
+    /// Expand the cwd's ancestors in the nav tree so the current location
+    /// stays visible (Win7 "expand to current folder" behavior), then
+    /// scroll the tree to the current row. Volumes sit directly under
+    /// Computer, so inside a mounted volume the chain stops at the mount
+    /// point (the tree does not re-descend through /media/... to reach
+    /// the drive it already shows). Listings that are still in flight
+    /// defer the reveal via `request_reveal`.
+    fn nav_reveal_cwd(&mut self) -> iced::Task<Message> {
+        let boundary = self
+            .volumes
+            .iter()
+            .filter(|v| v.mount != Path::new("/") && self.cwd.starts_with(&v.mount))
+            .map(|v| v.mount.as_path())
+            .max_by_key(|m| m.components().count());
+        let mut targets: Vec<PathBuf> = Vec::new();
+        let mut p: &Path = &self.cwd;
+        loop {
+            targets.push(p.to_path_buf());
+            if Some(p) == boundary {
+                break;
+            }
+            match p.parent() {
+                Some(parent) => p = parent,
+                None => break,
+            }
+        }
+        self.request_reveal = targets.iter().any(|t| !self.nav.children.contains_key(t));
+        for t in targets {
+            self.nav.expanded.insert(t.clone());
+            self.nav.ensure_listed(&self.sched, &t);
+        }
+        if self.request_reveal {
+            iced::Task::none()
+        } else {
+            self.nav_scroll_to_cwd()
+        }
+    }
+
+    /// Scroll the nav tree so the current-folder row is visible. Only
+    /// correct once every reveal target is cached (the row offsets are
+    /// computed from the tree contents).
+    fn nav_scroll_to_cwd(&self) -> iced::Task<Message> {
+        let Some(idx) = crate::nav_pane::selected_row_index(self) else {
+            return iced::Task::none();
+        };
+        let (_, item_h, ..) = self.ribbon.metrics();
+        // favorites rows precede the tree; reveal targets sit below them
+        let favs = if self.nav.favorites_open {
+            crate::nav_pane::favorites_len() + 1
+        } else {
+            1
+        };
+        let row = (favs + idx) as f32;
+        let padding = 8.0; // column padding(4) top + bottom
+        let viewport = self.nav.viewport_h;
+        if viewport <= 0.0 {
+            return iced::Task::none();
+        }
+        let content_h = padding + (crate::nav_pane::tree_row_count(self) as f32) * item_h;
+        let max_scroll = (content_h - viewport).max(0.0);
+        let row_top = 4.0 + row * item_h;
+        let row_bottom = row_top + item_h;
+        let target = if row_top < self.nav.scroll_y {
+            row_top
+        } else if row_bottom > self.nav.scroll_y + viewport {
+            row_bottom - viewport
+        } else {
+            return iced::Task::none(); // already visible
+        };
+        let y = (target.clamp(0.0, max_scroll) / max_scroll.max(f32::EPSILON)).clamp(0.0, 1.0);
+        iced::widget::operation::snap_to(
+            crate::nav_pane::nav_scrollable_id(),
+            iced::widget::operation::RelativeOffset { x: None, y: Some(y) },
+        )
     }
 
     /// Sort entries: directories first, then by the active key.
@@ -377,6 +525,10 @@ impl Explorer {
     fn handle_fs_event(&mut self, ev: FsEvent) {
         match ev {
             FsEvent::Listed { path, result } => {
+                // every listing also feeds the nav tree cache (folders/archives only)
+                if let Ok(entries) = &result {
+                    self.nav.store(&path, entries, self.show_hidden);
+                }
                 if path == self.cwd {
                     self.loading = false;
                     match result {
@@ -533,10 +685,7 @@ impl Explorer {
                 }
                 iced::Task::none()
             }
-            Message::Navigate(p) => {
-                self.navigate(p);
-                iced::Task::none()
-            }
+            Message::Navigate(p) => self.navigate(p),
             Message::Back => {
                 if let Some(p) = self.back.pop() {
                     self.forward.push(self.cwd.clone());
@@ -558,13 +707,34 @@ impl Explorer {
                 iced::Task::none()
             }
             Message::Up => {
-                if let Some(p) = self.cwd.parent().map(Path::to_path_buf) {
-                    self.navigate(p);
+                match self.cwd.parent().map(Path::to_path_buf) {
+                    Some(p) => self.navigate(p),
+                    None => iced::Task::none(),
                 }
-                iced::Task::none()
             }
             Message::Refresh => {
                 self.request_listing();
+                // re-list every open nav node so the tree stays in sync
+                let open: Vec<PathBuf> = self.nav.expanded.iter().cloned().collect();
+                for p in open {
+                    self.sched.send(Job::List(p));
+                }
+                iced::Task::none()
+            }
+            Message::NavToggle(path) => {
+                if self.nav.expanded.contains(&path) {
+                    self.nav.expanded.remove(&path);
+                } else {
+                    self.nav.expanded.insert(path.clone());
+                    self.nav.ensure_listed(&self.sched, &path);
+                }
+                iced::Task::none()
+            }
+            Message::NavSectionToggle(section) => {
+                match section {
+                    NavSection::Favorites => self.nav.favorites_open = !self.nav.favorites_open,
+                    NavSection::Network => self.nav.network_open = !self.nav.network_open,
+                }
                 iced::Task::none()
             }
             Message::Select(i) => {
@@ -578,7 +748,7 @@ impl Explorer {
                         if let Some(e) = self.entries.get(i) {
                             if e.kind == fs::EntryKind::Dir || fs::archive::is_archive_path(&e.path) {
                                 let p = e.path.clone();
-                                self.navigate(p);
+                                return self.navigate(p);
                             }
                         }
                         return iced::Task::none();
@@ -595,7 +765,7 @@ impl Explorer {
                 if let Some(e) = self.entries.get(i) {
                     if e.kind == fs::EntryKind::Dir || fs::archive::is_archive_path(&e.path) {
                         let p = e.path.clone();
-                        self.navigate(p);
+                        return self.navigate(p);
                     }
                 }
                 iced::Task::none()
@@ -879,8 +1049,23 @@ impl Explorer {
                 self.search_share = (search_w / content_w).clamp(0.08, 0.6);
                 iced::Task::none()
             }
+            Message::NavScrolled { y, height } => {
+                self.nav.scroll_y = y;
+                self.nav.viewport_h = height;
+                iced::Task::none()
+            }
             Message::FsEvent(ev) => {
+                // a nav listing finished (or volumes arrived) while the
+                // tree reveal was waiting for data: re-run it now
+                let pending = match &ev {
+                    FsEvent::Listed { result, .. } => self.request_reveal && result.is_ok(),
+                    FsEvent::Volumes(_) => self.request_reveal,
+                    _ => false,
+                };
                 self.handle_fs_event(ev);
+                if pending {
+                    return self.nav_reveal_cwd();
+                }
                 iced::Task::none()
             }
         }

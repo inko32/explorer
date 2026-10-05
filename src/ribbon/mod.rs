@@ -767,6 +767,20 @@ impl Ribbon {
             Err(_) => 20.0,
         }
     }
+
+    /// UI metrics (band height, tree row height/indention/font scale),
+    /// from the ribbon markup.
+    pub fn metrics(&self) -> (f32, f32, f32, f32) {
+        match self.framework.spec() {
+            Ok(spec) => (
+                spec.metrics.band_height,
+                spec.metrics.tree_item_height,
+                spec.metrics.tree_indention,
+                spec.metrics.tree_font_scale,
+            ),
+            Err(_) => (32.0, 22.0, 14.0, 0.7),
+        }
+    }
 }
 
 /// Load the ribbon markup: a user file at `~/.config/explorer/ribbon.yaml`
