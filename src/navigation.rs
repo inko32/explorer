@@ -10,10 +10,15 @@ use crate::border::frame_insets;
 use crate::model::{Explorer, Message};
 use crate::ui_common::{bg, dbg, icon, skin, CHROME_BTN};
 
-fn nav_circle(icon_name: &'static str, enabled: bool, msg: Message, skin: skin::Skin, inner: f32) -> Element<'static, Message> {
-    let btn = button(crate::icon::view(icon_name, (inner * 0.67).round().max(6.0), &skin))
+fn nav_circle(icon_name: &'static str, enabled: bool, msg: Message, skin: skin::Skin, inner: f32, mult: f32) -> Element<'static, Message> {
+    // icon = button / bar_button_multiplier (ribbon.yaml); tight padding
+    // so iced's default button padding does not clamp the Fixed icon
+    let icon_sz = (inner / mult).round().max(8.0);
+    let pad = ((inner - icon_sz) / 2.0).max(0.0);
+    let btn = button(crate::icon::view(icon_name, icon_sz, &skin))
         .width(Length::Fixed(inner))
         .height(Length::Fixed(inner))
+        .padding(pad)
         .style(move |_t, status| button::Style {
             background: match (enabled, status) {
                 (true, button::Status::Hovered) => Some(skin.nav_hover.into()),
@@ -48,9 +53,11 @@ pub(crate) fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Mes
     // inner bar size derives from the band height (8px band padding)
     let inner = (state.ribbon.band_height() - 8.0).max(12.0);
     let text_sz = (inner * 0.55).round().max(8.0);
-    let refresh = button(icon("refresh", (inner * 0.67).round().max(6.0), skin))
+    let refresh_icon = (inner / state.ribbon.bar_button_multiplier()).round().max(8.0);
+    let refresh = button(icon("refresh", refresh_icon, skin))
         .width(Length::Fixed(inner))
         .height(Length::Fixed(inner))
+        .padding(((inner - refresh_icon) / 2.0).max(0.0))
         .style(move |_t, status| button::Style {
             background: match status {
                 button::Status::Hovered => Some(skin.hover.into()),
@@ -64,6 +71,7 @@ pub(crate) fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Mes
         .on_press(Message::Refresh);
 
     let mult = state.dpi_multiplier();
+    let btn_mult = state.ribbon.bar_button_multiplier();
     let show_search = content_w >= state.ribbon.sacrifice().3 * mult;
     let mut crumbs = row![].spacing(2).align_y(iced::Alignment::Center);
     let segs: Vec<String> = {
@@ -176,9 +184,9 @@ pub(crate) fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Mes
     .on_exit(Message::SplitterHover(false))
     .interaction(iced::mouse::Interaction::ResizingHorizontally);
     let mut band = row![
-        nav_circle("back", !state.back_is_empty(), Message::Back, skin, inner),
-        nav_circle("forward", !state.forward_is_empty(), Message::Forward, skin, inner),
-        nav_circle("up", state.cwd.parent().is_some(), Message::Up, skin, inner),
+        nav_circle("back", !state.back_is_empty(), Message::Back, skin, inner, btn_mult),
+        nav_circle("forward", !state.forward_is_empty(), Message::Forward, skin, inner, btn_mult),
+        nav_circle("up", state.cwd.parent().is_some(), Message::Up, skin, inner, btn_mult),
         crumb_bar,
     ];
     if show_search {

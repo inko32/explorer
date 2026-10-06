@@ -18,7 +18,7 @@ use crate::ribbon::spec::{
 use crate::ribbon::theme::{ContextualColor, Theme};
 
 use super::scene::{Cmd, Fill, Node, Scene};
-use super::state::EditState;
+use super::state::{EditState, Popup, PopupKind};
 use super::Target;
 
 pub const QAT_H: f32 = QAT_ROW_HEIGHT;
@@ -30,7 +30,13 @@ pub fn gap(ctx: &Ctx) -> f32 {
     ctx.spec().metrics.gap_scale
 }
 pub const STRIP_H: f32 = TAB_STRIP_HEIGHT;
+/// Base body height (without the yaml `metrics.footer_shift`).
 pub const BODY_H: f32 = RIBBON_BODY_HEIGHT;
+/// Body height for the loaded spec: the group titles sit
+/// `footer_shift` px lower and the bottom separator line follows.
+pub fn body_h(ctx: &Ctx) -> f32 {
+    BODY_H + ctx.spec().metrics.footer_shift
+}
 pub const FOOTER_H: f32 = 18.0;
 pub const CONTENT_H: f32 = BODY_H - FOOTER_H - 8.0; // 66
 pub const ROW_H: f32 = CONTENT_H / 3.0; // 22
@@ -413,7 +419,7 @@ pub fn tab_label(_ctx: &Ctx, tab: &TabSpec) -> String {
 pub fn ribbon_height(view: &RibbonView) -> f32 {
     let mut h = STRIP_H;
     if !view.minimized() {
-        h += BODY_H;
+        h += view.body_height();
     }
     if view.qat_dock() == ControlDock::Bottom {
         h += QAT_H;
@@ -447,8 +453,9 @@ pub fn ribbon_scene(ctx: &Ctx, width: f32) -> (Scene, Vec<TabLayout>) {
 
     let mut tabs_layout = Vec::new();
     if !minimized {
+        let bh = body_h(ctx);
         body(ctx, &mut scene, y, width);
-        y += BODY_H;
+        y += bh;
     }
     tab_strip(ctx, &mut scene, strip_y, width, &mut tabs_layout);
 
@@ -475,20 +482,61 @@ fn tab_strip(
 
     let mut x = (ctx.text_w("File", 12.5) + 26.0) * 8.0 / 7.0;
     let visible = visible_tabs(ctx);
+    // Pre-scan: base tab widths, then widen the last tab of each
+    // contextual run so the whole run is at least as wide as its
+    // title-bar block caption (block = run, see
+    // border::contextual_blocks) — the caption must fit over the run.
+    let widths: Vec<f32> = {
+        let mut ws: Vec<f32> = visible
+            .iter()
+            .map(|&idx| {
+                let tab = &spec.tabs[idx];
+                ctx.text_w(&tab_label(ctx, tab), 12.5) + 26.0
+            })
+            .collect();
+        let mut i = 0;
+        while i < visible.len() {
+            let name = spec.tabs[visible[i]].contextual.clone();
+            let mut j = i;
+            while j + 1 < visible.len()
+                && name.is_some()
+                && spec.tabs[visible[j + 1]].contextual == name
+            {
+                j += 1;
+            }
+            if let Some(name) = &name {
+                let run_w: f32 =
+                    ws[i..=j].iter().sum::<f32>() + 2.0 * (j - i) as f32;
+                let target = ctx.text_w(name, 12.0) + 6.0;
+                if run_w < target {
+                    ws[j] += target - run_w;
+                }
+            }
+            i = j + 1;
+        }
+        ws
+    };
     let mut contextual_run: Option<(ContextualColor, f32, f32, String)> = None;
     // Geometry of the active tab, for the connected line (Filled style).
     let mut active_tab: Option<(f32, f32, Option<ContextualColor>)> = None;
 
-    for &idx in &visible {
+    for (pos, &idx) in visible.iter().enumerate() {
         let tab = &spec.tabs[idx];
         let label = tab_label(ctx, tab);
-        // contextual tabs are as wide as their title-bar block (the
-        // block adds 3px per side)
-        let w = ctx.text_w(&label, 12.5) + 26.0
-            + if tab.contextual.is_some() { 24.0 } else { 0.0 };
+        let w = widths[pos];
         let rect =
             Rectangle::new(Point::new(x, strip_y + 1.0), Size::new(w, STRIP_H - 1.0));
-        let is_active = idx == selected;
+        // While minimized, no tab is pinned active: the clicked tab
+        // only highlights while its popup is open. The stored selection
+        // is left untouched so expand restores the previous active tab.
+        let is_active = if view.minimized() {
+            matches!(
+                &ctx.state.popup,
+                Some(Popup { kind: PopupKind::MinimizedTab(i), .. }) if *i == idx
+            )
+        } else {
+            idx == selected
+        };
         let accent = tab
             .contextual
             .as_deref()
@@ -1092,7 +1140,7 @@ pub fn plan_groups(
     tab_idx: usize,
 ) -> (Vec<GroupPlan>, Vec<usize>) {
     let tab = &ctx.spec().tabs[tab_idx];
-    let avail = width - 8.0;
+    let avail = width - 8.0 * gap(ctx);
     // Fallback ladders per group (ladder[gi][0] is the first shrink
     // step below the declared layout).
     let ladders: Vec<Vec<GroupScale>> = tab
@@ -1288,17 +1336,19 @@ pub fn tab_content(
     tab_idx: usize,
     allow_overflow: bool,
 ) {
+    let bh = body_h(ctx);
     // body background
     quad(
         scene,
-        Rectangle::new(Point::new(0.0, y), Size::new(width, BODY_H)),
+        Rectangle::new(Point::new(0.0, y), Size::new(width, bh)),
         Fill::Gradient(ctx.theme.ribbon.0, ctx.theme.ribbon.1),
         None,
         0.0,
     );
+    // bottom separator line — it follows the shifted group titles
     quad(
         scene,
-        Rectangle::new(Point::new(0.0, y + BODY_H - 1.0), Size::new(width, 1.0)),
+        Rectangle::new(Point::new(0.0, y + bh - 1.0), Size::new(width, 1.0)),
         Fill::Color(ctx.theme.tab_line),
         None,
         0.0,
@@ -1323,7 +1373,7 @@ pub fn tab_content(
             Vec::new(),
         )
     };
-    let mut x = 4.0f32;
+    let mut x = 4.0 * gap(ctx);
     for (pos, plan) in placed.iter().enumerate() {
         build_group(
             ctx,
@@ -1344,7 +1394,7 @@ pub fn tab_content(
             scene,
             Rectangle::new(
                 Point::new(x - 4.0 * g, content_y),
-                Size::new(1.0, BODY_H - 8.0),
+                Size::new(1.0, body_h(ctx) - 8.0),
             ),
             Fill::Color(ctx.theme.group_separator),
             None,
@@ -1361,7 +1411,7 @@ pub fn tab_content(
     }
     if !hidden.is_empty() && allow_overflow {
         let rect = Rectangle::new(
-            Point::new(width - 24.0, y + BODY_H / 2.0 - 9.0),
+            Point::new(width - 24.0, y + body_h(ctx) / 2.0 - 9.0),
             Size::new(18.0, 18.0),
         );
         let target = Target::Overflow;
@@ -1726,7 +1776,7 @@ fn build_group(
         // vertical button with the group icon, label and chevron that
         // opens the full group in a popup. It fills the whole command
         // pane — there is no separate group caption under it.
-        let rect = Rectangle::new(Point::new(x, y), Size::new(width, BODY_H - 10.0));
+        let rect = Rectangle::new(Point::new(x, y), Size::new(width, body_h(ctx) - 10.0));
         let target = Target::OverflowGroup(tab_idx, group_idx);
         let hover = ctx.hovered(&target);
         quad(
@@ -1805,8 +1855,9 @@ fn build_group(
     }
     flush(scene, col_x, col_width, &mut pending);
 
-    // footer: caption + dialog launcher
-    let footer_y = y + CONTENT_H + 2.0;
+    // footer: caption + dialog launcher (footer_shift px lower — the
+    // bottom separator line follows, see body())
+    let footer_y = y + CONTENT_H + 2.0 + ctx.spec().metrics.footer_shift;
     let label = group
         .label
         .clone()
@@ -1970,9 +2021,10 @@ pub fn build_control_scaled(
 }
 
 /// Shared large-button geometry: a 32px icon at the top, a balanced
-/// two-line label under it, an optional chevron below the label. Large
-/// buttons, large dropdown buttons and collapsed (popup) groups all use
-/// these offsets so their icons and text align.
+/// two-line label under it; with a dropdown the chevron trails the last
+/// label line (like a trailing character), never a third line below.
+/// Large buttons, large dropdown buttons and collapsed (popup) groups
+/// all use these offsets so their icons and text align.
 pub const LARGE_ICON_Y: f32 = 3.0;
 pub const LARGE_TEXT_Y: f32 = 38.0;
 pub const LARGE_LINE_H: f32 = 12.0;
@@ -2000,31 +2052,32 @@ fn large_content(
         img,
         opacity,
     );
-    let lines = wrap_balanced(ctx, label, 11.0, 2);
-    for (i, line) in lines.iter().take(2).enumerate() {
-        text(
-            scene,
-            Rectangle::new(
-                Point::new(rect.x, rect.y + LARGE_TEXT_Y + i as f32 * LARGE_LINE_H),
-                Size::new(rect.width, LARGE_LINE_H),
-            ),
-            line.clone(),
-            11.0,
-            text_color,
-            Horizontal::Center,
-            Vertical::Center,
-        );
+    // at most 2 lines; the arrow follows the last line ("Move to ▾",
+    // alone on the second line for single-line labels: "Paste ▾")
+    let mut lines = wrap_balanced(ctx, label, 11.0, 2);
+    lines.truncate(2);
+    if chevron_color.is_some() && lines.len() == 1 {
+        lines.push(String::new());
     }
-    if let Some(c) = chevron_color {
-        let n = lines.len().min(2) as f32;
-        triangle_down(
-            scene,
-            rect.x + rect.width / 2.0,
-            rect.y + LARGE_TEXT_Y + n * LARGE_LINE_H + 2.0 + LARGE_LINE_H / 2.0 + 0.5,
-            7.0,
-            5.0,
-            c,
+    let last = lines.len() - 1;
+    for (i, line) in lines.iter().enumerate() {
+        let lrect = Rectangle::new(
+            Point::new(rect.x, rect.y + LARGE_TEXT_Y + i as f32 * LARGE_LINE_H),
+            Size::new(rect.width, LARGE_LINE_H),
         );
+        if i == last && chevron_color.is_some() {
+            text_arrow(ctx, scene, lrect, line, 11.0, chevron_color.unwrap_or(text_color));
+        } else {
+            text(
+                scene,
+                lrect,
+                line.clone(),
+                11.0,
+                text_color,
+                Horizontal::Center,
+                Vertical::Center,
+            );
+        }
     }
 }
 

@@ -95,7 +95,7 @@ fn load_ui_creates_commands_and_view() {
     // every command got a handler via OnCreateUICommand
     assert!(fw.commands().len() > 40, "expected many commands, got {}", fw.commands().len());
     let view = fw.get_view(0).unwrap();
-    assert_eq!(view.get_height(), 26 + 92); // strip + body (top QAT lives in the title bar)
+    assert_eq!(view.get_height(), 26 + 92 + 3); // strip + body incl. default footer_shift (top QAT lives in the title bar)
     fw.destroy();
     drop(handler);
 }

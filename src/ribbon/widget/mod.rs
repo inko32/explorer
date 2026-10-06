@@ -39,6 +39,9 @@ use layout::Ctx;
 use scene::{Cmd, Fill, Scene};
 use state::Target::*;
 
+/// Hover dwell time before a tooltip appears.
+const TOOLTIP_DELAY: Duration = Duration::from_millis(600);
+
 /// The ribbon widget.
 pub struct Ribbon<'a, Message, Th = IcedTheme, Renderer = iced::Renderer> {
     fw: &'a RibbonFramework,
@@ -194,132 +197,158 @@ where
             shell.request_redraw();
         }
 
-        match event {
-            iced::Event::Mouse(mouse::Event::CursorMoved { position }) => {
-                state.hover_pos = position;
-                let local = Point::new(position.x - origin.x, position.y - origin.y);
-                let hit = state
-                    .scene
-                    .as_ref()
-                    .and_then(|s| s.hit(local).cloned());
-                let new_hover = hit.as_ref().and_then(|n| n.target.clone());
-                if state.hover != new_hover {
-                    state.hover = new_hover.clone();
-                    state.hover_since = Some(Instant::now());
-                    state.tooltip = None;
-                    state.tooltip_anchor = None;
-                    // the hover fill is baked into the scene at layout
-                    // time — invalidate so the highlight shows with the
-                    // entering move, not one event later
+        // Press/move/release logic shared by mouse and touch: the first
+        // finger plays the pointer role (touch events carry their own
+        // position; mouse reads the cursor).
+        let fw = self.fw;
+        let theme = &self.theme;
+        let on_event = &self.on_event;
+        let move_to = |state: &mut State, position: Point, shell: &mut Shell<'_, Message>| {
+            state.hover_pos = position;
+            let local = Point::new(position.x - origin.x, position.y - origin.y);
+            let hit = state
+                .scene
+                .as_ref()
+                .and_then(|s| s.hit(local).cloned());
+            let new_hover = hit.as_ref().and_then(|n| n.target.clone());
+            if state.hover != new_hover {
+                state.hover = new_hover.clone();
+                state.hover_since = Some(Instant::now());
+                state.tooltip = None;
+                state.tooltip_anchor = None;
+                // the hover fill is baked into the scene at layout
+                // time — invalidate so the highlight shows with the
+                // entering move, not one event later
+                shell.invalidate_layout();
+                shell.request_redraw();
+            }
+            // tooltip
+            if let Some(node) = &hit {
+                if let (Some(tip), Some(since)) = (node.tip, state.hover_since) {
+                    if since.elapsed() > TOOLTIP_DELAY
+                        && state.tooltip.is_none()
+                    {
+                        state.tooltip = Some(tip);
+                        state.tooltip_anchor = Some(translate_rect(node.rect, origin));
+                        shell.request_redraw();
+                        fw.view_log(
+                            EventType::TooltipShown,
+                            if matches!(new_hover, Some(Qat(_))) {
+                                EventLocation::Qat
+                            } else {
+                                EventLocation::Ribbon
+                            },
+                            tip,
+                        );
+                    }
+                }
+            }
+            // gallery preview from the in-ribbon strip
+            handle_strip_preview(fw, state, &new_hover, shell, on_event);
+        };
+        let press_at = |state: &mut State, position: Point, shell: &mut Shell<'_, Message>| {
+            state.keytips = false;
+            state.keytip_buffer.clear();
+            // close popups on click-away (the overlay passes through)
+            if let Some((pop_origin, pop_size)) = state.popup_bounds {
+                let r = Rectangle::new(pop_origin, pop_size);
+                if pop_size.width > 0.0 && r.contains(position) {
+                    return; // overlay handles it
+                }
+                close_all_popups(state);
+                state.popup_bounds = None;
+                shell.request_redraw();
+            }
+            let local = Point::new(position.x - origin.x, position.y - origin.y);
+            let hit = state.scene.as_ref().and_then(|s| s.hit(local).cloned());
+            if let Some(node) = &hit {
+                if let Some(t) = &node.target {
+                    state.pressed = Some(t.clone());
                     shell.invalidate_layout();
                     shell.request_redraw();
-                }
-                // tooltip
-                if let Some(node) = &hit {
-                    if let (Some(tip), Some(since)) = (node.tip, state.hover_since) {
-                        if since.elapsed() > Duration::from_millis(600)
-                            && state.tooltip.is_none()
-                        {
-                            state.tooltip = Some(tip);
-                            state.tooltip_anchor = Some(translate_rect(node.rect, origin));
-                            shell.request_redraw();
-                            self.fw.view_log(
-                                EventType::TooltipShown,
-                                if matches!(new_hover, Some(Qat(_))) {
-                                    EventLocation::Qat
-                                } else {
-                                    EventLocation::Ribbon
-                                },
-                                tip,
-                            );
+                    // entering edit mode?
+                    match t {
+                        SpinnerText(cmd) => {
+                            let text = format_spinner(fw, *cmd);
+                            state.edit = Some(EditState {
+                                cmd: *cmd,
+                                text,
+                                numeric: true,
+                            });
+                        }
+                        ComboMain(cmd) => {
+                            let text = fw
+                                .cached(*cmd, PropertyKey::StringValue)
+                                .and_then(|v| v.as_str().map(str::to_owned))
+                                .unwrap_or_default();
+                            state.edit = Some(EditState {
+                                cmd: *cmd,
+                                text,
+                                numeric: false,
+                            });
+                        }
+                        _ => {
+                            if state.edit.is_some() {
+                                state.edit = None;
+                            }
                         }
                     }
                 }
-                // gallery preview from the in-ribbon strip
-                handle_strip_preview(self.fw, state, &new_hover, shell, &self.on_event);
+            } else if state.edit.is_some() {
+                state.edit = None;
+            }
+        };
+        let release_at = |state: &mut State, position: Point, shell: &mut Shell<'_, Message>| {
+            let local = Point::new(position.x - origin.x, position.y - origin.y);
+            let hit = state.scene.as_ref().and_then(|s| s.hit(local).cloned());
+            let pressed = state.pressed.take();
+            if let (Some(node), Some(t)) = (&hit, &pressed) {
+                if node.target.as_ref() == Some(t) {
+                    let anchor = translate_rect(node.rect, origin);
+                    activate(
+                        fw,
+                        theme,
+                        state,
+                        t,
+                        anchor,
+                        origin,
+                        shell,
+                        on_event.as_deref(),
+                    );
+                    shell.capture_event();
+                }
+            }
+        };
+
+        match event {
+            iced::Event::Mouse(mouse::Event::CursorMoved { position })
+            | iced::Event::Touch(iced::touch::Event::FingerMoved { position, .. }) => {
+                move_to(state, position, shell);
                 return;
             }
             iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-                state.keytips = false;
-                state.keytip_buffer.clear();
-                let Some(position) = cursor.position() else {
-                    return;
-                };
-                // close popups on click-away (the overlay passes through)
-                if let Some((pop_origin, pop_size)) = state.popup_bounds {
-                    let r = Rectangle::new(pop_origin, pop_size);
-                    if pop_size.width > 0.0 && r.contains(position) {
-                        return; // overlay handles it
-                    }
-                    close_all_popups(state);
-                    state.popup_bounds = None;
-                    shell.request_redraw();
-                }
-                let local = Point::new(position.x - origin.x, position.y - origin.y);
-                let hit = state.scene.as_ref().and_then(|s| s.hit(local).cloned());
-                if let Some(node) = &hit {
-                    if let Some(t) = &node.target {
-                        state.pressed = Some(t.clone());
-                        shell.invalidate_layout();
-                        shell.request_redraw();
-                        // entering edit mode?
-                        match t {
-                            SpinnerText(cmd) => {
-                                let text = format_spinner(self.fw, *cmd);
-                                state.edit = Some(EditState {
-                                    cmd: *cmd,
-                                    text,
-                                    numeric: true,
-                                });
-                            }
-                            ComboMain(cmd) => {
-                                let text = self
-                                    .fw
-                                    .cached(*cmd, PropertyKey::StringValue)
-                                    .and_then(|v| v.as_str().map(str::to_owned))
-                                    .unwrap_or_default();
-                                state.edit = Some(EditState {
-                                    cmd: *cmd,
-                                    text,
-                                    numeric: false,
-                                });
-                            }
-                            _ => {
-                                if state.edit.is_some() {
-                                    state.edit = None;
-                                }
-                            }
-                        }
-                    }
-                } else if state.edit.is_some() {
-                    state.edit = None;
+                if let Some(position) = cursor.position() {
+                    press_at(state, position, shell);
                 }
                 return;
             }
+            iced::Event::Touch(iced::touch::Event::FingerPressed { position, .. }) => {
+                press_at(state, position, shell);
+                return;
+            }
             iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                let Some(position) = cursor.position() else {
-                    state.pressed = None;
-                    return;
-                };
-                let local = Point::new(position.x - origin.x, position.y - origin.y);
-                let hit = state.scene.as_ref().and_then(|s| s.hit(local).cloned());
-                let pressed = state.pressed.take();
-                if let (Some(node), Some(t)) = (&hit, &pressed) {
-                    if node.target.as_ref() == Some(t) {
-                        let anchor = translate_rect(node.rect, origin);
-                        activate(
-                            self.fw,
-                            &self.theme,
-                            state,
-                            t,
-                            anchor,
-                            origin,
-                            shell,
-                            self.on_event.as_deref(),
-                        );
-                        shell.capture_event(); return;
-                    }
+                match cursor.position() {
+                    Some(position) => release_at(state, position, shell),
+                    None => state.pressed = None,
                 }
+                return;
+            }
+            iced::Event::Touch(iced::touch::Event::FingerLifted { position, .. }) => {
+                release_at(state, position, shell);
+                return;
+            }
+            iced::Event::Touch(iced::touch::Event::FingerLost { .. }) => {
+                state.pressed = None;
                 return;
             }
             iced::Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
@@ -362,6 +391,43 @@ where
                     shell,
                     self.on_event.as_deref(),
                 )
+            }
+            // Redraw armed by the hover-dwell timer: show the tooltip
+            // if the pointer has stayed put long enough (no CursorMoved
+            // needed).
+            iced::Event::Window(iced::window::Event::RedrawRequested(_)) => {
+                let Some(since) = state.hover_since else { return };
+                if state.tooltip.is_some() || state.popup.is_some() {
+                    return;
+                }
+                if since.elapsed() < TOOLTIP_DELAY {
+                    // too early — re-arm
+                    shell.request_redraw_at(since + TOOLTIP_DELAY);
+                    return;
+                }
+                let local = Point::new(
+                    state.hover_pos.x - origin.x,
+                    state.hover_pos.y - origin.y,
+                );
+                if let Some(node) =
+                    state.scene.as_ref().and_then(|s| s.hit(local).cloned())
+                {
+                    if let Some(tip) = node.tip {
+                        state.tooltip = Some(tip);
+                        state.tooltip_anchor =
+                            Some(translate_rect(node.rect, origin));
+                        shell.request_redraw();
+                        self.fw.view_log(
+                            EventType::TooltipShown,
+                            if matches!(state.hover, Some(Qat(_))) {
+                                EventLocation::Qat
+                            } else {
+                                EventLocation::Ribbon
+                            },
+                            tip,
+                        );
+                    }
+                }
             }
             _ => {},
         }

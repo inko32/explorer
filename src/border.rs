@@ -140,7 +140,11 @@ pub(crate) fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'st
                     hover_bg: Color,
                     solid: bool|
           -> Element<'static, Message> {
-        let rest = if solid { Some(skin.close_hover) } else { rest_bg };
+        // Win8 keeps the close button red even at rest; Win10 shows it
+        // like the other caption buttons (accent bar showing through)
+        // and only turns red on hover/press.
+        let solid_rest = solid && rest_bg.is_some();
+        let rest = if solid_rest { Some(skin.close_idle) } else { rest_bg };
         let blend_white = |c: Color, a: f32| Color {
             r: c.r + (1.0 - c.r) * a,
             g: c.g + (1.0 - c.g) * a,
@@ -161,7 +165,7 @@ pub(crate) fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'st
             background: match (solid, status) {
                 (true, button::Status::Hovered) => Some(skin.close_hover.into()),
                 (true, button::Status::Pressed) => Some(skin.close_pressed.into()),
-                (true, _) => Some(skin.close_idle.into()),
+                (true, _) => rest.map(Into::into),
                 (false, button::Status::Hovered) => Some(match rest {
                     Some(c) => blend_white(c, 0.18).into(),
                     None => hover_bg.into(),
@@ -241,9 +245,9 @@ fn contextual_blocks(state: &Explorer) -> Element<'static, Message> {
     let mut r = row![].height(Length::Fixed(TITLEBAR_H));
     let mut prev_end = 0.0f32;
     for b in state.ribbon.contextual_blocks() {
-        // reserve ~1 character of space before and after the set label
-        let bx = (b.x - 6.0).max(0.0);
-        let bw = b.w + 12.0;
+        // the block spans exactly its tab run on the strip below
+        let bx = b.x;
+        let bw = b.w;
         let gap = (bx - prev_end).max(0.0);
         if gap > 0.0 {
             r = r.push(Space::new().width(Length::Fixed(gap)));
@@ -341,11 +345,32 @@ pub(crate) fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Messag
     };
     let (_, fr, _, fl) = frame_insets(state);
     let content_w = (state.win_w - fr - fl).max(240.0);
-    let title_w = (content_w - icon_zone_w - captions_w - 16.0).max(60.0);
+    let qat_visible = state.ribbon.qat_docked_top()
+        && state.win_w - fl - fr
+            >= state.ribbon.sacrifice().0 * state.dpi_multiplier();
+    // QAT head width when docked at the top: two separators, the
+    // chevron and n 22px buttons with 2px row spacing
+    // (mirrors titlebar_qat).
+    let head_w = icon_zone_w
+        + if qat_visible {
+            24.0 * state.ribbon.qat_buttons().len() as f32 + 30.0
+        } else {
+            0.0
+        };
+    // the centered title must clear the contextual blocks (they sit
+    // above the ribbon tabs, left of the title area) and the QAT head
+    let blocks_right = state
+        .ribbon
+        .contextual_blocks()
+        .iter()
+        .map(|b| b.x + b.w)
+        .fold(0.0f32, f32::max);
+    let title_left = (blocks_right + 8.0).max(head_w);
+    let title_w = (content_w - title_left - captions_w - 16.0).max(60.0);
     let drag_title: Element<Message> = mouse_area(
         container(
-            text(elide(&state.title(), title_w))
-                .size(12.0)
+            text(elide(&state.title(), title_w, 8.75))
+                .size(14.0)
                 .color(skin.title_text)
                 .width(Length::Shrink),
         )
@@ -364,15 +389,13 @@ pub(crate) fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Messag
             .center_x(Length::Fixed(icon_zone_w))
             .center_y(Length::Fill),
     ];
-    let (_, fr2, _, fl2) = frame_insets(state);
-    if state.ribbon.qat_docked_top()
-        && state.win_w - fl2 - fr2 >= state.ribbon.sacrifice().0 * state.dpi_multiplier()
-    {
+    if qat_visible {
         head = head.push(dbg("titlebar_qat", titlebar_qat(state, skin)));
     }
     let base = container(
         row![
             head,
+            Space::new().width(Length::Fixed((title_left - head_w).max(0.0))),
             drag_title,
             mouse_area(Space::new().width(Length::Fill).height(Length::Fixed(TITLEBAR_H)))
                 .on_press(Message::TitlebarPress)

@@ -249,12 +249,12 @@ pub(crate) fn icon(name: &str, size: f32, skin: skin::Skin) -> Element<'static, 
 // ---------------- title bar ----------------
 
 /// Middle-ellipsis text clamp to a pixel width.
-pub(crate) fn elide(s: &str, max_w: f32) -> String {
-    let w = s.chars().count() as f32 * 7.5;
+pub(crate) fn elide(s: &str, max_w: f32, per_char: f32) -> String {
+    let w = s.chars().count() as f32 * per_char;
     if w <= max_w {
         return s.to_string();
     }
-    let keep = ((max_w / 7.5).max(1.0) as usize).saturating_sub(3);
+    let keep = ((max_w / per_char).max(1.0) as usize).saturating_sub(3);
     let take = keep / 2;
     let start: String = s.chars().take(take).collect();
     let tail: String = s

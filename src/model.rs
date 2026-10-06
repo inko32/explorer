@@ -40,7 +40,22 @@ pub enum Message {
     SelectAll,
     SelectNone,
     InvertSelection,
-    SetView(ViewMode),
+    /// Set the view to a step index (SPEC/folder-spec.md §5 preset pick).
+    SetView(u8),
+    /// Ctrl+scroll over the file view: accumulated wheel delta in §7
+    /// units (Lines converted to notch deltas, Pixels as-is).
+    WheelZoom(f32),
+    /// Windows scrollbar strip: absolute target offset for the file
+    /// view (the x offset for List, the y offset otherwise).
+    FileScrollTo(f32),
+    /// Same for the navigation pane (always vertical).
+    NavScrollTo(f32),
+    /// Toggle the Details compact mode (24px rows instead of 32, §8.1).
+    ToggleDetailsCompact,
+    /// Press on a Details column split handle: start a column drag.
+    ColumnSplitBegin(usize),
+    /// Cursor moved during a Details column drag (window-logical x).
+    ColumnSplitMove(f32),
     SetSort(SortBy),
     /// A ribbon framework event (IUICommandHandler::Execute and friends).
     Ribbon(crate::ribbon::RibbonEvent),
@@ -67,7 +82,13 @@ pub enum Message {
     Event(iced::Event),
     FsEvent(FsEvent),
     /// Scroll offset + viewport height from the file list scrollable.
-    Scrolled { y: f32, height: f32 },
+    Scrolled { x: f32, y: f32, height: f32 },
+    /// The file-view scrollable area changed size (Sensor) — the
+    /// accurate viewport height (on_scroll stays silent when the
+    /// content fits, window resize carries the WINDOW height).
+    FileAreaResized(f32, f32),
+    /// Same for the navigation pane area.
+    NavAreaResized(f32, f32),
     /// Window resized (for list virtualization viewport + title-bar layout).
     WindowResized(f32, f32),
     /// Switch between the self-rendered border and native decorations.
@@ -81,12 +102,6 @@ pub enum Message {
     ToggleFrameStyle,
     /// Toggle the QAT between the title bar ("above") and below the ribbon.
     ToggleQatDock,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum ViewMode {
-    Details,
-    Large,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -167,6 +182,15 @@ impl NavTree {
     }
 }
 
+/// Details column drag: which fixed column (0=Date, 1=Type, 2=Size),
+/// the cursor x at drag start (learned on the first move) and the
+/// column width at drag start.
+struct ColDrag {
+    col: usize,
+    start_x: Option<f32>,
+    start_w: f32,
+}
+
 pub struct Explorer {
     pub window: Option<iced::window::Id>,
     pub cwd: PathBuf,
@@ -191,6 +215,8 @@ pub struct Explorer {
     /// Pointer over the address/search splitter.
     pub splitter_hover: bool,
     pub maximized: bool,
+    /// Ctrl held (drives Ctrl+scroll view zoom over the file view).
+    pub ctrl_held: bool,
     /// Last title-bar press (double-click detection: the 2nd press must not
     /// start a window drag, or the in-flight move scrambles the placement of
     /// the subsequent maximize).
@@ -200,11 +226,34 @@ pub struct Explorer {
     /// Win8 double border vs Win10 1px border.
     pub frame_style: FrameStyle,
     pub clipboard: Option<(ClipMode, Vec<PathBuf>)>,
-    pub view: ViewMode,
+    /// Folder view configuration (`assets/folder-view.yaml`,
+    /// SPEC/folder-spec.md): step sizes, layout metrics, enabled mask.
+    pub view_cfg: crate::view_step::ViewCfg,
+    /// View step index (SPEC/folder-spec.md §3).
+    pub view_index: u8,
+    /// §6 enabled mask (resolved from folder-view.yaml at startup).
+    #[allow(dead_code)] // the config is read via view_cfg.mask(); this
+                        // cache is for the future per-folder masks
+    view_mask: u64,
+    /// §7 wheel-delta accumulator (reset when Ctrl is released).
+    zoom_acc: f32,
+    /// §7 rate limit: time of the last zoom step.
+    zoom_step_at: Option<std::time::Instant>,
+    /// §10 per-folder stored view index (session persistence).
+    folder_views: std::collections::HashMap<PathBuf, u8>,
+    /// §8.1 Details compact mode (24px rows); compact is the default.
+    pub details_compact: bool,
+    /// Details column widths (Date modified / Type / Size); the Name
+    /// column takes the remaining width. Adjustable via header handles.
+    pub details_cols: [f32; 3],
+    /// Details column drag in progress.
+    col_drag: Option<ColDrag>,
     pub sort: SortBy,
     pub show_hidden: bool,
     /// The ribbon (rs-ribbon framework + explorer commanding).
     pub ribbon: crate::ribbon::Ribbon,
+    /// File-view scroll offsets (List scrolls horizontally, §8.1).
+    pub scroll_x: f32,
     pub scroll_y: f32,
     pub viewport_h: f32,
     /// Measured window width (resize events) for title-bar layout.
@@ -268,6 +317,10 @@ impl Explorer {
         let cwd = cwd
             .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
             .unwrap_or_else(|| PathBuf::from("/"));
+        let view_cfg = crate::view_step::ViewCfg::load();
+        let view_index = view_cfg.presets.details;
+        let view_mask = view_cfg.mask();
+        let details_cols = view_cfg.details_col_widths();
         let mut s = Self {
             window: None,
             cwd,
@@ -287,14 +340,24 @@ impl Explorer {
             bar_split: false,
             splitter_hover: false,
             maximized: false,
+            ctrl_held: false,
             last_title_press: None,
             self_border: true,
             frame_style: FrameStyle::Win8,
             clipboard: None,
-            view: ViewMode::Details,
+            view_cfg,
+            view_index,
+            view_mask,
+            zoom_acc: 0.0,
+            zoom_step_at: None,
+            folder_views: Default::default(),
+            details_compact: true,
+            details_cols,
+            col_drag: None,
             sort: SortBy::Name,
             show_hidden: false,
             ribbon: crate::ribbon::Ribbon::new(),
+            scroll_x: 0.0,
             scroll_y: 0.0,
             viewport_h: 600.0,
             win_w: 1152.0,
@@ -367,9 +430,172 @@ impl Explorer {
         self.cwd = path;
         self.selected.clear();
         self.renaming = None;
-        self.scroll_y = 0.0;
+        self.restore_folder_view();
         self.request_listing();
         self.nav_reveal_cwd()
+    }
+
+    /// §10 per-folder persistence: restore the stored view index for the
+    /// current folder (snapped to the enabled mask); unknown folders use
+    /// the default.
+    fn restore_folder_view(&mut self) {
+        let stored = self.folder_views.get(&self.cwd).copied();
+        self.view_index = self
+            .view_cfg
+            .nearest_enabled(stored.unwrap_or(self.view_cfg.presets.details));
+        self.zoom_acc = 0.0;
+        self.zoom_step_at = None;
+        self.scroll_x = 0.0;
+        self.scroll_y = 0.0;
+    }
+
+    /// Width of the file-view pane (window minus frame, nav pane and
+    /// scrollbar strip) — the same math ui.rs uses to lay out the main
+    /// row. The model needs it for the §9 scroll anchor (grid columns
+    /// depend on the width).
+    fn file_pane_width(&self) -> f32 {
+        let (_, fr, _, fl) =
+            crate::border::frame_insets_pub(self.self_border, self.frame_style);
+        let content_w = self.win_w - fl - fr;
+        // thresholds are in ribbon layout units; win_w is in compositor
+        // units — the --dpi multiplier separates the two (see ui.rs)
+        let mult = self.dpi_multiplier();
+        let (_, min_nav_w, nav_resize_below, _) = self.ribbon.sacrifice();
+        let (min_nav_w, nav_resize_below) = (min_nav_w * mult, nav_resize_below * mult);
+        let pane_w = if content_w >= min_nav_w {
+            let nav_w = if content_w >= nav_resize_below {
+                crate::nav_pane::NAV_W
+            } else {
+                (content_w * crate::nav_pane::NAV_W / nav_resize_below).max(110.0)
+            };
+            content_w - nav_w
+        } else {
+            content_w
+        };
+        // the scrollbar strip collapses to 0px when the content fits
+        // (same rule as folder::file_view), widening the pane
+        let cfg = &self.view_cfg;
+        let longest = self
+            .entries
+            .iter()
+            .map(|e| e.name.chars().count())
+            .max()
+            .unwrap_or(0);
+        let with_strip = (pane_w - crate::scrollbar::THICKNESS).max(0.0);
+        let extent = cfg.content_extent(
+            self.view_index,
+            self.entries.len(),
+            with_strip,
+            self.viewport_h,
+            longest,
+            self.details_compact,
+        );
+        let viewport_axis = if cfg.family(self.view_index) == crate::view_step::Family::List {
+            pane_w
+        } else {
+            self.viewport_h
+        };
+        if extent > viewport_axis {
+            with_strip
+        } else {
+            pane_w.max(0.0)
+        }
+    }
+
+    /// Switch the view step index (§5 preset pick / §7 wheel step),
+    /// snapping to the enabled mask, keeping the first visible item
+    /// anchored in the viewport (§9) and storing the choice per folder
+    /// (§10). Selection and hover stay untouched.
+    fn set_view_index(&mut self, index: u8) -> iced::Task<Message> {
+        let index = self.view_cfg.nearest_enabled(index);
+        if index == self.view_index {
+            return iced::Task::none();
+        }
+        let old = self.view_index;
+        let old_compact = self.details_compact;
+        self.view_index = index;
+        self.folder_views.insert(self.cwd.clone(), index);
+        self.anchor_view(old, old_compact)
+    }
+
+    /// §9 scroll anchor: keep the first visible item (in the OLD layout)
+    /// at the same viewport position in the current layout.
+    fn anchor_view(&mut self, old_index: u8, old_compact: bool) -> iced::Task<Message> {
+        let cfg = &self.view_cfg;
+        let pane_w = self.file_pane_width();
+        let longest = self
+            .entries
+            .iter()
+            .map(|e| e.name.chars().count())
+            .max()
+            .unwrap_or(0);
+        let n = self.entries.len();
+        let old_offset = if cfg.family(old_index) == crate::view_step::Family::List {
+            self.scroll_x
+        } else {
+            self.scroll_y
+        };
+        let item = cfg.first_visible(
+            old_index,
+            old_offset,
+            pane_w,
+            self.viewport_h,
+            n,
+            longest,
+            old_compact,
+        );
+        let within = old_offset
+            - cfg.item_offset(old_index, item, pane_w, self.viewport_h, longest, old_compact);
+        let index = self.view_index;
+        let offset = (cfg.item_offset(
+            index,
+            item,
+            pane_w,
+            self.viewport_h,
+            longest,
+            self.details_compact,
+        ) + within)
+            .max(0.0);
+        let (x, y) = if cfg.family(index) == crate::view_step::Family::List {
+            self.scroll_x = offset;
+            self.scroll_y = 0.0;
+            (Some(offset), Some(0.0))
+        } else {
+            self.scroll_y = offset;
+            self.scroll_x = 0.0;
+            (Some(0.0), Some(offset))
+        };
+        iced::widget::operation::scroll_to(
+            crate::folder::file_scrollable_id(),
+            iced::widget::operation::AbsoluteOffset { x, y },
+        )
+    }
+
+    /// §7 Ctrl+wheel input handling: accumulate the delta and change one
+    /// step per ±notch_delta; at most one step per step_interval_ms —
+    /// extra delta is dropped, not queued. Wheel up = next enabled index
+    /// above (larger icons; ScrollDirection default).
+    fn wheel_zoom(&mut self, delta: f32) -> iced::Task<Message> {
+        let input = self.view_cfg.input;
+        let now = std::time::Instant::now();
+        if self
+            .zoom_step_at
+            .is_some_and(|t| now.duration_since(t).as_millis() < input.step_interval_ms as u128)
+        {
+            return iced::Task::none();
+        }
+        self.zoom_acc += delta;
+        if self.zoom_acc.abs() < input.notch_delta {
+            return iced::Task::none();
+        }
+        let up = (self.zoom_acc > 0.0) != input.invert_direction;
+        self.zoom_acc = 0.0;
+        self.zoom_step_at = Some(now);
+        let next = self.view_cfg.next_enabled(self.view_index, up);
+        if next == self.view_index {
+            return iced::Task::none(); // §7 bounds: stop at the first/last index
+        }
+        self.set_view_index(next)
     }
 
     /// Expand the cwd's ancestors in the nav tree so the current location
@@ -435,7 +661,11 @@ impl Explorer {
         let row_top = 4.0 + row * item_h;
         let row_bottom = row_top + item_h;
         let target = if row_top < self.nav.scroll_y {
-            row_top
+            // navigating up: leave a couple of rows of context above the
+            // row (ancestors/siblings) instead of pinning it flush to
+            // the top — mirrors the down case which shows ancestors
+            // above the row pinned at the bottom.
+            (row_top - 3.0 * item_h).max(0.0)
         } else if row_bottom > self.nav.scroll_y + viewport {
             row_bottom - viewport
         } else {
@@ -692,6 +922,7 @@ impl Explorer {
                     self.cwd = p;
                     self.selected.clear();
                     self.renaming = None;
+                    self.restore_folder_view();
                     self.request_listing();
                 }
                 iced::Task::none()
@@ -702,6 +933,7 @@ impl Explorer {
                     self.cwd = p;
                     self.selected.clear();
                     self.renaming = None;
+                    self.restore_folder_view();
                     self.request_listing();
                 }
                 iced::Task::none()
@@ -861,8 +1093,62 @@ impl Explorer {
                 self.selected = (0..n).filter(|i| !old.contains(i)).collect();
                 iced::Task::none()
             }
-            Message::SetView(v) => {
-                self.view = v;
+            Message::SetView(index) => self.set_view_index(index),
+            Message::WheelZoom(delta) => self.wheel_zoom(delta),
+            Message::FileScrollTo(target) => {
+                let (x, y) = if self.view_cfg.family(self.view_index)
+                    == crate::view_step::Family::List
+                {
+                    self.scroll_x = target.max(0.0);
+                    (Some(self.scroll_x), None)
+                } else {
+                    self.scroll_y = target.max(0.0);
+                    (None, Some(self.scroll_y))
+                };
+                iced::widget::operation::scroll_to(
+                    crate::folder::file_scrollable_id(),
+                    iced::widget::operation::AbsoluteOffset { x, y },
+                )
+            }
+            Message::NavScrollTo(target) => {
+                self.nav.scroll_y = target.max(0.0);
+                iced::widget::operation::scroll_to(
+                    crate::nav_pane::nav_scrollable_id(),
+                    iced::widget::operation::AbsoluteOffset {
+                        x: None,
+                        y: Some(self.nav.scroll_y),
+                    },
+                )
+            }
+            Message::ToggleDetailsCompact => {
+                let old = self.details_compact;
+                self.details_compact = !old;
+                // row heights changed: re-anchor the first visible item
+                if self.view_cfg.family(self.view_index) == crate::view_step::Family::Details {
+                    return self.anchor_view(self.view_index, old);
+                }
+                iced::Task::none()
+            }
+            Message::ColumnSplitBegin(col) => {
+                if col < self.details_cols.len() {
+                    self.col_drag = Some(ColDrag {
+                        col,
+                        start_x: None,
+                        start_w: self.details_cols[col],
+                    });
+                }
+                iced::Task::none()
+            }
+            Message::ColumnSplitMove(x) => {
+                if let Some(drag) = &mut self.col_drag {
+                    // first move after the press anchors the drag origin
+                    let start_x = *drag.start_x.get_or_insert(x);
+                    // the handle sits at the column's left edge: dragging
+                    // left widens the column
+                    let d = &self.view_cfg.layouts.details;
+                    self.details_cols[drag.col] =
+                        (drag.start_w + (start_x - x)).clamp(d.col_min, d.col_max);
+                }
                 iced::Task::none()
             }
             Message::ToggleHidden => {
@@ -980,13 +1266,13 @@ impl Explorer {
                 };
                 iced::Task::none()
             }
-            Message::Scrolled { y, height } => {
+            Message::Scrolled { x, y, height } => {
+                self.scroll_x = x;
                 self.scroll_y = y;
                 self.viewport_h = height;
                 iced::Task::none()
             }
             Message::WindowResized(w, h) => {
-                self.viewport_h = h;
                 self.win_w = w;
                 if std::env::var_os("EXPLORER_DEBUG").is_some() {
                     eprintln!("WindowResized: logical {w}x{h}, system_scale={}, dpi={:?}",
@@ -1026,6 +1312,33 @@ impl Explorer {
                         _ => {}
                     }
                 }
+                // column drag: track the cursor, end on left release
+                if self.col_drag.is_some() {
+                    use iced::mouse::{Button as MButton, Event as MEvent};
+                    match &e {
+                        iced::Event::Mouse(MEvent::CursorMoved { position }) => {
+                            return self.update(Message::ColumnSplitMove(position.x));
+                        }
+                        iced::Event::Mouse(MEvent::ButtonReleased(MButton::Left)) => {
+                            self.col_drag = None;
+                            return iced::Task::none();
+                        }
+                        _ => {}
+                    }
+                }
+                if let iced::Event::Keyboard(
+                    iced::keyboard::Event::ModifiersChanged(m),
+                ) = &e
+                {
+                    let ctrl = m.control();
+                    if !ctrl && self.ctrl_held {
+                        // §7: Ctrl released — reset the delta accumulator
+                        self.zoom_acc = 0.0;
+                        self.zoom_step_at = None;
+                    }
+                    self.ctrl_held = ctrl;
+                    return iced::Task::none();
+                }
                 if let Some(m) = crate::handle_key(e, self.renaming.is_some()) {
                     return self.update(m);
                 }
@@ -1052,6 +1365,14 @@ impl Explorer {
             Message::NavScrolled { y, height } => {
                 self.nav.scroll_y = y;
                 self.nav.viewport_h = height;
+                iced::Task::none()
+            }
+            Message::FileAreaResized(_w, h) => {
+                self.viewport_h = h;
+                iced::Task::none()
+            }
+            Message::NavAreaResized(_w, h) => {
+                self.nav.viewport_h = h;
                 iced::Task::none()
             }
             Message::FsEvent(ev) => {

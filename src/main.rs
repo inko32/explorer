@@ -14,9 +14,11 @@ mod navigation;
 // re-implementation, vendor/rs-ribbon) + the explorer commanding layer
 // in ribbon.rs. The ribbon markup is assets/ribbon.yaml.
 mod ribbon;
+mod scrollbar;
 mod status;
 mod ui;
 mod ui_common;
+mod view_step;
 
 use model::{Explorer, Message};
 
@@ -50,7 +52,7 @@ fn main() -> iced::Result {
         }
         match arg.as_str() {
             "--render" => {}
-            "--ui-debug" => std::env::set_var("EXPLORER_UI_DEBUG", "1"),
+            "--ui-debug" => unsafe {std::env::set_var("EXPLORER_UI_DEBUG", "1")},
             v if v == "--dpi" => want_dpi = true,
             v if v.starts_with("--dpi=") => set_dpi(&v["--dpi=".len()..]),
             v if v.starts_with("--size=") => set_size(&v["--size=".len()..]),
@@ -111,7 +113,9 @@ fn set_dpi(value: &str) {
         }
     };
     let factor = if v <= 10.0 { v } else { v / 100.0 };
-    std::env::set_var("EXPLORER_DPI", factor.to_string());
+    unsafe {
+        std::env::set_var("EXPLORER_DPI", factor.to_string());
+    }
 }
 
 /// `--size=WxH` -> `EXPLORER_SIZE`: initial window size (logical pixels).
@@ -124,7 +128,9 @@ fn set_size(value: &str) {
             eprintln!("invalid --size value '{value}' (expected like 1152x720, min 160x120)");
             std::process::exit(2);
         });
-    std::env::set_var("EXPLORER_SIZE", format!("{w}x{h}"));
+    unsafe {
+        std::env::set_var("EXPLORER_SIZE", format!("{w}x{h}"));
+    }
 }
 
 /// `--render gpu|cpu` -> iced's `ICED_BACKEND` (wgpu / tiny-skia). An
@@ -140,7 +146,9 @@ fn set_renderer(choice: &str) {
         }
     };
     // SAFETY: single-threaded, before iced::application run.
-    std::env::set_var("ICED_BACKEND", backend);
+    unsafe {
+        std::env::set_var("ICED_BACKEND", backend);
+    }
 }
 
 /// Base LOGICAL window size. `--dpi` scales the CONTENT; the window size is

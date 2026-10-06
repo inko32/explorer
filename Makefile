@@ -26,6 +26,7 @@ export PATH := $(TMPROOT)/cargo/bin:$(PATH)
 all: build
 
 setup-env:
+	@ln -sf $(CARGO_TARGET_DIR) target
 	@mkdir -p $(CARGO_HOME) $(RUSTUP_HOME)
 	@if ! rustup toolchain list --no-self-update 2>/dev/null | grep -q "$(TOOLCHAIN)"; then \
 		echo "==> Installing Rust toolchain '$(TOOLCHAIN)' into $(TMPROOT)..."; \
@@ -50,9 +51,10 @@ test: setup-env
 
 dist: build
 	@mkdir -p $(DIST)
+	-strip --strip-all $(CARGO_TARGET_DIR)/$(TARGET)/release/$(BIN) 2>/dev/null || true
+	-./tools/upx  $(CARGO_TARGET_DIR)/$(TARGET)/release/$(BIN) || true
 	cp $(CARGO_TARGET_DIR)/$(TARGET)/release/$(BIN) $(DIST)/$(BIN)
-	-strip --strip-all $(DIST)/$(BIN) 2>/dev/null || true
-	@ls -l $(DIST)/$(BIN) | awk '{printf "dist: %s (%d bytes, %.1f MB)\n", $$NF, $$5, $$5/1048576}'
+	@ls -l $(DIST)/$(BIN)
 	@file $(DIST)/$(BIN)
 
 size: dist

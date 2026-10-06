@@ -316,6 +316,16 @@ pub(crate) fn tree_row_count(state: &Explorer) -> usize {
     n
 }
 
+/// Total tree content height (drives the scrollbar strip geometry).
+fn content_height(state: &Explorer) -> f32 {
+    let (_, item_h, ..) = state.ribbon.metrics();
+    let favs = if state.nav.favorites_open { favorites_len() } else { 0 };
+    let net = 1 + usize::from(state.nav.network_open);
+    // 1 favorites header + favorites + the Computer tree + Network rows;
+    // 8 = the column's top+bottom padding
+    8.0 + (1 + favs + tree_row_count(state) + net) as f32 * item_h
+}
+
 pub(crate) fn nav_pane(state: &Explorer, skin: skin::Skin, width: f32) -> Element<'_, Message> {
     let m = nav_metrics(state);
     let mut list = column![].spacing(0).padding(4);
@@ -374,18 +384,57 @@ pub(crate) fn nav_pane(state: &Explorer, skin: skin::Skin, width: f32) -> Elemen
         ));
     }
 
-    container(
-        scrollable(list)
-            .id(nav_scrollable_id())
+    let (_, item_h, ..) = state.ribbon.metrics();
+    let need_strip = content_height(state) > state.nav.viewport_h;
+    // the scrollbar strip collapses to a 1px hairline at the right edge
+    // when the tree fits the pane
+    let bar: Element<Message> = if need_strip {
+        crate::scrollbar::vertical(
+            state.nav.scroll_y,
+            state.nav.viewport_h,
+            content_height(state),
+            item_h,
+            skin,
+            Message::NavScrollTo,
+        )
+    } else {
+        container(Space::new())
+            .width(Length::Fixed(1.0))
             .height(Length::Fill)
-            .direction(scrollable::Direction::Both {
-                vertical: scrollable::Scrollbar::default(),
-                horizontal: scrollable::Scrollbar::default(),
-            })
-            .on_scroll(|vp| Message::NavScrolled {
-                y: vp.absolute_offset().y,
-                height: vp.bounds().height,
-            }),
+            .style(bg(skin.sep))
+            .into()
+    };
+    container(
+        // wheel speed boost (folder-view.yaml input.scroll_speed)
+        crate::scrollbar::wheel_boost(
+            row![
+                iced::widget::Sensor::new(
+                    scrollable(list)
+                        .id(nav_scrollable_id())
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .direction(scrollable::Direction::Both {
+                            // the Windows-style strip beside the scrollable is
+                            // the visible scrollbar (arrow buttons + thumb)
+                            vertical: scrollable::Scrollbar::hidden(),
+                            // keep horizontal scrolling, but no visible scrollbar
+                            horizontal: scrollable::Scrollbar::hidden(),
+                        })
+                        .on_scroll(|vp| Message::NavScrolled {
+                            y: vp.absolute_offset().y,
+                            height: vp.bounds().height,
+                        }),
+                )
+                .on_show(|size| Message::NavAreaResized(size.width, size.height))
+                .on_resize(|size| Message::NavAreaResized(size.width, size.height)),
+                bar,
+            ]
+            .into(),
+            state.nav.scroll_y,
+            state.view_cfg.input.scroll_speed,
+            crate::scrollbar::Axis::Vertical,
+            Message::NavScrollTo,
+        ),
     )
     .width(Length::Fixed(width))
     .height(Length::Fill)
