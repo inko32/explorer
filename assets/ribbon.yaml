@@ -1,27 +1,43 @@
 # Ribbon definition — explorer markup for the rs-ribbon framework
 # (the YAML equivalent of Windows ribbon `.ribbon` XML resources; schema
-# documented in vendor/rs-ribbon/src/spec.rs).
+# documented in src/ribbon/spec.rs).
 #
-# The COMMANDING layer lives in src/ribbon.rs: every `commands:` name maps
-# to a numeric id, and the backend's CommandHandler (IUICommandHandler)
-# dispatches executions to explorer actions. Contextual tabs are governed
-# by UI_PKEY_ContextAvailable, published from the explorer context
-# (is_drive / has_image / inside_archive / has_archive) — like the native
-# ribbon framework.
+# The COMMANDING layer lives in src/ribbon/mod.rs: every `commands:` name
+# maps to a numeric id, and ExplorerHandler dispatches executions to
+# explorer actions. Contextual tabs are governed by UI_PKEY_ContextAvailable,
+# published from the explorer context (is_drive / has_image / inside_archive
+# / has_archive). Tabs whose detector is not wired yet return
+# ContextAvailable=NotAvailable so they stay hidden (see mod.rs).
+#
+# Structure mirrors the real Windows 10 File Explorer ribbon
+# (SPEC/ribbon-list.txt). Custom explorer-only commands that have no Win10
+# equivalent are kept on purpose: dark mode, custom border, Win8 frame,
+# open terminal, paste symbolic link, delete as sudo, filters, tree expander.
 
 commands:
+  # ---- application menu / global ----
   cmdAppMenu: 1
   cmdNewWindow: 2
   cmdOpenTerminal: 3
+  cmdOpenTerminalAdmin: 200
+  cmdAbout: 201
   cmdExit: 9
+  cmdHelp: 99
+  cmdCtxMenu: 140
 
+  # ---- Home / Clipboard ----
   cmdUndo: 18
   cmdRedo: 19
   cmdPaste: 20
   cmdPasteSpecial: 21
   cmdCut: 23
   cmdCopy: 24
+  cmdPin: 202
+  cmdCopyPath: 203
+  cmdPasteShortcut: 204
+  cmdPasteSymlink: 205
 
+  # ---- Home / Organize ----
   cmdMoveTo: 25
   cmdMoveToHome: 26
   cmdMoveToDesktop: 27
@@ -30,79 +46,261 @@ commands:
   cmdCopyToDesktop: 30
   cmdDelete: 31
   cmdDeletePermanent: 32
+  cmdDeleteSudo: 206
+  cmdShowRecycleConfirm: 207
   cmdRename: 33
+
+  # ---- Home / New ----
   cmdNewFolder: 34
   cmdNewItem: 35
+  cmdNewShortcut: 208
+  cmdNewSymlink: 209
+  cmdNewTextFile: 210
+  cmdEasyAccess: 211
+  cmdMapDrive: 212
+  cmdShareAccess: 213
+
+  # ---- Home / Open ----
   cmdProperties: 36
   cmdOpen: 37
   cmdEdit: 38
   cmdHistory: 39
+  cmdRemoveProperties: 214
+  cmdPermission: 215
+  cmdMakeExecutable: 216
+  cmdGrantPermission: 217
+  cmdOpenWith: 218
+  cmdOpenNotepad: 219
+  cmdOpenExcel: 220
+  cmdOpenWord: 221
+  cmdChooseApp: 222
 
+  # ---- Home / Select ----
   cmdSelectAll: 40
   cmdSelectNone: 41
   cmdInvertSelection: 42
 
+  # ---- Home / Filter ----
+  cmdFilters: 223
+  cmdFilterAll: 224
+  cmdFilterDocs: 225
+  cmdFilterSheets: 226
+  cmdFilterSlides: 227
+  cmdFilterImages: 228
+  cmdFilterVideos: 229
+  cmdFilterPdf: 230
+
+  # ---- Share ----
+  cmdShare: 231
   cmdShareNobody: 50
   cmdShareEmail: 51
+  cmdEmail: 51
+  cmdBurn: 232
+  cmdPrint: 233
+  cmdFax: 234
+  cmdUserList: 235
+  cmdRemoveAccess: 236
+  cmdAdvancedSecurity: 237
 
+  # ---- Share / Archive ----
+  cmdCompress: 238
+  cmdZip: 239
+  cmdSevenZ: 240
+  cmdTarXz: 241
+  cmdReadOnly: 242
+
+  # ---- View / Panes ----
   cmdNavPane: 60
   cmdPreviewPane: 61
   cmdDetailsPane: 62
+  cmdExpandToFolder: 268
+  cmdShowAllFolders: 269
+
+  # ---- View / Layout ----
   cmdViewDetails: 63
   cmdViewLarge: 64
+  cmdCompactDetails: 78
+
+  # ---- View / Current view ----
   cmdSortBy: 65
   cmdSortName: 66
   cmdSortSize: 67
   cmdSortModified: 68
+  cmdSortDate: 245
+  cmdSortType: 246
+  cmdSortTags: 247
+  cmdSortCreated: 248
+  cmdSortTaken: 249
+  cmdSortDimensions: 250
+  cmdSortRating: 251
+  cmdSortAsc: 252
+  cmdSortDesc: 253
+  cmdChooseColumns: 254
   cmdGroupBy: 69
+  cmdGroupNone: 255
+  cmdGroupName: 256
+  cmdGroupDate: 257
+  cmdGroupType: 258
+  cmdGroupSize: 259
+  cmdGroupTags: 260
+  cmdGroupRating: 261
+  cmdGroupAsc: 262
+  cmdGroupDesc: 263
+  cmdAddColumns: 264
   cmdSizeColumns: 70
+
+  # ---- View / Show-hide ----
   cmdToggleCheckboxes: 71
   cmdToggleExtensions: 72
   cmdToggleHidden: 73
+  cmdShowTreeExpander: 265
+  cmdHideSelected: 266
+
+  # ---- View / Options + custom toggles ----
+  cmdFolderOptions: 77
+  cmdChangeFolderOptions: 267
   cmdToggleDark: 74
   cmdToggleBorder: 75
   cmdToggleFrame: 76
-  cmdFolderOptions: 77
 
-  cmdHelp: 99
-
-  cmdCtxMenu: 140
-
+  # ---- Drive Tools ----
   cmdCtxDrive: 100
   cmdDriveProperties: 101
+  cmdBitlocker: 270
+  cmdBitlockerOn: 271
+  cmdBitlockerManage: 272
+  cmdBitlockerPin: 273
+  cmdOptimize: 274
+  cmdCleanup: 275
+  cmdFormat: 276
+  cmdAutoPlay: 277
+  cmdEject: 278
+  cmdFinishBurning: 279
+  cmdEraseDisc: 280
+
+  # ---- Picture Tools ----
   cmdCtxPicture: 110
   cmdOpenPicture: 111
   cmdSetWallpaper: 112
-  cmdCtxArchive: 120
-  cmdExtractHere: 121
+  cmdRotateLeft: 281
+  cmdRotateRight: 282
+  cmdSlideShow: 283
 
-# window-size sacrifices: below ribbon_below content width the ribbon
-# is hidden entirely, below nav_below the navigation pane is hidden
-# (the file view resizes accordingly)
+  # ---- Compressed Folder Tools ----
+  cmdCtxArchive: 120
+  cmdCtxCompressed: 285
+  cmdExtractHere: 121
+  cmdExtractAll: 284
+
+  # ---- Search Tools ----
+  cmdCtxSearch: 286
+  cmdThisPC: 287
+  cmdCurrentFolder: 288
+  cmdAllSubfolders: 289
+  cmdSearchAgainIn: 290
+  cmdSearchPlaces: 291
+  cmdSearchInternet: 292
+  cmdDateModified: 293
+  cmdKind: 294
+  cmdSizeFilter: 295
+  cmdOtherProperties: 296
+  cmdRecentSearches: 297
+  cmdClearSearchHistory: 298
+  cmdAdvancedOptions: 299
+  cmdChangeIndexed: 300
+  cmdIndexFileContents: 301
+  cmdIndexSystemFiles: 302
+  cmdIndexCompressed: 303
+  cmdSaveSearch: 304
+  cmdOpenFileLocation: 305
+  cmdCloseSearch: 306
+
+  # ---- Video / Music Tools ----
+  cmdCtxVideo: 310
+  cmdCtxMusic: 311
+  cmdPlay: 312
+  cmdPlayAll: 313
+  cmdAddToPlaylist: 314
+
+  # ---- Application Tools ----
+  cmdCtxApplication: 315
+  cmdPinTaskbar: 316
+  cmdRunAsAdmin: 317
+  cmdRunAsUser: 318
+  cmdTroubleshoot: 319
+
+  # ---- Disc Image Tools ----
+  cmdCtxDiscImage: 320
+  cmdMount: 321
+
+  # ---- Network ----
+  cmdCtxNetwork: 322
+  cmdNetProperties: 323
+  cmdNetOpen: 324
+  cmdRemoteDesktop: 325
+  cmdAddDevices: 326
+  cmdViewPrinters: 327
+  cmdDeviceWebpage: 328
+  cmdSearchAD: 329
+  cmdNetSharingCenter: 330
+
+  # ---- Computer ----
+  cmdCtxComputer: 331
+  cmdCompProperties: 332
+  cmdCompOpen: 333
+  cmdCompRename: 334
+  cmdAccessMedia: 335
+  cmdConnectMedia: 336
+  cmdDisconnectMedia: 337
+  cmdMapNetworkDrive: 338
+  cmdDisconnectDrive: 339
+  cmdAddNetworkLocation: 340
+  cmdOpenSettings: 341
+  cmdUninstallProgram: 342
+  cmdSystemProperties: 343
+  cmdManage: 344
+
+# window-size sacrifices: below ribbon_below content width the ribbon is
+# hidden entirely, below nav_below the navigation pane is hidden (the file
+# view resizes accordingly)
 sacrifice:
   ribbon_below: 240
   nav_below: 460
 
 # UI metrics (explorer extension)
 metrics:
-  # height of the navigation band (nav buttons, address bar, search box)
   band_height: 32
-  # navigation pane tree rows: icon and text sizes derive from the height
   tree_item_height: 22
   tree_indention: 8
-  # tree label size = icon size x this factor
   tree_font_scale: 0.7
+  bar_button_multiplier: 2.2
+  gap_scale: 0.5
+  # extra px the group titles sit lower (the bottom line follows)
+  footer_shift: 3
 
 application_menu:
   command: cmdAppMenu
   items:
     - { command: cmdNewWindow, image: new, label: New window, keytip: "N" }
-    - { command: cmdOpenTerminal, image: terminal, label: Open terminal here, keytip: "T" }
+    - command: cmdOpenTerminal
+      image: terminal
+      label: Open terminal
+      keytip: "T"
+      items:
+        - { command: cmdOpenTerminal, image: terminal, label: Open terminal here }
+        - { command: cmdOpenTerminalAdmin, image: terminal, label: Open terminal as Administrator }
+    - { command: cmdFolderOptions, image: gear, label: Options, keytip: "O" }
     - separator: true
-    - { command: cmdExit, image: exit, label: Exit, keytip: "X" }
+    - command: cmdHelp
+      image: help
+      label: Help
+      keytip: "H"
+      items:
+        - { command: cmdHelp, image: help, label: Help }
+        - { command: cmdAbout, image: help, label: About Explorer }
+    - separator: true
+    - { command: cmdExit, image: exit, label: Close, keytip: "X" }
 
-# QAT dock: top = above the tab strip, bottom = below the command pane
-# (the switch — only one QAT bar is shown at a time)
 quick_access:
   commands: [cmdUndo, cmdRedo, cmdDelete]
   dock: top
@@ -119,50 +317,89 @@ context_popups:
 size_definitions:
   smallish:
     - controls: [cmdCut, cmdCopy, cmdUndo, cmdRedo, cmdSelectAll, cmdSelectNone,
-                 cmdInvertSelection, cmdNavPane, cmdPreviewPane, cmdDetailsPane,
-                 cmdGroupBy, cmdSizeColumns, cmdToggleCheckboxes, cmdToggleExtensions,
-                 cmdToggleHidden, cmdToggleDark, cmdToggleBorder, cmdToggleFrame,
-                 cmdFolderOptions]
+                 cmdInvertSelection, cmdCopyPath, cmdPasteShortcut, cmdNewItem,
+                 cmdEasyAccess, cmdOpenWith, cmdEdit, cmdHistory,
+                 cmdPreviewPane, cmdDetailsPane, cmdExpandToFolder,
+                 cmdShowAllFolders, cmdGroupBy, cmdAddColumns, cmdSizeColumns,
+                 cmdToggleCheckboxes, cmdToggleExtensions, cmdToggleHidden,
+                 cmdShowTreeExpander, cmdToggleDark, cmdToggleBorder,
+                 cmdToggleFrame, cmdChangeFolderOptions, cmdReadOnly,
+                 cmdBitlocker, cmdBitlockerOn, cmdBitlockerManage, cmdBitlockerPin,
+                 cmdOptimize, cmdCleanup, cmdFormat, cmdAutoPlay, cmdEject,
+                 cmdFinishBurning, cmdEraseDisc, cmdRotateLeft, cmdRotateRight,
+                 cmdSlideShow, cmdCurrentFolder, cmdAllSubfolders,
+                 cmdSearchAgainIn, cmdDateModified, cmdKind, cmdSizeFilter,
+                 cmdOtherProperties, cmdRecentSearches, cmdAdvancedOptions,
+                 cmdSaveSearch, cmdOpenFileLocation, cmdCloseSearch,
+                 cmdPlay, cmdPlayAll, cmdAddToPlaylist, cmdPinTaskbar,
+                 cmdRunAsAdmin, cmdRunAsUser, cmdTroubleshoot, cmdMount,
+                 cmdNetOpen, cmdRemoteDesktop, cmdAddDevices, cmdViewPrinters,
+                 cmdDeviceWebpage, cmdSearchAD, cmdNetSharingCenter,
+                 cmdCompOpen, cmdAccessMedia, cmdConnectMedia,
+                 cmdDisconnectMedia, cmdMapNetworkDrive, cmdDisconnectDrive,
+                 cmdAddNetworkLocation, cmdUninstallProgram, cmdSystemProperties,
+                 cmdBurn, cmdPrint, cmdFax, cmdUserList, cmdFilterAll,
+                 cmdFilterDocs, cmdFilterSheets, cmdFilterSlides, cmdFilterImages,
+                 cmdFilterVideos, cmdFilterPdf, cmdZip, cmdSevenZ, cmdTarXz]
       size: small
   mediumish:
-    - controls: [cmdPaste, cmdMoveTo, cmdCopyTo, cmdDelete, cmdSortBy]
+    - controls: [cmdPaste, cmdMoveTo, cmdCopyTo, cmdDelete, cmdRename,
+                 cmdProperties, cmdSortBy, cmdFilters, cmdCompress,
+                 cmdRemoveAccess, cmdAdvancedSecurity, cmdHideSelected,
+                 cmdBitlocker, cmdAutoPlay, cmdSlideShow, cmdExtractAll,
+                 cmdDateModified, cmdSearchAgainIn, cmdRunAsAdmin,
+                 cmdMapNetworkDrive, cmdNetProperties, cmdCompProperties]
       size: medium
 
 scaling:
-  - group: clipboard
-    ideal: [large]
-    scale: [mediumish, smallish, popup]
-  - group: organize
-    scale: [popup]
-  - group: new
-    scale: [popup]
-  - group: open
-    scale: [popup]
-  - group: select
-    scale: [popup]
-  - group: share_with
-    scale: [popup]
-  - group: send
-    scale: [popup]
-  - group: panes
-    scale: [popup]
-  - group: layout
-    scale: [popup]
-  - group: current_view
-    scale: [popup]
-  - group: show_hide
-    scale: [popup]
-  - group: options
-    scale: [popup]
-  - group: drive
-    scale: [popup]
-  - group: manage
-    scale: [popup]
-  - group: archive
-    scale: [popup]
+  - { group: clipboard, ideal: [large], scale: [mediumish, smallish, popup] }
+  - { group: organize, scale: [popup] }
+  - { group: new, scale: [popup] }
+  - { group: open, scale: [popup] }
+  - { group: select, scale: [popup] }
+  - { group: filter, scale: [popup] }
+  - { group: send, scale: [popup] }
+  - { group: share_with, scale: [popup] }
+  - { group: share_security, scale: [popup] }
+  - { group: panes, scale: [popup] }
+  - { group: layout, scale: [popup] }
+  - { group: current_view, scale: [popup] }
+  - { group: show_hide, scale: [popup] }
+  - { group: options, scale: [popup] }
+  # contextual: drive tools
+  - { group: drive_protect, scale: [popup] }
+  - { group: drive_manage, scale: [popup] }
+  - { group: drive_media, scale: [popup] }
+  # contextual: picture tools
+  - { group: rotate, scale: [popup] }
+  - { group: view_pic, scale: [popup] }
+  # contextual: archive tools
+  - { group: extract, scale: [popup] }
+  # contextual: search tools
+  - { group: search_location, scale: [popup] }
+  - { group: search_refine, scale: [popup] }
+  - { group: search_options, scale: [popup] }
+  - { group: search_close, scale: [popup] }
+  # contextual: video / music
+  - { group: play, scale: [popup] }
+  # contextual: compressed
+  - { group: extract_to, scale: [popup] }
+  # contextual: application
+  - { group: app_pin, scale: [popup] }
+  - { group: app_run, scale: [popup] }
+  # contextual: disc image
+  - { group: disc_manage, scale: [popup] }
+  # contextual: network
+  - { group: net_location, scale: [popup] }
+  - { group: net_network, scale: [popup] }
+  - { group: net_center, scale: [popup] }
+  # contextual: computer
+  - { group: comp_location, scale: [popup] }
+  - { group: comp_network, scale: [popup] }
+  - { group: comp_system, scale: [popup] }
 
 tabs:
-  # ------------------------------------------------------------ Home
+  # ============================================================ Home
   - id: home
     label: Home
     keytip: "H"
@@ -171,6 +408,8 @@ tabs:
         label: Clipboard
         image: paste
         controls:
+          - { type: button, command: cmdPin, size: large, image: pin, label: Pin to Quick access, keytip: "P", tooltip: "Pin the current folder to Quick access" }
+          - { type: button, command: cmdCopy, size: large, image: copy, label: Copy, keytip: "C", tooltip: "Copy the selection to the clipboard", shortcut: "Ctrl+C" }
           - type: split_button
             command: cmdPaste
             separate: true
@@ -183,9 +422,15 @@ tabs:
             items:
               - { command: cmdPasteSpecial, image: paste_special, label: Paste special }
           - { type: button, command: cmdCut, size: small, image: cut, label: Cut, keytip: "X", tooltip: "Cut the selection to the clipboard", shortcut: "Ctrl+X" }
-          - { type: button, command: cmdCopy, size: small, image: copy, label: Copy, keytip: "C", tooltip: "Copy the selection to the clipboard", shortcut: "Ctrl+C" }
-          - { type: button, command: cmdUndo, size: small, image: undo, label: Undo, keytip: "U", tooltip: "Undo the last operation", shortcut: "Ctrl+Z" }
-          - { type: button, command: cmdRedo, size: small, image: redo, label: Redo, keytip: "R", tooltip: "Redo the last undone operation", shortcut: "Ctrl+Y" }
+          - { type: button, command: cmdCopyPath, size: small, image: copy, label: Copy path, tooltip: "Copy the selected path to the clipboard" }
+          - type: split_button
+            command: cmdPasteShortcut
+            size: small
+            image: paste_special
+            label: Paste shortcut
+            items:
+              - { command: cmdPasteShortcut, image: paste_special, label: Paste shortcut }
+              - { command: cmdPasteSymlink, image: paste_special, label: Paste symbolic link }
 
       - id: organize
         label: Organize
@@ -193,7 +438,6 @@ tabs:
         controls:
           - type: split_button
             command: cmdMoveTo
-            separate: true
             size: large
             image: move_to
             label: Move to
@@ -203,7 +447,6 @@ tabs:
               - { command: cmdMoveToDesktop, image: open, label: Desktop }
           - type: split_button
             command: cmdCopyTo
-            separate: true
             size: large
             image: copy_to
             label: Copy to
@@ -221,7 +464,10 @@ tabs:
             tooltip: "Move the selection to the trash"
             shortcut: "Del"
             items:
+              - { command: cmdDelete, image: delete, label: Recycle, tooltip: "Move the selection to the trash" }
               - { command: cmdDeletePermanent, image: delete, label: Delete permanently, tooltip: "Permanently delete the selection" }
+              - { command: cmdDeleteSudo, image: terminal, label: Delete as sudo, tooltip: "Delete as root (sudo)" }
+              - { command: cmdShowRecycleConfirm, image: gear, label: Show recycle confirmation }
           - { type: button, command: cmdRename, size: large, image: rename, label: Rename, keytip: "N", tooltip: "Rename the selected item", shortcut: "F2" }
 
       - id: new
@@ -229,14 +475,51 @@ tabs:
         image: new_folder
         controls:
           - { type: button, command: cmdNewFolder, size: large, image: new_folder, label: New folder, keytip: "W", tooltip: "Create a new folder here", shortcut: "Ctrl+Shift+N" }
-          - { type: button, command: cmdNewItem, size: small, image: new, label: New item }
+          - type: split_button
+            command: cmdNewItem
+            size: small
+            image: new
+            label: New item
+            items:
+              - { command: cmdNewFolder, image: new_folder, label: Folder }
+              - { command: cmdNewShortcut, image: new, label: Shortcut }
+              - { command: cmdNewSymlink, image: new, label: Symbolic link }
+              - { command: cmdNewTextFile, image: new, label: Text file }
+          - type: split_button
+            command: cmdEasyAccess
+            size: small
+            image: gear
+            label: Easy access
+            items:
+              - { command: cmdMapDrive, image: open, label: Map as drive }
+              - { command: cmdShareAccess, image: email, label: Share }
 
       - id: open
         label: Open
         image: properties
         controls:
-          - { type: button, command: cmdProperties, size: large, image: properties, label: Properties, keytip: "I" }
-          - { type: button, command: cmdOpen, size: small, image: open, label: Open }
+          - type: split_button
+            command: cmdProperties
+            size: large
+            image: properties
+            label: Properties
+            keytip: "I"
+            items:
+              - { command: cmdProperties, image: properties, label: Properties }
+              - { command: cmdRemoveProperties, image: properties, label: Remove properties }
+              - { command: cmdPermission, image: gear, label: Permission }
+              - { command: cmdMakeExecutable, image: terminal, label: Make executable }
+              - { command: cmdGrantPermission, image: gear, label: Grant permission }
+          - type: split_button
+            command: cmdOpenWith
+            size: small
+            image: open
+            label: Open
+            items:
+              - { command: cmdOpenNotepad, image: blank, label: Notepad }
+              - { command: cmdOpenExcel, image: blank, label: Excel }
+              - { command: cmdOpenWord, image: blank, label: Word }
+              - { command: cmdChooseApp, image: open, label: Choose another app }
           - { type: button, command: cmdEdit, size: small, image: edit, label: Edit }
           - { type: button, command: cmdHistory, size: small, image: history, label: History }
 
@@ -248,23 +531,54 @@ tabs:
           - { type: button, command: cmdSelectNone, size: small, image: select_none, label: Select none, tooltip: "Clear the selection" }
           - { type: button, command: cmdInvertSelection, size: small, image: invert_sel, label: Invert selection, tooltip: "Invert the selection" }
 
-  # ------------------------------------------------------------ Share
+      - id: filter
+        label: Filter
+        image: find
+        controls:
+          - type: split_button
+            command: cmdFilters
+            size: large
+            image: find
+            label: Filters
+            keytip: "F"
+            items:
+              - { command: cmdFilterAll, image: blank, label: All File Types }
+              - { command: cmdFilterDocs, image: blank, label: Documents, separator_before: true }
+              - { command: cmdFilterSheets, image: blank, label: Spreadsheets }
+              - { command: cmdFilterSlides, image: blank, label: Slides }
+              - { command: cmdFilterImages, image: blank, label: Images }
+              - { command: cmdFilterVideos, image: blank, label: Videos }
+              - { command: cmdFilterPdf, image: blank, label: PDF Files }
+
+  # ============================================================ Share
   - id: share
     label: Share
     keytip: "S"
     groups:
-      - id: share_with
-        label: Share with
-        image: properties
-        controls:
-          - { type: button, command: cmdShareNobody, size: small, image: properties, label: Nobody }
       - id: send
         label: Send
         image: email
         controls:
-          - { type: button, command: cmdShareEmail, size: small, image: email, label: Email }
+          - { type: button, command: cmdShare, size: large, image: email, label: Share, tooltip: "Share the selection" }
+          - { type: button, command: cmdEmail, size: large, image: email, label: Email, tooltip: "Send the selection by email" }
+          - { type: button, command: cmdBurn, size: small, image: blank, label: Burn to disc }
+          - { type: button, command: cmdPrint, size: small, image: print, label: Print }
+          - { type: button, command: cmdFax, size: small, image: print, label: Fax }
 
-  # ------------------------------------------------------------ View
+      - id: share_with
+        label: Share with
+        image: properties
+        controls:
+          # runtime-populated user list (placeholder until gallery items source is wired)
+          - { type: button, command: cmdUserList, size: small, image: blank, label: People }
+          - { type: button, command: cmdRemoveAccess, size: large, image: delete, label: Remove access, tooltip: "Stop sharing the selection" }
+
+      - id: share_security
+        image: gear
+        controls:
+          - { type: button, command: cmdAdvancedSecurity, size: large, image: gear, label: Advanced security, tooltip: "Open advanced security settings" }
+
+  # ============================================================ View
   - id: view
     label: View
     keytip: "W"
@@ -273,9 +587,18 @@ tabs:
         label: Panes
         image: nav_pane
         controls:
-          - { type: button, command: cmdNavPane, size: large, image: nav_pane, label: Navigation pane, keytip: "P" }
-          - { type: button, command: cmdPreviewPane, size: small, image: preview_pane, label: Preview pane }
-          - { type: button, command: cmdDetailsPane, size: small, image: details_pane, label: Details pane }
+          - type: split_button
+            command: cmdNavPane
+            size: large
+            image: nav_pane
+            label: Navigation pane
+            keytip: "P"
+            items:
+              - { command: cmdNavPane, image: nav_pane, label: Navigation pane }
+              - { command: cmdExpandToFolder, image: nav_pane, label: Expand to open folder, separator_before: true }
+              - { command: cmdShowAllFolders, image: nav_pane, label: Show all folders }
+          - { type: toggle_button, command: cmdPreviewPane, size: small, image: preview_pane, label: Preview pane }
+          - { type: toggle_button, command: cmdDetailsPane, size: small, image: details_pane, label: Details pane }
 
       - id: layout
         label: Layout
@@ -296,70 +619,396 @@ tabs:
             label: Sort by
             keytip: "SO"
             items:
-              - { command: cmdSortName, image: sort_by, label: Name, tooltip: "Sort by name" }
-              - { command: cmdSortSize, image: sort_by, label: Size, tooltip: "Sort by size" }
-              - { command: cmdSortModified, image: sort_by, label: Date modified, tooltip: "Sort by modification date" }
-          - { type: button, command: cmdGroupBy, size: small, image: sort_by, label: Group by }
-          - { type: button, command: cmdSizeColumns, size: small, image: view_details, label: Size columns to fit }
+              - { command: cmdSortName, image: sort_by, label: Name }
+              - { command: cmdSortDate, image: sort_by, label: Date }
+              - { command: cmdSortType, image: sort_by, label: Type }
+              - { command: cmdSortSize, image: sort_by, label: Size }
+              - { command: cmdSortTags, image: sort_by, label: Tags }
+              - { command: cmdSortCreated, image: sort_by, label: Date created }
+              - { command: cmdSortModified, image: sort_by, label: Date modified }
+              - { command: cmdSortTaken, image: sort_by, label: Date taken }
+              - { command: cmdSortDimensions, image: sort_by, label: Dimensions }
+              - { command: cmdSortRating, image: sort_by, label: Rating }
+              - { command: cmdSortAsc, image: sort_by, label: Ascending, separator_before: true }
+              - { command: cmdSortDesc, image: sort_by, label: Descending }
+              - { command: cmdChooseColumns, image: view_details, label: Choose columns, separator_before: true }
+          - type: split_button
+            command: cmdGroupBy
+            size: small
+            image: sort_by
+            label: Group by
+            items:
+              - { command: cmdGroupNone, image: blank, label: "(none)" }
+              - { command: cmdGroupName, image: sort_by, label: Name, separator_before: true }
+              - { command: cmdGroupDate, image: sort_by, label: Date modified }
+              - { command: cmdGroupType, image: sort_by, label: Type }
+              - { command: cmdGroupSize, image: sort_by, label: Size }
+              - { command: cmdGroupRating, image: sort_by, label: Rating }
+              - { command: cmdGroupAsc, image: sort_by, label: Ascending, separator_before: true }
+              - { command: cmdGroupDesc, image: sort_by, label: Descending }
+              - { command: cmdChooseColumns, image: view_details, label: Choose columns, separator_before: true }
+          - type: split_button
+            command: cmdAddColumns
+            size: small
+            image: view_details
+            label: Add columns
+            items:
+              - { command: cmdSortDate, image: view_details, label: Date }
+              - { command: cmdSortType, image: view_details, label: Type }
+              - { command: cmdSortSize, image: view_details, label: Size }
+              - { command: cmdSortTags, image: view_details, label: Tags }
+              - { command: cmdChooseColumns, image: view_details, label: Choose columns, separator_before: true }
+          - { type: button, command: cmdSizeColumns, size: small, image: view_details, label: Size all columns to fit }
+          - { type: toggle_button, command: cmdCompactDetails, size: small, image: view_details, label: Compact details, tooltip: "Show Details rows at compact height (24 px)" }
 
       - id: show_hide
         label: Show/hide
         image: select_none
         controls:
-          - { type: button, command: cmdToggleCheckboxes, size: small, image: select_none, label: Item check boxes }
-          - { type: button, command: cmdToggleExtensions, size: small, image: edit, label: File name extensions }
+          - { type: toggle_button, command: cmdToggleCheckboxes, size: small, image: select_all, label: Item check boxes }
+          - { type: toggle_button, command: cmdToggleExtensions, size: small, image: edit, label: File name extensions }
           - { type: toggle_button, command: cmdToggleHidden, size: small, image: view_details, label: Hidden items, keytip: "H", tooltip: "Show or hide hidden items" }
+          - { type: toggle_button, command: cmdShowTreeExpander, size: small, image: nav_pane, label: Show tree expander }
+          - { type: button, command: cmdHideSelected, size: large, image: delete, label: Hide selected items }
 
       - id: options
         label: Options
         image: gear
         controls:
+          - type: split_button
+            command: cmdFolderOptions
+            size: large
+            image: gear
+            label: Options
+            keytip: "O"
+            items:
+              - { command: cmdChangeFolderOptions, image: gear, label: Change folder and search options }
           - { type: toggle_button, command: cmdToggleDark, size: small, image: gear, label: Dark mode, keytip: "DK", tooltip: "Switch between light and dark mode" }
           - { type: toggle_button, command: cmdToggleBorder, size: small, image: gear, label: Custom border, tooltip: "Use the custom window border" }
           - { type: toggle_button, command: cmdToggleFrame, size: small, image: gear, label: Win8 frame, tooltip: "Switch between Win8 and Win10 frame styles" }
-          - { type: button, command: cmdFolderOptions, size: small, image: gear, label: Folder options }
 
-  # ------------------------------------------------------------ Contextual: Drive Tools
+  # ============================================================ Contextual: Drive Tools
   - id: drive_tools
-    label: Manage
+    label: Drive Tools
     keytip: "M"
     contextual: Drive Tools
     context_color: green
     context_command: cmdCtxDrive
     groups:
-      - id: drive
-        label: Drive
+      - id: drive_protect
+        label: Protect
         image: properties
         controls:
+          - type: split_button
+            command: cmdBitlocker
+            size: large
+            image: properties
+            label: BitLocker
+            items:
+              - { command: cmdBitlockerOn, image: properties, label: Turn on BitLocker }
+              - { command: cmdBitlockerManage, image: properties, label: Manage BitLocker }
+              - { command: cmdBitlockerPin, image: properties, label: Change PIN }
+      - id: drive_manage
+        label: Manage
+        image: gear
+        controls:
+          - { type: button, command: cmdOptimize, size: small, image: gear, label: Optimize }
+          - { type: button, command: cmdCleanup, size: small, image: delete, label: Cleanup }
+          - { type: button, command: cmdFormat, size: large, image: delete, label: Format }
           - { type: button, command: cmdDriveProperties, size: small, image: properties, label: Properties }
-          - { type: button, command: cmdOpenTerminal, size: small, image: terminal, label: Open terminal, keytip: "T", tooltip: "Open a terminal in this folder" }
+      - id: drive_media
+        label: Media
+        image: drive
+        controls:
+          - { type: button, command: cmdAutoPlay, size: large, image: drive, label: AutoPlay }
+          - { type: button, command: cmdEject, size: small, image: open, label: Eject }
+          - { type: button, command: cmdFinishBurning, size: small, image: blank, label: Finish burning }
+          - { type: button, command: cmdEraseDisc, size: small, image: delete, label: Erase this disc }
 
-  # ------------------------------------------------------------ Contextual: Picture Tools
+  # ============================================================ Contextual: Picture Tools
   - id: picture_tools
-    label: Manage
+    label: Picture Tools
     keytip: "P"
     contextual: Picture Tools
     context_color: gold
     context_command: cmdCtxPicture
     groups:
-      - id: manage
-        label: Manage
+      - id: rotate
+        label: Rotate
         image: pictures
         controls:
+          - { type: button, command: cmdRotateLeft, size: small, image: pictures, label: Rotate left }
+          - { type: button, command: cmdRotateRight, size: large, image: pictures, label: Rotate right }
+      - id: view_pic
+        label: View
+        image: open
+        controls:
+          - { type: button, command: cmdSlideShow, size: small, image: pictures, label: Slide show }
+          - { type: button, command: cmdSetWallpaper, size: large, image: pictures, label: Set as background }
           - { type: button, command: cmdOpenPicture, size: small, image: open, label: Open, keytip: "O" }
-          - { type: button, command: cmdSetWallpaper, size: small, image: pictures, label: Set as wallpaper }
 
-  # ------------------------------------------------------------ Contextual: Archive Tools
+  # ============================================================ Contextual: Archive Tools
   - id: archive_tools
-    label: Manage
+    label: Compressed Folder Tools
     keytip: "A"
     contextual: Archive Tools
     context_color: orange
     context_command: cmdCtxArchive
     groups:
-      - id: archive
-        label: Archive
+      - id: extract
+        label: Extract
         image: extract
         controls:
-          - { type: button, command: cmdExtractHere, size: small, image: extract, label: Extract here, keytip: "E" }
+          - { type: button, command: cmdExtractAll, size: large, image: extract, label: Extract all, keytip: "E", tooltip: "Extract every file in the archive" }
+          - { type: button, command: cmdExtractHere, size: small, image: extract, label: Extract here, tooltip: "Extract to this folder" }
           - { type: button, command: cmdOpenTerminal, size: small, image: terminal, label: Open terminal, tooltip: "Open a terminal in this folder" }
+
+  # ============================================================ Contextual: Search Tools (hidden until detector wired)
+  - id: search_tools
+    label: Search Tools
+    keytip: "R"
+    contextual: Search Tools
+    context_color: blue
+    context_command: cmdCtxSearch
+    groups:
+      - id: search_location
+        label: Location
+        image: search
+        controls:
+          - { type: button, command: cmdThisPC, size: large, image: drive, label: This PC }
+          - { type: toggle_button, command: cmdCurrentFolder, size: small, image: find, label: Current folder }
+          - { type: toggle_button, command: cmdAllSubfolders, size: small, image: find, label: All subfolders }
+          - type: split_button
+            command: cmdSearchAgainIn
+            size: small
+            image: find
+            label: Search again in
+            items:
+              - { command: cmdSearchPlaces, image: open, label: Important places }
+              - { command: cmdSearchInternet, image: open, label: Internet }
+      - id: search_refine
+        label: Refine
+        image: find
+        controls:
+          - type: split_button
+            command: cmdDateModified
+            size: large
+            image: find
+            label: Date modified
+            items:
+              - { command: cmdDateModified, image: find, label: Today }
+              - { command: cmdDateModified, image: find, label: Yesterday }
+              - { command: cmdDateModified, image: find, label: This week }
+              - { command: cmdDateModified, image: find, label: Last week }
+              - { command: cmdDateModified, image: find, label: This month }
+              - { command: cmdDateModified, image: find, label: Last month }
+              - { command: cmdDateModified, image: find, label: This year }
+              - { command: cmdDateModified, image: find, label: Last year }
+          - type: split_button
+            command: cmdKind
+            size: small
+            image: find
+            label: Kind
+            items: []
+          - type: split_button
+            command: cmdSizeFilter
+            size: small
+            image: find
+            label: Size
+            items:
+              - { command: cmdSizeFilter, image: find, label: Empty }
+              - { command: cmdSizeFilter, image: find, label: Tiny }
+              - { command: cmdSizeFilter, image: find, label: Small }
+              - { command: cmdSizeFilter, image: find, label: Medium }
+              - { command: cmdSizeFilter, image: find, label: Large }
+              - { command: cmdSizeFilter, image: find, label: Huge }
+              - { command: cmdSizeFilter, image: find, label: Gigantic }
+          - type: split_button
+            command: cmdOtherProperties
+            size: small
+            image: find
+            label: Other properties
+            items: []
+      - id: search_options
+        label: Options
+        image: gear
+        controls:
+          - type: split_button
+            command: cmdRecentSearches
+            size: small
+            image: find
+            label: Recent searches
+            items:
+              - { command: cmdClearSearchHistory, image: delete, label: Clear search history }
+          - type: split_button
+            command: cmdAdvancedOptions
+            size: small
+            image: gear
+            label: Advanced options
+            items:
+              - { command: cmdChangeIndexed, image: gear, label: Change indexed locations }
+              - { command: cmdIndexFileContents, image: gear, label: File contents }
+              - { command: cmdIndexSystemFiles, image: gear, label: System files }
+              - { command: cmdIndexCompressed, image: gear, label: "Compressed files (ZIP, CAB, ...)" }
+          - { type: button, command: cmdSaveSearch, size: small, image: save, label: Save search }
+      - id: search_close
+        controls:
+          - { type: button, command: cmdOpenFileLocation, size: small, image: open, label: Open file location }
+          - { type: button, command: cmdCloseSearch, size: large, image: close, label: Close search }
+
+  # ============================================================ Contextual: Video Tools (hidden)
+  - id: video_tools
+    label: Video Tools
+    keytip: "V"
+    contextual: Video Tools
+    context_color: purple
+    context_command: cmdCtxVideo
+    groups:
+      - id: play
+        controls:
+          - { type: button, command: cmdPlay, size: large, image: open, label: Play }
+          - { type: button, command: cmdPlayAll, size: large, image: open, label: Play all }
+          - { type: button, command: cmdAddToPlaylist, size: small, image: open, label: Add to playlist }
+
+  # ============================================================ Contextual: Music Tools (hidden)
+  - id: music_tools
+    label: Music Tools
+    keytip: "M"
+    contextual: Music Tools
+    context_color: purple
+    context_command: cmdCtxMusic
+    groups:
+      - id: play
+        controls:
+          - { type: button, command: cmdPlay, size: large, image: music, label: Play }
+          - { type: button, command: cmdPlayAll, size: large, image: music, label: Play all }
+          - { type: button, command: cmdAddToPlaylist, size: small, image: music, label: Add to playlist }
+
+  # ============================================================ Contextual: Compressed Folder Tools (hidden)
+  - id: compressed_tools
+    label: Compressed Folder Tools
+    keytip: "C"
+    contextual: Compressed Folder Tools
+    context_color: orange
+    context_command: cmdCtxCompressed
+    groups:
+      - id: extract_to
+        label: Extract
+        image: extract
+        controls:
+          - { type: button, command: cmdExtractAll, size: large, image: extract, label: Extract all, keytip: "E" }
+          - { type: button, command: cmdExtractHere, size: small, image: extract, label: Extract here }
+
+  # ============================================================ Contextual: Application Tools (hidden)
+  - id: application_tools
+    label: Application Tools
+    keytip: "A"
+    contextual: Application Tools
+    context_color: purple
+    context_command: cmdCtxApplication
+    groups:
+      - id: app_pin
+        controls:
+          - { type: button, command: cmdPinTaskbar, size: large, image: pin, label: Pin to taskbar }
+      - id: app_run
+        label: Run
+        image: terminal
+        controls:
+          - type: split_button
+            command: cmdRunAsAdmin
+            separate: true
+            size: large
+            image: terminal
+            label: Run as administrator
+            items:
+              - { command: cmdRunAsAdmin, image: terminal, label: Run as Administrator }
+              - { command: cmdRunAsUser, image: terminal, label: Run as another user }
+          - { type: button, command: cmdTroubleshoot, size: large, image: gear, label: Troubleshoot compatibility }
+
+  # ============================================================ Contextual: Disc Image Tools (hidden)
+  - id: disc_image_tools
+    label: Disc Image Tools
+    keytip: "I"
+    contextual: Disc Image Tools
+    context_color: orange
+    context_command: cmdCtxDiscImage
+    groups:
+      - id: disc_manage
+        label: Manage
+        image: drive
+        controls:
+          - { type: button, command: cmdMount, size: small, image: drive, label: Mount }
+          - { type: button, command: cmdBurn, size: large, image: drive, label: Burn }
+
+  # ============================================================ Contextual: Network (hidden)
+  - id: network_tools
+    label: Network
+    keytip: "N"
+    contextual: Network
+    context_color: blue
+    context_command: cmdCtxNetwork
+    groups:
+      - id: net_location
+        label: Location
+        image: network
+        controls:
+          - { type: button, command: cmdNetProperties, size: small, image: properties, label: Properties }
+          - { type: button, command: cmdNetOpen, size: small, image: open, label: Open }
+          - { type: button, command: cmdRemoteDesktop, size: large, image: network, label: Connect with Remote Desktop }
+      - id: net_network
+        label: Network
+        image: network
+        controls:
+          - { type: button, command: cmdAddDevices, size: large, image: network, label: Add devices and printers }
+          - { type: button, command: cmdViewPrinters, size: small, image: print, label: View printers }
+          - { type: button, command: cmdDeviceWebpage, size: small, image: open, label: View device webpage }
+          - { type: button, command: cmdSearchAD, size: small, image: find, label: Search Active Directory }
+      - id: net_center
+        controls:
+          - { type: button, command: cmdNetSharingCenter, size: large, image: network, label: Network and Sharing Center }
+
+  # ============================================================ Contextual: Computer (hidden)
+  - id: computer_tools
+    label: Computer
+    keytip: "C"
+    contextual: Computer
+    context_color: blue
+    context_command: cmdCtxComputer
+    groups:
+      - id: comp_location
+        label: Location
+        image: drive
+        controls:
+          - { type: button, command: cmdCompProperties, size: small, image: properties, label: Properties }
+          - { type: button, command: cmdCompOpen, size: small, image: open, label: Open }
+          - { type: button, command: cmdCompRename, size: small, image: rename, label: Rename }
+      - id: comp_network
+        label: Network
+        image: network
+        controls:
+          - type: split_button
+            command: cmdAccessMedia
+            size: small
+            image: network
+            label: Access media
+            items:
+              - { command: cmdConnectMedia, image: network, label: Connect to media server }
+              - { command: cmdDisconnectMedia, image: network, label: Disconnect }
+          - type: split_button
+            command: cmdMapNetworkDrive
+            separate: true
+            size: large
+            image: network
+            label: Map network drive
+            items:
+              - { command: cmdMapNetworkDrive, image: network, label: Map network drive }
+              - { command: cmdDisconnectDrive, image: network, label: Disconnect network drive }
+          - { type: button, command: cmdAddNetworkLocation, size: large, image: network, label: Add a network location }
+      - id: comp_system
+        label: System
+        image: gear
+        controls:
+          - { type: button, command: cmdOpenSettings, size: large, image: gear, label: Open Settings }
+          - { type: button, command: cmdUninstallProgram, size: small, image: delete, label: Uninstall or change a program }
+          - { type: button, command: cmdSystemProperties, size: small, image: properties, label: System properties }
+          - { type: button, command: cmdManage, size: small, image: gear, label: Manage }

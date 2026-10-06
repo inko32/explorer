@@ -1,0 +1,124 @@
+# Folder view configuration — SPEC/folder-spec.md as data.
+# Everything the spec fixes lives here: the step→size map (§3/§4), the
+# layout families and their index ranges (§3, §12 FlipIndex), the View
+# menu presets (§5), the enabled mask (§6/§12), the Ctrl+scroll input
+# tuning (§7/§12) and the layout metrics (§8, §12). A user copy at
+# ~/.config/explorer/folder-view.yaml overrides this file (same
+# override path as ribbon.yaml). Missing keys fall back to the values
+# shown below. px values are at 100% scaling (96 DPI); s = the icon
+# size of the current step.
+
+# §3/§4 step→icon-size map (index = position in the list, 0-based;
+# stable, never renumbered)
+sizes: [
+  32, 48, 16, 16,                               # 0 Content, 1 Tiles, 2 Details, 3 List
+  16, 17, 18, 19, 21, 22, 23, 25, 26, 28, 30,   # 4–14 small icons (name right)
+  32, 34, 36, 40, 42, 44, 48, 50, 54, 58, 60,   # 15–25 icon on top (name below)
+  64, 68, 72, 80, 84, 88, 96, 100, 108, 116, 120,
+  128, 136, 144, 160, 168, 184, 192, 208, 224, 240, 256,
+]
+
+# §5 presets (View menu entries); their mask bits are forced on (§6)
+presets:
+  content: 0
+  tiles: 1
+  details: 2
+  list: 3
+  small: 4
+  medium: 21
+  large: 32
+  xlarge: 47
+
+# §6/§12 EnabledMask: bit i = step reachable by Ctrl+Scroll
+# (decimal or "0x..." hex; 2^48-1 = all steps enabled)
+enabled_mask: 281474976710655
+
+# §7/§12 Ctrl+scroll input tuning
+input:
+  notch_delta: 120.0        # NotchDelta: one step per ±this much wheel delta (30–240)
+  step_interval_ms: 40      # at most one step per this many ms (0–200); extra delta dropped
+  invert_direction: false   # ScrollDirection: false = wheel up grows the icons
+  anim_ms: 120              # §9 zoom animation duration (0 = off; animation not implemented yet)
+  scroll_speed: 2.0         # wheel scroll multiplier (folder view + nav pane); 1.0 = iced default 60px/line
+
+# §8.1 fixed layouts, each pinned to its step index
+layouts:
+  content:                  # index 0: one item per row
+    index: 0
+    row_h: 48.0             # 32px icon + 2x8 padding
+    icon: 32.0
+    name_size: 12.0         # semibold name
+    prop_size: 11.0         # property lines
+    spacing: 2.0            # between the text lines
+    pad_h: 8.0              # vertical padding inside the row
+    pad_w: 8.0              # horizontal padding
+    icon_text_gap: 8.0
+  tiles:                    # index 1: fixed cells, name/Type/Size lines
+    index: 1
+    cell_w: 256.0
+    cell_h: 64.0
+    icon: 48.0
+    name_size: 12.0
+    prop_size: 11.0
+    line_spacing: 1.0
+    icon_text_gap: 8.0
+    pad: 8.0                # padding inside the cell
+  details:                  # index 2: column list with a sortable header
+    index: 2
+    row_h: 32.0             # DetailsRowHeight…
+    row_h_compact: 24.0     # …and compact (compact is the default)
+    header_h: 24.0          # column header strip (overlays the scrollable top)
+    icon: 16.0
+    icon_cell_w: 26.0       # icon column slot
+    cell_padding_v: 2.0     # text cell vertical padding
+    cell_padding_h: 4.0
+    col_widths: [170.0, 140.0, 90.0]  # Date modified / Type / Size; Name takes the rest
+    col_min: 40.0           # column drag clamp
+    col_max: 600.0
+  list:                     # index 3: name-only columns flowing top to bottom
+    index: 3
+    row_h: 24.0
+    icon: 16.0
+    icon_text_gap: 6.0
+    col_w_base: 30.0        # column width = base + longest name * per_char
+    per_char: 7.2           # px per name character
+    col_w_min: 48.0
+    col_w_max: 240.0        # ListMaxColW
+    pad_h: 0.0
+    pad_w: 4.0
+
+# §8.2 small-icon family (name right of the icon); its end is the §12
+# FlipIndex — the label moves below the icon at the next index
+small_icon:
+  from: 4
+  to: 14
+  cell_h_extra: 8.0         # cell height = s + this
+  icon_label_gap: 6.0
+  label_w_base: 160.0       # label width = base + factor * (s - 16)
+  label_w_factor: 4.0
+  cell_w_tail: 8.0          # cell width = s + gap + label + this
+  grid_gap: 2.0
+
+# §8.3 icon-on-top family (name below the icon)
+icon_top:
+  from: 15
+  to: 47
+  thumb_min: 48.0           # ThumbMinSize: smallest size with thumbnails (not implemented yet)
+  thumb_border: true        # ThumbBorder (not implemented yet)
+  w_min: 76.0               # Wmin: minimum cell width
+  pad_factor: 0.08          # P = max(pad_min, floor(pad_factor * s))
+  pad_min: 8.0
+  gap_factor: 0.06          # icon–label gap + grid gap = max(gap_min, floor(gap_factor * s))
+  gap_min: 4.0
+  label_lines_small: 2      # LabelLines: below label_lines_switch…
+  label_lines_switch: 96.0  # …at or above this icon size…
+  label_lines_large: 3      # …this many label lines
+  label_line_h: 20.0
+  label_pad: 8.0            # horizontal breathing room for the elided label
+  per_char: 6.5             # px per label character (elide estimate)
+
+# §8.4 common styling
+style:
+  corner_radius: 4.0        # hover/selection rounded rectangle
+  font_size: 12.0           # system UI font, 9 pt; all item labels
+  prop_size: 11.0           # property lines (Content/Tiles) + Details header

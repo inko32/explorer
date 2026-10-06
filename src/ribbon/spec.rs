@@ -109,9 +109,16 @@ pub struct MetricsSpec {
     pub tree_indention: f32,
     /// Navigation tree label size as a fraction of the icon size.
     pub tree_font_scale: f32,
+    /// Icon size as a fraction of the bar-button (nav circles / refresh /
+    /// status view buttons) size.
+    pub bar_button_multiplier: f32,
     /// Horizontal gap multiplier for the ribbon (group edge padding,
     /// inter-group and column gaps).
     pub gap_scale: f32,
+    /// Extra px the group footers (group titles + dialog launchers) sit
+    /// below their default position; the ribbon body grows with it, so
+    /// the bottom separator line moves down too.
+    pub footer_shift: f32,
 }
 
 impl Default for MetricsSpec {
@@ -121,7 +128,9 @@ impl Default for MetricsSpec {
             tree_item_height: 22.0,
             tree_indention: 14.0,
             tree_font_scale: 0.7,
+            bar_button_multiplier: 2.2,
             gap_scale: 1.0,
+            footer_shift: 3.0,
         }
     }
 }

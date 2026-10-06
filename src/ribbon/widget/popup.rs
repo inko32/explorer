@@ -1092,7 +1092,7 @@ fn overflow_group_scene(ctx: &Ctx, tab: usize, group: usize) -> Scene {
     let spec = ctx.spec();
     let g = &spec.tabs[tab].groups[group];
     let width = super::layout::measure_group_pub(ctx, g).max(150.0);
-    let height = super::layout::BODY_H + 8.0;
+    let height = super::layout::body_h(ctx) + 8.0;
     let mut scene = Scene::new(Size::new(width, height));
     panel(&mut scene, Size::new(width, height), ctx.theme);
     // Same group body as in the ribbon, at its declared (unscaled)
@@ -1205,7 +1205,7 @@ fn qat_menu_scene(ctx: &Ctx) -> Scene {
 // minimized tab body
 
 fn minimized_tab_scene(ctx: &Ctx, tab: usize, width: f32) -> Scene {
-    let mut scene = Scene::new(Size::new(width, RIBBON_BODY_HEIGHT));
+    let mut scene = Scene::new(Size::new(width, super::layout::body_h(ctx)));
     super::layout::tab_content(ctx, &mut scene, 0.0, width, tab, false);
     scene
 }
@@ -1361,7 +1361,7 @@ where
         layout: iced::advanced::Layout<'_>,
         cursor: mouse::Cursor,
         _renderer: &Renderer,
-        clipboard: &mut dyn iced::advanced::Clipboard,
+        _clipboard: &mut dyn iced::advanced::Clipboard,
         shell: &mut Shell<'_, Message>,
     ) {
         if self.tooltip {
@@ -1402,46 +1402,22 @@ where
                 let Some(position) = cursor.position() else {
                     return;
                 };
-                if !layout.bounds().contains(position) {
-                    // click-away: close and let the base widget handle it
-                    close_all_popups(self.state);
-                    self.state.previewed = None;
-                    shell.request_redraw();
-                    return;
-                }
-                if let Some(node) = self.scene.hit(local(position)) {
-                    if let Some(t) = node.target.clone() {
-                        self.state.pressed = Some(t.clone());
-                    }
-                }
-                shell.capture_event();
+                self.press_at(position, origin, layout.bounds(), shell);
+            }
+            iced::Event::Touch(iced::touch::Event::FingerPressed { position, .. }) => {
+                self.press_at(position, origin, layout.bounds(), shell);
             }
             iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
                 let Some(position) = cursor.position() else {
                     return;
                 };
-                let hit = self.scene.hit(local(position)).and_then(|n| n.target.clone());
-                let pressed = self.state.pressed.take();
-                if let (Some(t), Some(p)) = (hit, pressed) {
-                    if t == p {
-                        let anchor = match self.scene.hit(local(position)) {
-                            Some(n) => super::translate_rect(n.rect, layout.position()),
-                            None => layout.bounds(),
-                        };
-                        activate(
-                            self.fw,
-                            self.theme,
-                            self.state,
-                            &t,
-                            anchor,
-                            layout.position(),
-                            shell,
-                            self.mapper,
-                        );
-                        let _ = clipboard;
-                    }
-                }
-                shell.capture_event();
+                self.release_at(position, origin, layout.bounds(), shell);
+            }
+            iced::Event::Touch(iced::touch::Event::FingerLifted { position, .. }) => {
+                self.release_at(position, origin, layout.bounds(), shell);
+            }
+            iced::Event::Touch(iced::touch::Event::FingerLost { .. }) => {
+                self.state.pressed = None;
             }
             iced::Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
                 let Some(position) = cursor.position() else {
@@ -1524,5 +1500,61 @@ impl<'a, Message, Th, Renderer> RibbonOverlay<'a, Message, Th, Renderer> {
                 );
             }
         }
+    }
+
+    /// Press at a position (mouse or first touch finger).
+    fn press_at(
+        &mut self,
+        position: Point,
+        origin: Point,
+        bounds: Rectangle,
+        shell: &mut Shell<'_, Message>,
+    ) {
+        if !bounds.contains(position) {
+            // click-away: close and let the base widget handle it
+            close_all_popups(self.state);
+            self.state.previewed = None;
+            shell.request_redraw();
+            return;
+        }
+        let local = Point::new(position.x - origin.x, position.y - origin.y);
+        if let Some(node) = self.scene.hit(local) {
+            if let Some(t) = node.target.clone() {
+                self.state.pressed = Some(t);
+            }
+        }
+        shell.capture_event();
+    }
+
+    /// Release at a position (mouse or first touch finger).
+    fn release_at(
+        &mut self,
+        position: Point,
+        origin: Point,
+        bounds: Rectangle,
+        shell: &mut Shell<'_, Message>,
+    ) {
+        let local = Point::new(position.x - origin.x, position.y - origin.y);
+        let hit = self.scene.hit(local).and_then(|n| n.target.clone());
+        let pressed = self.state.pressed.take();
+        if let (Some(t), Some(p)) = (hit, pressed) {
+            if t == p {
+                let anchor = match self.scene.hit(local) {
+                    Some(n) => super::translate_rect(n.rect, origin),
+                    None => bounds,
+                };
+                activate(
+                    self.fw,
+                    self.theme,
+                    self.state,
+                    &t,
+                    anchor,
+                    origin,
+                    shell,
+                    self.mapper,
+                );
+            }
+        }
+        shell.capture_event();
     }
 }

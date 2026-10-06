@@ -165,6 +165,9 @@ pub struct ViewState {
     /// by the widget on every layout — the window chrome (title bar)
     /// aligns its contextual blocks with these.
     pub(crate) tab_rects: Vec<(usize, f32, f32)>,
+    /// yaml `metrics.footer_shift`: the group titles sit this many px
+    /// lower and the ribbon body grows with it (set by `load_ui`).
+    pub(crate) footer_shift: f32,
     pub(crate) event_logger: Option<Rc<RefCell<dyn FnMut(EventType, EventLocation, u32)>>>,
 }
 
@@ -178,6 +181,7 @@ impl Default for ViewState {
             modes: 1,
             pending_popup: None,
             tab_rects: Vec::new(),
+            footer_shift: 0.0,
             event_logger: None,
         }
     }
@@ -203,13 +207,18 @@ pub const RIBBON_BODY_HEIGHT: f32 = 92.0;
 pub const QAT_ROW_HEIGHT: f32 = 22.0;
 
 impl RibbonView {
+    /// Body height including the yaml `metrics.footer_shift`.
+    pub(crate) fn body_height(&self) -> f32 {
+        RIBBON_BODY_HEIGHT + self.inner.borrow().footer_shift
+    }
+
     /// `IUIRibbon::GetHeight`.
     pub fn get_height(&self) -> u32 {
         let s = self.inner.borrow();
         let mut h = TAB_STRIP_HEIGHT;
         // docked "top" lives in the window title bar (no ribbon row)
         if !s.minimized {
-            h += RIBBON_BODY_HEIGHT;
+            h += RIBBON_BODY_HEIGHT + s.footer_shift;
         }
         if s.qat_dock == ControlDock::Bottom {
             h += QAT_ROW_HEIGHT;
@@ -375,6 +384,8 @@ impl RibbonFramework {
             .ok_or_else(|| RibbonError::fail("IUIFramework::Initialize has not been called"))?;
 
         self.spec = Some(spec);
+        self.view.inner.borrow_mut().footer_shift =
+            self.spec.as_ref().map(|s| s.metrics.footer_shift).unwrap_or(0.0);
 
         // Seed markup-provided property values.
         for (cmd, ty, seeds) in &commands {

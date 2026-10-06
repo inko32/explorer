@@ -82,12 +82,16 @@ use std::rc::Rc;
 
 use iced::Element;
 
-use crate::model::{Explorer, Message, SortBy, ViewMode};
+use crate::model::{Explorer, Message, SortBy};
 use crate::ribbon::widget::Ribbon as RibbonWidget;
 
 // ---------------------------------------------------------------------------
 // command ids (mirror assets/ribbon.yaml `commands:`)
 
+// Command id manifest mirroring assets/ribbon.yaml `commands:`. Most
+// ids are referenced only from the yaml (resolved by name), so unused
+// constants here are expected — they document the numeric ids.
+#[allow(dead_code)]
 pub mod cmd {
     pub const NEW_WINDOW: u32 = 2;
     pub const OPEN_TERMINAL: u32 = 3;
@@ -128,6 +132,8 @@ pub mod cmd {
     pub const DETAILS_PANE: u32 = 62;
     pub const VIEW_DETAILS: u32 = 63;
     pub const VIEW_LARGE: u32 = 64;
+    /// Reserved view option: compact Details rows (24px, the default).
+    pub const COMPACT_DETAILS: u32 = 78;
     pub const SORT_BY: u32 = 65;
     pub const SORT_NAME: u32 = 66;
     pub const SORT_SIZE: u32 = 67;
@@ -153,21 +159,181 @@ pub mod cmd {
     pub const SET_WALLPAPER: u32 = 112;
     pub const CTX_ARCHIVE: u32 = 120;
     pub const EXTRACT_HERE: u32 = 121;
+
+    // ---- File menu / Home ----
+    pub const OPEN_TERMINAL_ADMIN: u32 = 200;
+    pub const ABOUT: u32 = 201;
+    pub const PIN: u32 = 202;
+    pub const COPY_PATH: u32 = 203;
+    pub const PASTE_SHORTCUT: u32 = 204;
+    pub const PASTE_SYMLINK: u32 = 205;
+    pub const DELETE_SUDO: u32 = 206;
+    pub const SHOW_RECYCLE_CONFIRM: u32 = 207;
+    pub const NEW_SHORTCUT: u32 = 208;
+    pub const NEW_SYMLINK: u32 = 209;
+    pub const NEW_TEXT_FILE: u32 = 210;
+    pub const EASY_ACCESS: u32 = 211;
+    pub const MAP_DRIVE: u32 = 212;
+    pub const SHARE_ACCESS: u32 = 213;
+    pub const REMOVE_PROPERTIES: u32 = 214;
+    pub const PERMISSION: u32 = 215;
+    pub const MAKE_EXECUTABLE: u32 = 216;
+    pub const GRANT_PERMISSION: u32 = 217;
+    pub const OPEN_WITH: u32 = 218;
+    pub const OPEN_NOTEPAD: u32 = 219;
+    pub const OPEN_EXCEL: u32 = 220;
+    pub const OPEN_WORD: u32 = 221;
+    pub const CHOOSE_APP: u32 = 222;
+    pub const FILTERS: u32 = 223;
+    pub const FILTER_ALL: u32 = 224;
+    pub const FILTER_DOCS: u32 = 225;
+    pub const FILTER_SHEETS: u32 = 226;
+    pub const FILTER_SLIDES: u32 = 227;
+    pub const FILTER_IMAGES: u32 = 228;
+    pub const FILTER_VIDEOS: u32 = 229;
+    pub const FILTER_PDF: u32 = 230;
+
+    // ---- Share ----
+    pub const SHARE: u32 = 231;
+    pub const BURN: u32 = 232;
+    pub const PRINT: u32 = 233;
+    pub const FAX: u32 = 234;
+    pub const USER_LIST: u32 = 235;
+    pub const REMOVE_ACCESS: u32 = 236;
+    pub const ADVANCED_SECURITY: u32 = 237;
+    pub const COMPRESS: u32 = 238;
+    pub const ZIP: u32 = 239;
+    pub const SEVEN_Z: u32 = 240;
+    pub const TAR_XZ: u32 = 241;
+    pub const READ_ONLY: u32 = 242;
+
+    // ---- View ----
+    pub const SORT_DATE: u32 = 245;
+    pub const SORT_TYPE: u32 = 246;
+    pub const SORT_TAGS: u32 = 247;
+    pub const SORT_CREATED: u32 = 248;
+    pub const SORT_TAKEN: u32 = 249;
+    pub const SORT_DIMENSIONS: u32 = 250;
+    pub const SORT_RATING: u32 = 251;
+    pub const SORT_ASC: u32 = 252;
+    pub const SORT_DESC: u32 = 253;
+    pub const CHOOSE_COLUMNS: u32 = 254;
+    pub const GROUP_NONE: u32 = 255;
+    pub const GROUP_NAME: u32 = 256;
+    pub const GROUP_DATE: u32 = 257;
+    pub const GROUP_TYPE: u32 = 258;
+    pub const GROUP_SIZE: u32 = 259;
+    pub const GROUP_TAGS: u32 = 260;
+    pub const GROUP_RATING: u32 = 261;
+    pub const GROUP_ASC: u32 = 262;
+    pub const GROUP_DESC: u32 = 263;
+    pub const ADD_COLUMNS: u32 = 264;
+    pub const SHOW_TREE_EXPANDER: u32 = 265;
+    pub const HIDE_SELECTED: u32 = 266;
+    pub const CHANGE_FOLDER_OPTIONS: u32 = 267;
+    pub const EXPAND_TO_FOLDER: u32 = 268;
+    pub const SHOW_ALL_FOLDERS: u32 = 269;
+
+    // ---- Drive Tools ----
+    pub const BITLOCKER: u32 = 270;
+    pub const BITLOCKER_ON: u32 = 271;
+    pub const BITLOCKER_MANAGE: u32 = 272;
+    pub const BITLOCKER_PIN: u32 = 273;
+    pub const OPTIMIZE: u32 = 274;
+    pub const CLEANUP: u32 = 275;
+    pub const FORMAT: u32 = 276;
+    pub const AUTOPLAY: u32 = 277;
+    pub const EJECT: u32 = 278;
+    pub const FINISH_BURNING: u32 = 279;
+    pub const ERASE_DISC: u32 = 280;
+
+    // ---- Picture Tools ----
+    pub const ROTATE_LEFT: u32 = 281;
+    pub const ROTATE_RIGHT: u32 = 282;
+    pub const SLIDE_SHOW: u32 = 283;
+
+    // ---- Compressed Folder Tools / Archive ----
+    pub const EXTRACT_ALL: u32 = 284;
+    pub const CTX_COMPRESSED: u32 = 285;
+
+    // ---- Search Tools ----
+    pub const CTX_SEARCH: u32 = 286;
+    pub const THIS_PC: u32 = 287;
+    pub const CURRENT_FOLDER: u32 = 288;
+    pub const ALL_SUBFOLDERS: u32 = 289;
+    pub const SEARCH_AGAIN_IN: u32 = 290;
+    pub const SEARCH_PLACES: u32 = 291;
+    pub const SEARCH_INTERNET: u32 = 292;
+    pub const DATE_MODIFIED: u32 = 293;
+    pub const KIND: u32 = 294;
+    pub const SIZE_FILTER: u32 = 295;
+    pub const OTHER_PROPERTIES: u32 = 296;
+    pub const RECENT_SEARCHES: u32 = 297;
+    pub const CLEAR_SEARCH_HISTORY: u32 = 298;
+    pub const ADVANCED_OPTIONS: u32 = 299;
+    pub const CHANGE_INDEXED: u32 = 300;
+    pub const INDEX_FILE_CONTENTS: u32 = 301;
+    pub const INDEX_SYSTEM_FILES: u32 = 302;
+    pub const INDEX_COMPRESSED: u32 = 303;
+    pub const SAVE_SEARCH: u32 = 304;
+    pub const OPEN_FILE_LOCATION: u32 = 305;
+    pub const CLOSE_SEARCH: u32 = 306;
+
+    // ---- Video / Music Tools ----
+    pub const CTX_VIDEO: u32 = 310;
+    pub const CTX_MUSIC: u32 = 311;
+    pub const PLAY: u32 = 312;
+    pub const PLAY_ALL: u32 = 313;
+    pub const ADD_TO_PLAYLIST: u32 = 314;
+
+    // ---- Application Tools ----
+    pub const CTX_APPLICATION: u32 = 315;
+    pub const PIN_TASKBAR: u32 = 316;
+    pub const RUN_AS_ADMIN: u32 = 317;
+    pub const RUN_AS_USER: u32 = 318;
+    pub const TROUBLESHOOT: u32 = 319;
+
+    // ---- Disc Image Tools ----
+    pub const CTX_DISC_IMAGE: u32 = 320;
+    pub const MOUNT: u32 = 321;
+
+    // ---- Network ----
+    pub const CTX_NETWORK: u32 = 322;
+    pub const NET_PROPERTIES: u32 = 323;
+    pub const NET_OPEN: u32 = 324;
+    pub const REMOTE_DESKTOP: u32 = 325;
+    pub const ADD_DEVICES: u32 = 326;
+    pub const VIEW_PRINTERS: u32 = 327;
+    pub const DEVICE_WEBPAGE: u32 = 328;
+    pub const SEARCH_AD: u32 = 329;
+    pub const NET_SHARING_CENTER: u32 = 330;
+
+    // ---- Computer ----
+    pub const CTX_COMPUTER: u32 = 331;
+    pub const COMP_PROPERTIES: u32 = 332;
+    pub const COMP_OPEN: u32 = 333;
+    pub const COMP_RENAME: u32 = 334;
+    pub const ACCESS_MEDIA: u32 = 335;
+    pub const CONNECT_MEDIA: u32 = 336;
+    pub const DISCONNECT_MEDIA: u32 = 337;
+    pub const MAP_NETWORK_DRIVE: u32 = 338;
+    pub const DISCONNECT_DRIVE: u32 = 339;
+    pub const ADD_NETWORK_LOCATION: u32 = 340;
+    pub const OPEN_SETTINGS: u32 = 341;
+    pub const UNINSTALL_PROGRAM: u32 = 342;
+    pub const SYSTEM_PROPERTIES: u32 = 343;
+    pub const MANAGE: u32 = 344;
 }
 
 /// Commands that exist in the markup but have no implementation yet.
 /// Kept enabled=false via [`ExplorerHandler::update_property`].
 const ALWAYS_DISABLED: &[u32] = &[
-    cmd::NEW_ITEM,
-    cmd::PROPERTIES,
     cmd::EDIT,
     cmd::HISTORY,
     cmd::SHARE_NOBODY,
     cmd::SHARE_EMAIL,
-    cmd::NAV_PANE,
     cmd::PREVIEW_PANE,
     cmd::DETAILS_PANE,
-    cmd::GROUP_BY,
     cmd::SIZE_COLUMNS,
     cmd::TOGGLE_CHECKBOXES,
     cmd::TOGGLE_EXTENSIONS,
@@ -201,6 +367,40 @@ mod tests {
     }
 
     #[test]
+    fn embedded_yaml_context_commands_are_declared() {
+        // Every tab `context_command` must name a DECLARED command — an
+        // undeclared name silently resolves to a hashed stable id whose
+        // ContextAvailable falls into the handler's `_ => true` arm,
+        // making the contextual tab always visible (regression: the
+        // Archive Tools tab showed in every folder because the yaml
+        // lacked `cmdCtxArchive`).
+        use crate::ribbon::spec::{self, CommandRef};
+        let text = include_str!("../../assets/ribbon.yaml");
+        let mut spec = spec::parse(text).expect("embedded ribbon.yaml is valid");
+        let declared: std::collections::BTreeSet<u32> = spec::collect_commands(&mut spec)
+            .unwrap()
+            .iter()
+            .map(|c| c.0)
+            .collect();
+        for tab in &spec.tabs {
+            if let Some(CommandRef::Id(id)) = tab.context_command {
+                assert!(
+                    declared.contains(&id) && id < 1000,
+                    "tab {:?} context_command resolved to undeclared id {id}",
+                    tab.id
+                );
+            }
+        }
+        // the archive tab must resolve to cmd::CTX_ARCHIVE specifically,
+        // whose handler arm drives it (inside archive / archive selected)
+        let archive = spec.tabs.iter().find(|t| t.id == "archive_tools").unwrap();
+        assert!(matches!(
+            archive.context_command,
+            Some(CommandRef::Id(cmd::CTX_ARCHIVE))
+        ));
+    }
+
+    #[test]
     fn embedded_yaml_commands_resolve_in_place() {
         // collect_commands must write resolved numeric ids back into EVERY
         // CommandRef slot — menus/popups render via `CommandRef::Id` only
@@ -226,14 +426,21 @@ mod tests {
             assert!(matches!(item.command, Some(CommandRef::Id(_))));
         }
         let home = spec.tabs.iter().find(|t| t.id == "home").unwrap();
-        match &home.groups[0].controls[0] {
-            ControlSpec::SplitButton(s) => {
-                assert!(matches!(s.command, Some(CommandRef::Id(_))));
-                for item in &s.items {
-                    assert!(matches!(item.command, Some(CommandRef::Id(_))));
+        // find the Paste split button wherever it sits in the Clipboard group
+        let paste = home.groups[0]
+            .controls
+            .iter()
+            .find_map(|c| match c {
+                ControlSpec::SplitButton(s)
+                    if matches!(s.command, Some(CommandRef::Id(id)) if id == cmd::PASTE) =>
+                {
+                    Some(s)
                 }
-            }
-            other => panic!("expected split button, got {other:?}"),
+                _ => None,
+            })
+            .expect("home clipboard group has a Paste split button");
+        for item in &paste.items {
+            assert!(matches!(item.command, Some(CommandRef::Id(_))));
         }
     }
 }
@@ -246,8 +453,14 @@ pub struct Snapshot {
     pub ctx: Context,
     pub has_clipboard: bool,
     pub has_items: bool,
-    pub view: Option<ViewMode>,
+    /// Current view step index (SPEC/folder-spec.md); the view commands
+    /// light up only when it equals their preset (§5 bullet rule).
+    pub view_index: u8,
+    /// The Details / Large-icons preset indices (folder-view.yaml §5).
+    pub preset_details: u8,
+    pub preset_large: u8,
     pub show_hidden: bool,
+    pub details_compact: bool,
     pub dark: bool,
     pub self_border: bool,
     pub win8_frame: bool,
@@ -264,8 +477,11 @@ impl Explorer {
             ctx: self.context(),
             has_clipboard: self.clipboard.is_some(),
             has_items: !self.entries.is_empty(),
-            view: Some(self.view),
+            view_index: self.view_index,
+            preset_details: self.view_cfg.presets.details,
+            preset_large: self.view_cfg.presets.large,
             show_hidden: self.show_hidden,
+            details_compact: self.details_compact,
             dark: self.dark,
             self_border: self.self_border,
             win8_frame: self.frame_style == crate::model::FrameStyle::Win8,
@@ -362,8 +578,9 @@ impl CommandHandler for ExplorerHandler {
             cmd::SELECT_ALL => out.push(Message::SelectAll),
             cmd::SELECT_NONE => out.push(Message::SelectNone),
             cmd::INVERT => out.push(Message::InvertSelection),
-            cmd::VIEW_DETAILS => out.push(Message::SetView(ViewMode::Details)),
-            cmd::VIEW_LARGE => out.push(Message::SetView(ViewMode::Large)),
+            cmd::VIEW_DETAILS => out.push(Message::SetView(snap.preset_details)),
+            cmd::VIEW_LARGE => out.push(Message::SetView(snap.preset_large)),
+            cmd::COMPACT_DETAILS => out.push(Message::ToggleDetailsCompact),
             cmd::SORT_BY => {
                 out.push(Message::Status("Pick a sort key from the menu".into()))
             }
@@ -421,8 +638,9 @@ impl CommandHandler for ExplorerHandler {
             }
             PropertyKey::BooleanValue => {
                 let on = match command {
-                    cmd::VIEW_DETAILS => snap.view == Some(ViewMode::Details),
-                    cmd::VIEW_LARGE => snap.view == Some(ViewMode::Large),
+                    cmd::VIEW_DETAILS => snap.view_index == snap.preset_details,
+                    cmd::VIEW_LARGE => snap.view_index == snap.preset_large,
+                    cmd::COMPACT_DETAILS => snap.details_compact,
                     cmd::TOGGLE_HIDDEN => snap.show_hidden,
                     cmd::TOGGLE_DARK => snap.dark,
                     cmd::TOGGLE_BORDER => snap.self_border,
@@ -436,6 +654,12 @@ impl CommandHandler for ExplorerHandler {
                     cmd::CTX_DRIVE => snap.ctx.is_drive,
                     cmd::CTX_PICTURE => snap.ctx.has_image,
                     cmd::CTX_ARCHIVE => snap.ctx.inside_archive || snap.ctx.has_archive,
+                    // contextual tabs not yet driven by the explorer
+                    // context stay hidden until their detector is wired
+                    cmd::CTX_SEARCH | cmd::CTX_VIDEO | cmd::CTX_MUSIC
+                    | cmd::CTX_COMPRESSED | cmd::CTX_APPLICATION
+                    | cmd::CTX_DISC_IMAGE | cmd::CTX_NETWORK
+                    | cmd::CTX_COMPUTER => false,
                     _ => true,
                 };
                 Some(PropValue::UInt(
@@ -490,6 +714,7 @@ fn command_name(command: u32) -> String {
         cmd::INVERT => "Invert selection",
         cmd::VIEW_DETAILS => "Details view",
         cmd::VIEW_LARGE => "Large icons view",
+        cmd::COMPACT_DETAILS => "Compact details view",
         cmd::SORT_BY => "Sort by",
         cmd::TOGGLE_HIDDEN => "Hidden items",
         cmd::TOGGLE_DARK => "Dark mode",
@@ -768,6 +993,16 @@ impl Ribbon {
         }
     }
 
+    /// Bar-button (nav circles / refresh / status view buttons) size as
+    /// a multiple of the icon size (ribbon markup `metrics:
+    /// bar_button_multiplier`).
+    pub fn bar_button_multiplier(&self) -> f32 {
+        match self.framework.spec() {
+            Ok(spec) => spec.metrics.bar_button_multiplier,
+            Err(_) => 2.2,
+        }
+    }
+
     /// UI metrics (band height, tree row height/indention/font scale),
     /// from the ribbon markup.
     pub fn metrics(&self) -> (f32, f32, f32, f32) {
@@ -842,4 +1077,32 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
         .theme(theme(state.dark))
         .on_event(Message::Ribbon)
         .into()
+}
+
+#[cfg(test)]
+mod debug_ctx_tests {
+    use super::*;
+
+    #[test]
+    fn contextual_tabs_hidden_by_default() {
+        let mut r = Ribbon::new();
+        r.sync(Snapshot::default());
+        for id in [
+            cmd::CTX_ARCHIVE,
+            cmd::CTX_COMPRESSED,
+            cmd::CTX_SEARCH,
+            cmd::CTX_VIDEO,
+            cmd::CTX_MUSIC,
+            cmd::CTX_APPLICATION,
+            cmd::CTX_DISC_IMAGE,
+            cmd::CTX_NETWORK,
+            cmd::CTX_COMPUTER,
+        ] {
+            assert_eq!(
+                r.framework.context_availability(id),
+                crate::ribbon::enums::ContextAvailability::NotAvailable,
+                "ctx command {id} must be hidden with empty snapshot"
+            );
+        }
+    }
 }

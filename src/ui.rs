@@ -30,7 +30,6 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
         root = root.push(dbg("ribbon", crate::ribbon::view(state)));
     }
     root = root.push(dbg("address_bar", crate::navigation::address_bar(state, skin)));
-    let fv = dbg("file_view", crate::folder::file_view(state, skin));
     // sacrifice the navigation pane when the window gets too narrow
     if content_w >= min_nav_w {
         // below nav_resize_below the nav pane shrinks proportionally,
@@ -41,8 +40,10 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
             (content_w * crate::nav_pane::NAV_W / nav_resize_below).max(110.0)
         };
         let nav = dbg("nav_pane", crate::nav_pane::nav_pane(state, skin, nav_w));
+        let fv = dbg("file_view", crate::folder::file_view(state, skin, content_w - nav_w));
         root = root.push(dbg("main_row", row![nav, fv].height(Length::Fill)));
     } else {
+        let fv = dbg("file_view", crate::folder::file_view(state, skin, content_w));
         root = root.push(dbg(
             "main_row",
             container(fv).width(Length::Fill).height(Length::Fill),
