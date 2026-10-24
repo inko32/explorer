@@ -119,6 +119,9 @@ pub struct MetricsSpec {
     /// below their default position; the ribbon body grows with it, so
     /// the bottom separator line moves down too.
     pub footer_shift: f32,
+    /// Functionless spacer between the navigation pane (and its
+    /// splitter) and the folder view.
+    pub nav_gap: f32,
 }
 
 impl Default for MetricsSpec {
@@ -131,6 +134,7 @@ impl Default for MetricsSpec {
             bar_button_multiplier: 2.2,
             gap_scale: 1.0,
             footer_shift: 3.0,
+            nav_gap: 4.0,
         }
     }
 }
@@ -152,6 +156,10 @@ pub struct SacrificeSpec {
     /// Below this content width the search box is hidden (the address
     /// bar takes the whole band).
     pub search_below: f32,
+    /// Below this content width the side (preview/details) pane is
+    /// hidden — it sacrifices itself BEFORE the folder view gets too
+    /// narrow.
+    pub pane_below: f32,
 }
 
 impl Default for SacrificeSpec {
@@ -161,6 +169,7 @@ impl Default for SacrificeSpec {
             nav_below: 600.0,
             nav_resize_below: 900.0,
             search_below: 400.0,
+            pane_below: 800.0,
         }
     }
 }

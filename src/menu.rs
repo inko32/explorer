@@ -176,7 +176,7 @@ pub struct TypeGroup {
 /// anything else without a `run:` argv).
 pub const BUILTIN: &[&str] = &[
     "open", "cut", "copy", "paste", "delete", "rename", "properties",
-    "open_with", "print", "new_folder", "select_all", "refresh",
+    "open_with", "print", "preview", "new_folder", "select_all", "refresh",
     "open_new_window", "extract_here",
 ];
 
@@ -528,12 +528,32 @@ pub fn open_files(cfg: &MenuCfg, paths: &[PathBuf]) -> Result<(), String> {
 // renderer (reusable: every menu kind draws through view())
 
 /// Windows-style context menu. Reusable: pure view of the resolved
-/// entries; the caller positions it (ui.rs floats it at the cursor).
+/// entries; the caller positions it (ui.rs floats it at the anchor).
 pub fn view<'a>(open: &'a Open, cfg: &'a MenuCfg, skin: skin::Skin) -> Element<'a, Message> {
     let l = &cfg.layout;
+    // Adaptive width: estimated from the content (text metrics are not
+    // available in view(); the estimate matches the ribbon's fallback)
+    let est = |s: &str| s.chars().count() as f32 * l.font_size * 0.58;
+    let content_w = open
+        .entries
+        .iter()
+        .map(|e| match e {
+            Entry::Item(i) => {
+                l.gutter
+                    + est(&i.label)
+                    + if i.shortcut.is_empty() {
+                        0.0
+                    } else {
+                        l.gutter + est(&i.shortcut)
+                    }
+                    + l.pad_h
+                    + 4.0
+            }
+            Entry::Sep => 0.0,
+        })
+        .fold(l.min_width, f32::max)
+        .ceil();
     let mut col = column![].spacing(0);
-    // min-width floor (columns shrink to their widest row)
-    col = col.push(Space::new().width(Length::Fixed(l.min_width)).height(Length::Fixed(0.0)));
     for (i, entry) in open.entries.iter().enumerate() {
         match entry {
             Entry::Sep => {
@@ -560,6 +580,7 @@ pub fn view<'a>(open: &'a Open, cfg: &'a MenuCfg, skin: skin::Skin) -> Element<'
         }
     }
     container(col)
+        .width(Length::Fixed(content_w))
         .style(move |_t: &iced::Theme| container::Style {
             background: Some(skin.menu_bg.into()),
             border: iced::Border {
@@ -791,8 +812,8 @@ mod tests {
 
     #[test]
     fn group_items_merge_without_duplicates() {
-        // §3.4: imagefiles adds Print after Open; selecting two images
-        // must not duplicate anything
+        // §3.4: imagefiles adds Preview/Print after Open (chained via
+        // `after:`); selecting two images must not duplicate anything
         let c = cfg();
         let groups = groups_for(&c, &[PathBuf::from("/a/one.PNG"), PathBuf::from("/b/two.jpg")]);
         assert_eq!(groups, ["imagefiles"]);
@@ -800,8 +821,8 @@ mod tests {
         let ids = ids(&m);
         assert_eq!(ids.iter().filter(|&i| i == "print").count(), 1);
         assert_eq!(
-            ids.iter().position(|i| i == "print"),
-            ids.iter().position(|i| i == "open").map(|p| p + 1)
+            ids.iter().take(3).map(String::as_str).collect::<Vec<_>>(),
+            ["open", "preview", "print"]
         );
         // rename is single-only: hidden for a multi-selection (§8)
         assert!(!ids.contains(&"rename".to_string()));
@@ -816,6 +837,24 @@ mod tests {
         let m = build_selection(&c, 1, true, true, &[]);
         // mixed: cannot operate on the whole selection
         assert!(!ids(&m).contains(&"open_with".to_string()));
+    }
+
+    #[test]
+    fn single_folder_offers_open_in_new_window() {
+        let c = cfg();
+        // single folder: present; single file: hidden (files: false);
+        // multiple folders: hidden (single: true)
+        let m = build_selection(&c, 1, false, true, &[]);
+        assert!(ids(&m).contains(&"open_new_window".to_string()));
+        let m = build_selection(&c, 1, true, false, &[]);
+        assert!(!ids(&m).contains(&"open_new_window".to_string()));
+        let m = build_selection(&c, 2, false, true, &[]);
+        assert!(!ids(&m).contains(&"open_new_window".to_string()));
+        // images get Preview (type-group distinction)
+        let m = build_selection(&c, 1, true, false, &["imagefiles".to_string()]);
+        assert!(ids(&m).contains(&"preview".to_string()));
+        let m = build_selection(&c, 1, true, false, &["textfiles".to_string()]);
+        assert!(!ids(&m).contains(&"preview".to_string()));
     }
 
     #[test]
@@ -855,14 +894,24 @@ mod tests {
 }
 
 /// Menu layer for ui.rs: a click-away catcher under the floated menu.
-/// The menu is clamped inside the viewport.
+/// The anchor is the menu's left-up corner; when that would push the
+/// menu out of the window the anchor flips to the right-up (and/or
+/// right-down/left-down) corner.
 pub fn layer<'a>(open: &'a Open, cfg: &'a MenuCfg, skin: skin::Skin) -> Element<'a, Message> {
     let (x, y) = (open.x, open.y);
     let menu = iced::widget::float(view(open, cfg, skin)).translate(
         move |bounds, viewport| {
-            let tx = x.clamp(0.0, (viewport.width - bounds.width - 4.0).max(0.0));
-            let ty = y.clamp(0.0, (viewport.height - bounds.height - 4.0).max(0.0));
-            Vector::new(tx - bounds.x, ty - bounds.y)
+            let tx = if x + bounds.width > viewport.width - 4.0 {
+                x - bounds.width // flip: clicked point = right corner
+            } else {
+                x
+            };
+            let ty = if y + bounds.height > viewport.height - 4.0 {
+                y - bounds.height // flip: clicked point = bottom corner
+            } else {
+                y
+            };
+            Vector::new(tx.max(0.0) - bounds.x, ty.max(0.0) - bounds.y)
         },
     );
     iced::widget::stack![

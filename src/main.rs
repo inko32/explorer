@@ -11,6 +11,7 @@ mod menu;
 mod model;
 mod nav_pane;
 mod navigation;
+mod pane;
 // Ribbon: the vendored rs-ribbon framework (Windows Ribbon Framework
 // re-implementation, vendor/rs-ribbon) + the explorer commanding layer
 // in ribbon.rs. The ribbon markup is assets/ribbon.yaml.
@@ -181,6 +182,10 @@ pub fn handle_key(event: iced::Event, renaming: bool, menu_open: bool) -> Option
     }
     if renaming {
         return (key == Key::Named(Named::Escape)).then_some(Message::CancelRename);
+    }
+    // the Menu key (near AltGr) opens the context menu for the selection
+    if key == Key::Named(Named::ContextMenu) {
+        return Some(Message::MenuKey);
     }
     match key {
         Key::Named(Named::F2) => Some(Message::RenameSelected),

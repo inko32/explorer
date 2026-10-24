@@ -5,7 +5,29 @@ use iced::widget::{column, container, mouse_area, row, stack, Space};
 use iced::{Element, Length};
 
 use crate::model::{Explorer, Message};
-use crate::ui_common::{dbg, skin, UI_DEBUG};
+use crate::ui_common::{bg, dbg, skin, UI_DEBUG};
+
+/// A pane splitter: an invisible (colorless) 4px drag target.
+/// A pane splitter: an invisible (colorless) 4px drag target. It needs
+/// the window background explicitly — without it the accent frame fill
+/// behind the main row would shine through the gap.
+fn pane_splitter(msg: Message, skin: skin::Skin) -> Element<'static, Message> {
+    mouse_area(
+        container(Space::new().width(Length::Fixed(4.0)).height(Length::Fill))
+            .style(bg(skin.window_bg)),
+    )
+    .on_press(msg)
+    .interaction(iced::mouse::Interaction::ResizingHorizontally)
+    .into()
+}
+
+/// A functionless spacer (window background; with `line` the grey
+/// theme separator instead).
+fn spacer(w: f32, skin: skin::Skin, line: bool) -> Element<'static, Message> {
+    container(Space::new().width(Length::Fixed(w)).height(Length::Fill))
+        .style(bg(if line { skin.sep } else { skin.window_bg }))
+        .into()
+}
 
 pub fn view(state: &Explorer) -> Element<'_, Message> {
     UI_DEBUG.store(state.ui_debug, std::sync::atomic::Ordering::Relaxed);
@@ -15,12 +37,9 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
     // thresholds are in ribbon layout units; win_w is in compositor
     // units — the --dpi multiplier separates the two
     let mult = state.dpi_multiplier();
-    let (min_ribbon_w, min_nav_w, nav_resize_below, _) = state.ribbon.sacrifice();
-    let (min_ribbon_w, min_nav_w, nav_resize_below) = (
-        min_ribbon_w * mult,
-        min_nav_w * mult,
-        nav_resize_below * mult,
-    );
+    // nav/side widths and their hide thresholds live in the model
+    // (layout_widths); only the ribbon sacrifice stays here
+    let min_ribbon_w = state.ribbon.sacrifice().0 * mult;
     let mut root = column![];
     if state.self_border {
         root = root.push(dbg("titlebar", crate::border::titlebar(state, skin)));
@@ -30,24 +49,47 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
         root = root.push(dbg("ribbon", crate::ribbon::view(state)));
     }
     root = root.push(dbg("address_bar", crate::navigation::address_bar(state, skin)));
-    // sacrifice the navigation pane when the window gets too narrow
-    if content_w >= min_nav_w {
-        // below nav_resize_below the nav pane shrinks proportionally,
-        // keeping its share of the content width
-        let nav_w = if content_w >= nav_resize_below {
-            crate::nav_pane::NAV_W
-        } else {
-            (content_w * crate::nav_pane::NAV_W / nav_resize_below).max(110.0)
-        };
+    // sacrifice the navigation pane when the window gets too narrow;
+    // the widths come from the model (yaml sacrifice rules + the
+    // splitter-dragged widths)
+    let (nav_w, side_w) = state.layout_widths();
+    if nav_w > 0.0 {
         let nav = dbg("nav_pane", crate::nav_pane::nav_pane(state, skin, nav_w));
-        let fv = dbg("file_view", crate::folder::file_view(state, skin, content_w - nav_w));
-        root = root.push(dbg("main_row", row![nav, fv].height(Length::Fill)));
+        let fv = dbg("file_view", crate::folder::file_view(state, skin, content_w - nav_w - side_w));
+        let mut main = row![
+            nav,
+            dbg("nav_splitter", pane_splitter(Message::BeginNavSplit, skin)),
+            // functionless spacer (yaml metrics.nav_gap)
+            spacer(state.ribbon.nav_gap(), skin, false),
+            fv,
+        ]
+        .height(Length::Fill);
+        // side pane right of the folder view (Preview / Details),
+        // resizable via the splitter on its left edge; it hides before
+        // the folder view gets too narrow (yaml sacrifice.pane_below)
+        if side_w > 0.0 {
+            main = main.push(dbg("pane_splitter", pane_splitter(Message::BeginPaneSplit, skin)));
+            // 1px grey theme separator hugging the pane's left edge
+            main = main.push(spacer(1.0, skin, true));
+            main = main.push(dbg("side_pane", crate::pane::view(state, skin, side_w)));
+        }
+        root = root.push(dbg("main_row", main));
     } else {
-        let fv = dbg("file_view", crate::folder::file_view(state, skin, content_w));
-        root = root.push(dbg(
-            "main_row",
-            container(fv).width(Length::Fill).height(Length::Fill),
-        ));
+        // the nav-gap spacer belongs to the folder view: it shows even
+        // with the nav pane hidden
+        let fv = dbg("file_view", crate::folder::file_view(state, skin, content_w - side_w));
+        let mut main = row![
+            spacer(state.ribbon.nav_gap(), skin, false),
+            container(fv).width(Length::Fill).height(Length::Fill)
+        ]
+        .height(Length::Fill);
+        if side_w > 0.0 {
+            main = main.push(dbg("pane_splitter", pane_splitter(Message::BeginPaneSplit, skin)));
+            // 1px grey theme separator hugging the pane's left edge
+            main = main.push(spacer(1.0, skin, true));
+            main = main.push(dbg("side_pane", crate::pane::view(state, skin, side_w)));
+        }
+        root = root.push(dbg("main_row", main));
     }
     root = root.push(dbg("statusbar", crate::status::statusbar(state, skin)));
     let framed: Element<Message> = if state.self_border {
@@ -102,7 +144,7 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
                            dbg("captions", crate::border::caption_overlay(state, skin))];
         // splitter drag: hold the resize cursor window-wide while dragging
         // (the pointer leaves the small splitter target mid-drag)
-        if state.bar_split {
+        if state.bar_split || state.pane_split || state.nav_split {
             s = s.push(
                 mouse_area(Space::new().width(Length::Fill).height(Length::Fill))
                     .interaction(iced::mouse::Interaction::ResizingHorizontally),

@@ -2,6 +2,8 @@
 # temporary artifacts stay in in-memory tmpfs (/tmp). Never build without it -
 # a ./target folder on the SSD is a bug; delete it and rebuild via this file.
 
+# this project is under active development. so less ssd writing is considered here.
+
 SHELL := /bin/bash
 
 TMPROOT   ?= /tmp/zramfs_inkodaily/explorer-rs-build
@@ -53,6 +55,13 @@ dist: build
 	@mkdir -p $(DIST)
 	-strip --strip-all $(CARGO_TARGET_DIR)/$(TARGET)/release/$(BIN) 2>/dev/null || true
 	-./tools/upx  $(CARGO_TARGET_DIR)/$(TARGET)/release/$(BIN) || true
+	@target="$$(realpath $(DIST)/$(BIN))"; \
+	for p in /proc/[0-9]*; do \
+		[ "$$(readlink "$$p/exe" 2>/dev/null)" = "$$target (deleted)" ] || \
+		[ "$$(readlink -f "$$p/exe" 2>/dev/null)" = "$$target" ] || continue; \
+		kill "$${p##*/}" 2>/dev/null || true; \
+	done; \
+	sleep 0.3
 	cp $(CARGO_TARGET_DIR)/$(TARGET)/release/$(BIN) $(DIST)/$(BIN)
 	@ls -l $(DIST)/$(BIN)
 	@file $(DIST)/$(BIN)
