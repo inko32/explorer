@@ -416,6 +416,8 @@ struct WheelBoost<'a> {
     content: Element<'a, Message>,
     /// Current scroll offset along `axis`.
     offset: f32,
+    /// Maximum scroll offset (content extent minus viewport).
+    max_scroll: f32,
     multiplier: f32,
     axis: Axis,
     on_scroll: fn(f32) -> Message,
@@ -424,11 +426,12 @@ struct WheelBoost<'a> {
 pub(crate) fn wheel_boost<'a>(
     content: Element<'a, Message>,
     offset: f32,
+    max_scroll: f32,
     multiplier: f32,
     axis: Axis,
     on_scroll: fn(f32) -> Message,
 ) -> Element<'a, Message> {
-    Element::new(WheelBoost { content, offset, multiplier, axis, on_scroll })
+    Element::new(WheelBoost { content, offset, max_scroll, multiplier, axis, on_scroll })
 }
 
 impl<'a> Widget<Message, iced::Theme, iced::Renderer> for WheelBoost<'a> {
@@ -514,9 +517,15 @@ impl<'a> Widget<Message, iced::Theme, iced::Renderer> for WheelBoost<'a> {
                 mouse::ScrollDelta::Pixels { x, y } => pick(*x, *y),
             };
             if px.abs() > 0.01 {
-                shell.publish((self.on_scroll)(self.offset - px * self.multiplier));
-                shell.capture_event();
-                return;
+                // at the scroll ends the wheel is not ours: pass the
+                // event through uncaptured (no useless scroll_to)
+                let at_end = px < 0.0 && self.offset >= self.max_scroll - 0.5
+                    || px > 0.0 && self.offset <= 0.5;
+                if !at_end {
+                    shell.publish((self.on_scroll)(self.offset - px * self.multiplier));
+                    shell.capture_event();
+                    return;
+                }
             }
         }
         self.content.as_widget_mut().update(

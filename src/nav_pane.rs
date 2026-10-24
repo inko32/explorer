@@ -50,19 +50,27 @@ fn nav_metrics(state: &Explorer) -> NavMetrics {
     }
 }
 
-/// One tree row: optional expand arrow, icon, label; selected = tinted row.
-/// Rows shrink to their content width (the pane scrolls horizontally).
+/// One tree row: optional expand arrow, icon, label; selected = tinted
+/// row, hovered = hover fill. Rows shrink to their content width (the
+/// pane scrolls horizontally).
 fn tree_item(
     label: String,
     icon_name: &'static str,
     indent: usize,
     arrow: Option<bool>, // Some(expanded) -> clickable arrow; None -> spacer
     selected: bool,
+    hovered: bool,
     navigate: Option<PathBuf>,
     m: NavMetrics,
     skin: skin::Skin,
 ) -> Element<'static, Message> {
-    let bgc = if selected { skin.sel } else { Color::TRANSPARENT };
+    let bgc = if selected {
+        skin.sel
+    } else if hovered {
+        skin.hover
+    } else {
+        Color::TRANSPARENT
+    };
     let border_color = if selected { skin.sel_border } else { Color::TRANSPARENT };
 
     let arrow_el: Element<Message> = match arrow {
@@ -111,7 +119,9 @@ fn tree_item(
     match navigate {
         Some(p) => mouse_area(item)
             .on_press(Message::Navigate(p.clone()))
-            .on_right_press(Message::ContextNav(p))
+            .on_right_press(Message::ContextNav(p.clone()))
+            .on_enter(Message::NavHover(Some(p.clone())))
+            .on_exit(Message::NavHoverExit(p))
             .interaction(iced::mouse::Interaction::Pointer)
             .into(),
         None => item,
@@ -169,12 +179,14 @@ fn push_tree_node<'a>(
     let expanded = state.nav.expanded.contains(path);
     let has_children = kids.map(|k| !k.is_empty()).unwrap_or(false);
     let selected = state.cwd == path;
+    let hovered = state.nav_hover.as_deref() == Some(path);
     let mut list = list.push(tree_item(
         label,
         icon_name,
         indent,
         has_children.then_some(expanded),
         selected,
+        hovered,
         Some(path.to_path_buf()),
         m,
         skin,
@@ -337,7 +349,8 @@ pub(crate) fn nav_pane(state: &Explorer, skin: skin::Skin, width: f32) -> Elemen
         for (label, icon_name, target) in favorites() {
             // shortcuts: never show the selected state (only the Computer
             // tree highlights the current folder)
-            list = list.push(tree_item(label, icon_name, 1, None, false, target, m, skin));
+            let hovered = target.is_some() && target == state.nav_hover;
+            list = list.push(tree_item(label, icon_name, 1, None, false, hovered, target, m, skin));
         }
     }
 
@@ -349,6 +362,7 @@ pub(crate) fn nav_pane(state: &Explorer, skin: skin::Skin, width: f32) -> Elemen
         0,
         Some(root_open),
         state.cwd == Path::new("/"),
+        state.nav_hover.as_deref() == Some(Path::new("/")),
         Some(PathBuf::from("/")),
         m,
         skin,
@@ -378,6 +392,7 @@ pub(crate) fn nav_pane(state: &Explorer, skin: skin::Skin, width: f32) -> Elemen
             "network",
             1,
             None,
+            false,
             false,
             None,
             m,
@@ -432,6 +447,7 @@ pub(crate) fn nav_pane(state: &Explorer, skin: skin::Skin, width: f32) -> Elemen
             ]
             .into(),
             state.nav.scroll_y,
+            (content_height(state) - state.nav.viewport_h).max(0.0),
             state.view_cfg.input.scroll_speed,
             crate::scrollbar::Axis::Vertical,
             Message::NavScrollTo,
