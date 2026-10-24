@@ -43,6 +43,7 @@ commands:
   properties:      { label: Properties }
   open_with:       { label: Open with... }
   print:           { label: Print }
+  preview:         { label: Preview }
   new_folder:      { label: New folder }
   select_all:      { label: Select all, shortcut: Ctrl+A }
   refresh:         { label: Refresh, shortcut: F5, icon: refresh }
@@ -58,6 +59,8 @@ menus:
   # §3.2 selection baseline (files and/or folders)
   general:
     - { command: open, bold: true }
+    # single folder only: not shown for files or multi-selections
+    - { command: open_new_window, files: false, single: true }
     - separator: true
     - { command: cut }
     - { command: copy }
@@ -98,7 +101,8 @@ file_types:
   - name: imagefiles
     extensions: [.png, .jpg, .jpeg, .gif, .webp, .bmp, .tiff, .svg]
     items:
-      - { command: print, after: open }
+      - { command: preview, after: open }
+      - { command: print, after: preview }
   - name: textfiles
     extensions: [.txt, .log, .md, .csv]
     items: []

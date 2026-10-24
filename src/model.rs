@@ -12,6 +12,14 @@ pub enum Message {
     BeginBarSplit,
     /// Cursor moved during a splitter drag (window-logical x).
     BarSplitMove(f32),
+    /// Press on the side-pane splitter: start a drag.
+    BeginPaneSplit,
+    /// Cursor moved during a side-pane splitter drag (window-logical x).
+    PaneSplitMove(f32),
+    /// Press on the navigation-pane splitter: start a drag.
+    BeginNavSplit,
+    /// Cursor moved during a nav-pane splitter drag (window-logical x).
+    NavSplitMove(f32),
     /// Hover state of the address/search splitter (drives tint + cursor).
     SplitterHover(bool),
     Navigate(PathBuf),
@@ -57,11 +65,18 @@ pub enum Message {
     MenuHover(Option<usize>),
     /// Close the context menu (Escape / click-away).
     CloseMenu,
+    /// The keyboard Menu key (near AltGr): open the context menu for the
+    /// selection, anchored at the first selected element's left-bottom
+    /// corner.
+    MenuKey,
     /// Windows scrollbar strip: absolute target offset for the file
     /// view (the x offset for List, the y offset otherwise).
     FileScrollTo(f32),
     /// Same for the navigation pane (always vertical).
     NavScrollTo(f32),
+    /// Toggle the side pane right of the folder view (mutually
+    /// exclusive: Preview XOR Details XOR none).
+    ToggleSidePane(crate::pane::Mode),
     /// Toggle the Details compact mode (24px rows instead of 32, §8.1).
     ToggleDetailsCompact,
     /// Press on a Details column split handle: start a column drag.
@@ -277,6 +292,20 @@ pub struct Explorer {
     pub menu: Option<crate::menu::Open>,
     /// Last known cursor position (window-logical; menu placement).
     cursor: iced::Point,
+    /// The side pane (Preview / Details / none, right of the folder
+    /// view) and its cached content.
+    pub pane: crate::pane::Mode,
+    /// Side pane width (splitter-dragged; `pane::clamped` at use).
+    pub pane_width: f32,
+    /// Side-pane splitter drag in progress.
+    pub pane_split: bool,
+    /// Navigation pane width (splitter-dragged; the yaml sacrifice rules
+    /// shrink/hide it when the window is narrow).
+    pub nav_width: f32,
+    /// Nav-pane splitter drag in progress.
+    pub nav_split: bool,
+    pane_key: Option<PathBuf>,
+    pub pane_content: crate::pane::Content,
     pub status: String,
     pub last_click: Option<(usize, std::time::Instant)>,
     pub loading: bool,
@@ -382,6 +411,13 @@ impl Explorer {
             menu_cfg: crate::menu::MenuCfg::load(),
             menu: None,
             cursor: iced::Point::ORIGIN,
+            pane: crate::pane::Mode::None,
+            pane_width: crate::pane::DEFAULT_WIDTH,
+            pane_split: false,
+            nav_width: crate::nav_pane::NAV_W,
+            nav_split: false,
+            pane_key: None,
+            pane_content: crate::pane::Content::None,
             status: String::new(),
             last_click: None,
             loading: false,
@@ -469,29 +505,52 @@ impl Explorer {
         self.scroll_y = 0.0;
     }
 
-    /// Width of the file-view pane (window minus frame, nav pane and
-    /// scrollbar strip) — the same math ui.rs uses to lay out the main
-    /// row. The model needs it for the §9 scroll anchor (grid columns
-    /// depend on the width).
+    /// (nav pane width, side pane width) actually shown at the current
+    /// window size — the yaml sacrifice rules: the side pane hides below
+    /// `pane_below` (before the folder view gets squeezed), the nav pane
+    /// shrinks below `nav_resize_below` and hides below `nav_below`.
+    /// ui.rs lays out with exactly these widths.
+    pub(crate) fn layout_widths(&self) -> (f32, f32) {
+        let (_, fr, _, fl) =
+            crate::border::frame_insets_pub(self.self_border, self.frame_style);
+        let content_w = self.win_w - fl - fr;
+        let mult = self.dpi_multiplier();
+        let (_, min_nav_w, nav_resize_below, _) = self.ribbon.sacrifice();
+        let nav_w = if content_w >= min_nav_w * mult {
+            if content_w >= nav_resize_below * mult {
+                self.nav_width
+            } else {
+                (content_w * self.nav_width / (nav_resize_below * mult)).max(110.0)
+            }
+        } else {
+            0.0
+        };
+        let side_w = if self.pane != crate::pane::Mode::None
+            && content_w >= self.ribbon.pane_below() * mult
+        {
+            crate::pane::clamped(self.pane_width, content_w)
+        } else {
+            0.0
+        };
+        (nav_w, side_w)
+    }
+
+    /// Width of the file-view pane (window minus frame, nav pane, side
+    /// pane and scrollbar strip) — the same math ui.rs uses to lay out
+    /// the main row. The model needs it for the §9 scroll anchor (grid
+    /// columns depend on the width).
     fn file_pane_width(&self) -> f32 {
         let (_, fr, _, fl) =
             crate::border::frame_insets_pub(self.self_border, self.frame_style);
         let content_w = self.win_w - fl - fr;
-        // thresholds are in ribbon layout units; win_w is in compositor
-        // units — the --dpi multiplier separates the two (see ui.rs)
-        let mult = self.dpi_multiplier();
-        let (_, min_nav_w, nav_resize_below, _) = self.ribbon.sacrifice();
-        let (min_nav_w, nav_resize_below) = (min_nav_w * mult, nav_resize_below * mult);
-        let pane_w = if content_w >= min_nav_w {
-            let nav_w = if content_w >= nav_resize_below {
-                crate::nav_pane::NAV_W
-            } else {
-                (content_w * crate::nav_pane::NAV_W / nav_resize_below).max(110.0)
-            };
-            content_w - nav_w
-        } else {
-            content_w
-        };
+        let (nav_w, side_w) = self.layout_widths();
+        // the nav_gap spacer is part of the folder view (always shown);
+        // the splitters (4px) and the pane separator (1px) only with
+        // their panes
+        let chrome = self.ribbon.nav_gap()
+            + if nav_w > 0.0 { 4.0 } else { 0.0 }
+            + if side_w > 0.0 { 4.0 + 1.0 } else { 0.0 };
+        let pane_w = content_w - nav_w - side_w - chrome;
         // the scrollbar strip collapses to 0px when the content fits
         // (same rule as folder::file_view), widening the pane
         let cfg = &self.view_cfg;
@@ -900,6 +959,13 @@ impl Explorer {
     /// Right-click a file-view item: Windows selects it first when it is
     /// not part of the selection, then opens the menu at the cursor.
     fn context_select(&mut self, i: usize) {
+        let (x, y) = (self.cursor.x, self.cursor.y);
+        self.context_select_at(i, x, y);
+    }
+
+    /// Selection menu at an explicit anchor (right-click: the cursor;
+    /// Menu key: the element's left-bottom corner).
+    fn context_select_at(&mut self, i: usize, x: f32, y: f32) {
         if !self.selected.contains(&i) {
             self.selected.clear();
             self.selected.insert(i);
@@ -925,11 +991,88 @@ impl Explorer {
         };
         self.menu = Some(crate::menu::Open {
             entries,
-            x: self.cursor.x,
-            y: self.cursor.y,
+            x,
+            y,
             hover: None,
             nav_target: None,
         });
+    }
+
+    /// Left-bottom corner of file-view item `i` in window coordinates
+    /// (Menu-key anchor). Best-effort: recomputed from the same layout
+    /// math as ui.rs + folder.rs.
+    fn item_anchor(&self, i: usize) -> (f32, f32) {
+        use crate::view_step as vs;
+        let cfg = &self.view_cfg;
+        let (ft, fr, _, fl) =
+            crate::border::frame_insets_pub(self.self_border, self.frame_style);
+        let title_h = if self.self_border { crate::border::TITLEBAR_H } else { 0.0 };
+        let content_w = self.win_w - fl - fr;
+        let mult = self.dpi_multiplier();
+        let (min_ribbon_w, _, _, _) = self.ribbon.sacrifice();
+        let ribbon_h = if content_w >= min_ribbon_w * mult {
+            crate::ribbon::widget::layout::ribbon_height(&self.ribbon.framework().view())
+        } else {
+            0.0
+        };
+        let band_h = self.ribbon.band_height();
+        let nav_w = self.layout_widths().0;
+        // the nav_gap spacer is part of the folder view (always shown)
+        let pane_x = fl + nav_w + self.ribbon.nav_gap()
+            + if nav_w > 0.0 { 4.0 } else { 0.0 };
+        let pane_y = ft + title_h + ribbon_h + band_h;
+        let pane_w = self.file_pane_width();
+        let s = cfg.icon_px(self.view_index);
+        match cfg.family(self.view_index) {
+            vs::Family::Content => {
+                let row_h = cfg.layouts.content.row_h;
+                (pane_x, pane_y + (i + 1) as f32 * row_h - self.scroll_y)
+            }
+            vs::Family::Details => {
+                let row_h = cfg.details_row_h(self.details_compact);
+                let h = cfg.layouts.details.header_h;
+                (pane_x, pane_y + h + (i + 1) as f32 * row_h - self.scroll_y)
+            }
+            vs::Family::List => {
+                let l = &cfg.layouts.list;
+                let longest = self
+                    .entries
+                    .iter()
+                    .map(|e| e.name.chars().count())
+                    .max()
+                    .unwrap_or(0);
+                let col_w = cfg.list_col_w(longest);
+                let rows = ((self.viewport_h / l.row_h).floor() as usize).max(1);
+                (
+                    pane_x + (i / rows) as f32 * col_w - self.scroll_x,
+                    pane_y + (i % rows + 1) as f32 * l.row_h,
+                )
+            }
+            vs::Family::Tiles => {
+                let t = &cfg.layouts.tiles;
+                let cols = vs::grid_cols(t.cell_w, 0.0, pane_w);
+                (
+                    pane_x + (i % cols) as f32 * t.cell_w,
+                    pane_y + (i / cols + 1) as f32 * t.cell_h - self.scroll_y,
+                )
+            }
+            vs::Family::SmallIcon => {
+                let m = cfg.small_icon(s);
+                let cols = vs::grid_cols(m.cell_w, m.gap, pane_w);
+                (
+                    pane_x + (i % cols) as f32 * (m.cell_w + m.gap),
+                    pane_y + (i / cols) as f32 * (m.cell_h + m.gap) + m.cell_h - self.scroll_y,
+                )
+            }
+            vs::Family::IconTop => {
+                let m = cfg.icon_top(s);
+                let cols = vs::grid_cols(m.cell_w, m.gap, pane_w);
+                (
+                    pane_x + (i % cols) as f32 * (m.cell_w + m.gap),
+                    pane_y + (i / cols) as f32 * (m.cell_h + m.gap) + m.cell_h - self.scroll_y,
+                )
+            }
+        }
     }
 
     /// Menu item activated: close the menu, then dispatch (§8: every
@@ -992,12 +1135,29 @@ impl Explorer {
                 self.status = "Printing is not configured yet".into();
                 iced::Task::none()
             }
+            // type-group marker (menu.yaml imagefiles): proves the
+            // menu distinguishes file types; the feature itself is reserved
+            "preview" => {
+                self.status = "Preview is not implemented yet".into();
+                iced::Task::none()
+            }
             "extract_here" => {
                 self.status = "Extraction is not supported yet".into();
                 iced::Task::none()
             }
             "open_new_window" => {
-                let target = open.nav_target.unwrap_or_else(|| self.cwd.clone());
+                // nav menu: the row's path; selection menu: the (single)
+                // selected folder; else the current folder
+                let target = open
+                    .nav_target
+                    .or_else(|| {
+                        self.selected
+                            .iter()
+                            .next()
+                            .and_then(|&i| self.entries.get(i))
+                            .map(|e| e.path.clone())
+                    })
+                    .unwrap_or_else(|| self.cwd.clone());
                 match std::env::current_exe() {
                     Ok(exe) => {
                         if let Err(e) = std::process::Command::new(exe).arg(&target).spawn() {
@@ -1026,11 +1186,29 @@ impl Explorer {
         }
     }
 
+    /// Keep the side-pane preview cache in sync with the selection
+    /// (cheap key compare; reloads only when the selection changes).
+    fn sync_pane(&mut self) {
+        if self.pane == crate::pane::Mode::None {
+            return;
+        }
+        let sel = self.selected.iter().next().and_then(|&i| self.entries.get(i));
+        let key = sel.map(|e| e.path.clone());
+        if key != self.pane_key {
+            self.pane_key = key;
+            self.pane_content = match sel {
+                Some(e) => crate::pane::load(&e.path, e.is_dir()),
+                None => crate::pane::Content::None,
+            };
+        }
+    }
+
     pub fn update(&mut self, message: Message) -> iced::Task<Message> {
         // ribbon-originated events must not re-run contextual
         // auto-activation (the user just clicked a tab)
         let auto = !matches!(message, Message::Ribbon(_));
         let task = self.handle(message);
+        self.sync_pane();
         // every model change refreshes the ribbon (enablement, toggle
         // values, contextual-tab availability)
         let snap = self.ribbon_snapshot();
@@ -1294,6 +1472,19 @@ impl Explorer {
                 self.menu = None;
                 iced::Task::none()
             }
+            Message::MenuKey => {
+                // keyboard Menu key: anchor at the first selected
+                // element's left-bottom corner; no selection = the
+                // background menu at the cursor
+                match self.selected.iter().next().copied() {
+                    Some(i) if i < self.entries.len() => {
+                        let (x, y) = self.item_anchor(i);
+                        self.context_select_at(i, x, y);
+                    }
+                    _ => return self.update(Message::ContextBackground),
+                }
+                iced::Task::none()
+            }
             Message::FileScrollTo(target) => {
                 let (x, y) = if self.view_cfg.family(self.view_index)
                     == crate::view_step::Family::List
@@ -1318,6 +1509,15 @@ impl Explorer {
                         y: Some(self.nav.scroll_y),
                     },
                 )
+            }
+            Message::ToggleSidePane(m) => {
+                self.pane = if self.pane == m {
+                    crate::pane::Mode::None
+                } else {
+                    m
+                };
+                self.pane_key = None; // force a content reload
+                iced::Task::none()
             }
             Message::ToggleDetailsCompact => {
                 let old = self.details_compact;
@@ -1515,6 +1715,34 @@ impl Explorer {
                         _ => {}
                     }
                 }
+                // side-pane splitter drag, same pattern
+                if self.pane_split {
+                    use iced::mouse::{Button as MButton, Event as MEvent};
+                    match &e {
+                        iced::Event::Mouse(MEvent::CursorMoved { position }) => {
+                            return self.update(Message::PaneSplitMove(position.x));
+                        }
+                        iced::Event::Mouse(MEvent::ButtonReleased(MButton::Left)) => {
+                            self.pane_split = false;
+                            return iced::Task::none();
+                        }
+                        _ => {}
+                    }
+                }
+                // nav-pane splitter drag, same pattern
+                if self.nav_split {
+                    use iced::mouse::{Button as MButton, Event as MEvent};
+                    match &e {
+                        iced::Event::Mouse(MEvent::CursorMoved { position }) => {
+                            return self.update(Message::NavSplitMove(position.x));
+                        }
+                        iced::Event::Mouse(MEvent::ButtonReleased(MButton::Left)) => {
+                            self.nav_split = false;
+                            return iced::Task::none();
+                        }
+                        _ => {}
+                    }
+                }
                 // column drag: track the cursor, end on left release
                 if self.col_drag.is_some() {
                     use iced::mouse::{Button as MButton, Event as MEvent};
@@ -1551,6 +1779,14 @@ impl Explorer {
                 self.bar_split = true;
                 iced::Task::none()
             }
+            Message::BeginPaneSplit => {
+                self.pane_split = true;
+                iced::Task::none()
+            }
+            Message::BeginNavSplit => {
+                self.nav_split = true;
+                iced::Task::none()
+            }
             Message::SplitterHover(h) => {
                 self.splitter_hover = h;
                 iced::Task::none()
@@ -1563,6 +1799,21 @@ impl Explorer {
                 // the 4px splitter + 2px row spacing) -> offset 6 + 4 = 10
                 let search_w = (content_w - (x - fl) - 10.0).clamp(120.0, (content_w - 280.0).max(120.0));
                 self.search_share = (search_w / content_w).clamp(0.08, 0.6);
+                iced::Task::none()
+            }
+            Message::PaneSplitMove(x) => {
+                // the pane's right edge is the content area's right edge
+                let (_, fr, _, _) =
+                    crate::border::frame_insets_pub(self.self_border, self.frame_style);
+                let content_w = (self.win_w - fr).max(160.0);
+                self.pane_width = crate::pane::clamped(content_w - x, content_w);
+                iced::Task::none()
+            }
+            Message::NavSplitMove(x) => {
+                let (_, fr, _, fl) =
+                    crate::border::frame_insets_pub(self.self_border, self.frame_style);
+                let content_w = self.win_w - fl - fr;
+                self.nav_width = (x - fl).clamp(110.0, (content_w * 0.5).max(110.0));
                 iced::Task::none()
             }
             Message::NavScrolled { y, height } => {

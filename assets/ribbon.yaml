@@ -266,6 +266,9 @@ commands:
 sacrifice:
   ribbon_below: 240
   nav_below: 460
+  # below this width the preview/details pane hides (before the folder
+  # view gets squeezed)
+  pane_below: 800
 
 # UI metrics (explorer extension)
 metrics:
@@ -277,6 +280,9 @@ metrics:
   gap_scale: 0.5
   # extra px the group titles sit lower (the bottom line follows)
   footer_shift: 3
+  # functionless spacer between the nav pane (and its splitter) and the
+  # folder view
+  nav_gap: 4
 
 application_menu:
   command: cmdAppMenu

@@ -332,8 +332,6 @@ const ALWAYS_DISABLED: &[u32] = &[
     cmd::HISTORY,
     cmd::SHARE_NOBODY,
     cmd::SHARE_EMAIL,
-    cmd::PREVIEW_PANE,
-    cmd::DETAILS_PANE,
     cmd::SIZE_COLUMNS,
     cmd::TOGGLE_CHECKBOXES,
     cmd::TOGGLE_EXTENSIONS,
@@ -456,6 +454,8 @@ pub struct Snapshot {
     /// Current view step index (SPEC/folder-spec.md); the view commands
     /// light up only when it equals their preset (§5 bullet rule).
     pub view_index: u8,
+    /// The side pane shown right of the folder view (Preview XOR Details).
+    pub side_pane: crate::pane::Mode,
     /// The Details / Large-icons preset indices (folder-view.yaml §5).
     pub preset_details: u8,
     pub preset_large: u8,
@@ -478,6 +478,7 @@ impl Explorer {
             has_clipboard: self.clipboard.is_some(),
             has_items: !self.entries.is_empty(),
             view_index: self.view_index,
+            side_pane: self.pane,
             preset_details: self.view_cfg.presets.details,
             preset_large: self.view_cfg.presets.large,
             show_hidden: self.show_hidden,
@@ -581,6 +582,8 @@ impl CommandHandler for ExplorerHandler {
             cmd::VIEW_DETAILS => out.push(Message::SetView(snap.preset_details)),
             cmd::VIEW_LARGE => out.push(Message::SetView(snap.preset_large)),
             cmd::COMPACT_DETAILS => out.push(Message::ToggleDetailsCompact),
+            cmd::PREVIEW_PANE => out.push(Message::ToggleSidePane(crate::pane::Mode::Preview)),
+            cmd::DETAILS_PANE => out.push(Message::ToggleSidePane(crate::pane::Mode::Details)),
             cmd::SORT_BY => {
                 out.push(Message::Status("Pick a sort key from the menu".into()))
             }
@@ -641,6 +644,8 @@ impl CommandHandler for ExplorerHandler {
                     cmd::VIEW_DETAILS => snap.view_index == snap.preset_details,
                     cmd::VIEW_LARGE => snap.view_index == snap.preset_large,
                     cmd::COMPACT_DETAILS => snap.details_compact,
+                    cmd::PREVIEW_PANE => snap.side_pane == crate::pane::Mode::Preview,
+                    cmd::DETAILS_PANE => snap.side_pane == crate::pane::Mode::Details,
                     cmd::TOGGLE_HIDDEN => snap.show_hidden,
                     cmd::TOGGLE_DARK => snap.dark,
                     cmd::TOGGLE_BORDER => snap.self_border,
@@ -715,6 +720,8 @@ fn command_name(command: u32) -> String {
         cmd::VIEW_DETAILS => "Details view",
         cmd::VIEW_LARGE => "Large icons view",
         cmd::COMPACT_DETAILS => "Compact details view",
+        cmd::PREVIEW_PANE => "Preview pane",
+        cmd::DETAILS_PANE => "Details pane",
         cmd::SORT_BY => "Sort by",
         cmd::TOGGLE_HIDDEN => "Hidden items",
         cmd::TOGGLE_DARK => "Dark mode",
@@ -984,6 +991,24 @@ impl Ribbon {
 }
 
 impl Ribbon {
+    /// Window-size sacrifice threshold for the side (preview/details)
+    /// pane: below this content width it is hidden.
+    pub fn pane_below(&self) -> f32 {
+        match self.framework.spec() {
+            Ok(spec) => spec.sacrifice.pane_below,
+            Err(_) => 800.0,
+        }
+    }
+
+    /// Functionless spacer width between the nav pane (splitter) and
+    /// the folder view, from the ribbon markup.
+    pub fn nav_gap(&self) -> f32 {
+        match self.framework.spec() {
+            Ok(spec) => spec.metrics.nav_gap,
+            Err(_) => 4.0,
+        }
+    }
+
     /// Height of the navigation band (nav buttons / address / search),
     /// from the ribbon markup.
     pub fn band_height(&self) -> f32 {
