@@ -110,7 +110,8 @@ fn tree_item(
     .into();
     match navigate {
         Some(p) => mouse_area(item)
-            .on_press(Message::Navigate(p))
+            .on_press(Message::Navigate(p.clone()))
+            .on_right_press(Message::ContextNav(p))
             .interaction(iced::mouse::Interaction::Pointer)
             .into(),
         None => item,

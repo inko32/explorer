@@ -9,7 +9,7 @@ use iced::advanced::Shell;
 use iced::{Color, Point, Rectangle, Size, Vector};
 
 use crate::ribbon::enums::{ExecutionVerb, SwatchColorMode};
-use crate::ribbon::framework::{RibbonFramework, RIBBON_BODY_HEIGHT};
+use crate::ribbon::framework::RibbonFramework;
 use crate::ribbon::prop::{FontToggle, PropertyKey, PropValue};
 use crate::ribbon::spec::{CommandRef, ControlSpec, MenuItemSpec};
 use crate::ribbon::theme::{self, Theme, STANDARD_COLORS, THEME_COLORS};

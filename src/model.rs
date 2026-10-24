@@ -45,6 +45,18 @@ pub enum Message {
     /// Ctrl+scroll over the file view: accumulated wheel delta in §7
     /// units (Lines converted to notch deltas, Pixels as-is).
     WheelZoom(f32),
+    /// Right-click a file-view item (SPEC/menu_spec.md).
+    ContextSelect(usize),
+    /// Right-click empty folder-view space.
+    ContextBackground,
+    /// Right-click a navigation pane element.
+    ContextNav(PathBuf),
+    /// A context menu item was activated (index into the open menu).
+    MenuPick(usize),
+    /// Context menu item hover (drives the highlight).
+    MenuHover(Option<usize>),
+    /// Close the context menu (Escape / click-away).
+    CloseMenu,
     /// Windows scrollbar strip: absolute target offset for the file
     /// view (the x offset for List, the y offset otherwise).
     FileScrollTo(f32),
@@ -260,6 +272,11 @@ pub struct Explorer {
     pub win_w: f32,
     /// Inline rename: (row index, text buffer).
     pub renaming: Option<(usize, String)>,
+    /// Context menu configuration (assets/menu.yaml) + the open menu.
+    pub menu_cfg: crate::menu::MenuCfg,
+    pub menu: Option<crate::menu::Open>,
+    /// Last known cursor position (window-logical; menu placement).
+    cursor: iced::Point,
     pub status: String,
     pub last_click: Option<(usize, std::time::Instant)>,
     pub loading: bool,
@@ -362,6 +379,9 @@ impl Explorer {
             viewport_h: 600.0,
             win_w: 1152.0,
             renaming: None,
+            menu_cfg: crate::menu::MenuCfg::load(),
+            menu: None,
+            cursor: iced::Point::ORIGIN,
             status: String::new(),
             last_click: None,
             loading: false,
@@ -875,6 +895,137 @@ impl Explorer {
             .replace("{selection_count}", &self.selected.len().to_string())
     }
 
+    // ---- context menus (SPEC/menu_spec.md) ----
+
+    /// Right-click a file-view item: Windows selects it first when it is
+    /// not part of the selection, then opens the menu at the cursor.
+    fn context_select(&mut self, i: usize) {
+        if !self.selected.contains(&i) {
+            self.selected.clear();
+            self.selected.insert(i);
+        }
+        let n = self.selected.len();
+        let (mut has_files, mut has_dirs) = (false, false);
+        let mut files = Vec::new();
+        for &i in &self.selected {
+            if let Some(e) = self.entries.get(i) {
+                if e.is_dir() {
+                    has_dirs = true;
+                } else {
+                    has_files = true;
+                    files.push(e.path.clone());
+                }
+            }
+        }
+        let entries = if fs::archive::resolve(&self.cwd).is_some() {
+            crate::menu::build_archive(&self.menu_cfg, n, has_files, has_dirs)
+        } else {
+            let groups = crate::menu::groups_for(&self.menu_cfg, &files);
+            crate::menu::build_selection(&self.menu_cfg, n, has_files, has_dirs, &groups)
+        };
+        self.menu = Some(crate::menu::Open {
+            entries,
+            x: self.cursor.x,
+            y: self.cursor.y,
+            hover: None,
+            nav_target: None,
+        });
+    }
+
+    /// Menu item activated: close the menu, then dispatch (§8: every
+    /// command re-validates at execution — the file ops report errors
+    /// via the status bar).
+    fn menu_dispatch(&mut self, idx: usize) -> iced::Task<Message> {
+        let Some(open) = self.menu.take() else {
+            return iced::Task::none();
+        };
+        let Some(crate::menu::Entry::Item(item)) = open.entries.get(idx).cloned() else {
+            return iced::Task::none();
+        };
+        match item.id.as_str() {
+            "open" => {
+                if let Some(p) = open.nav_target {
+                    return self.update(Message::Navigate(p));
+                }
+                // directories navigate (first one); files go to the §5 backend
+                let mut nav = None;
+                let mut files = Vec::new();
+                for &i in &self.selected {
+                    if let Some(e) = self.entries.get(i) {
+                        if (e.is_dir() || fs::archive::is_archive_path(&e.path)) && nav.is_none() {
+                            nav = Some(e.path.clone());
+                        } else if !e.is_dir() {
+                            files.push(e.path.clone());
+                        }
+                    }
+                }
+                if !files.is_empty() {
+                    if fs::archive::resolve(&self.cwd).is_some() {
+                        self.status = "opening inside archives is not supported yet".into();
+                    } else if let Err(e) = crate::menu::open_files(&self.menu_cfg, &files) {
+                        self.status = format!("Open: {e}");
+                    }
+                }
+                if let Some(p) = nav {
+                    return self.navigate(p);
+                }
+                iced::Task::none()
+            }
+            "cut" => self.update(Message::CutSelection),
+            "copy" => self.update(Message::CopySelection),
+            "paste" => self.update(Message::Paste),
+            "delete" => self.update(Message::DeleteSelection),
+            "rename" => self.update(Message::RenameSelected),
+            "select_all" => self.update(Message::SelectAll),
+            "refresh" => self.update(Message::Refresh),
+            "new_folder" => self.update(Message::NewFolder),
+            "properties" => {
+                self.status = "Properties dialog is not implemented yet".into();
+                iced::Task::none()
+            }
+            // §6 placeholder (status notice until the dialog lands)
+            "open_with" => {
+                self.status = "Open with: application selection is not implemented yet".into();
+                iced::Task::none()
+            }
+            "print" => {
+                self.status = "Printing is not configured yet".into();
+                iced::Task::none()
+            }
+            "extract_here" => {
+                self.status = "Extraction is not supported yet".into();
+                iced::Task::none()
+            }
+            "open_new_window" => {
+                let target = open.nav_target.unwrap_or_else(|| self.cwd.clone());
+                match std::env::current_exe() {
+                    Ok(exe) => {
+                        if let Err(e) = std::process::Command::new(exe).arg(&target).spawn() {
+                            self.status = format!("New window: {e}");
+                        }
+                    }
+                    Err(e) => self.status = format!("New window: {e}"),
+                }
+                iced::Task::none()
+            }
+            _ => {
+                // YAML-defined command (§2 dispatcher): argv + paths
+                let paths = open
+                    .nav_target
+                    .map(|p| vec![p])
+                    .unwrap_or_else(|| self.selected_paths());
+                if let Some(argv) = item.run {
+                    if let Err(e) = crate::menu::run_custom(&argv, &paths) {
+                        self.status = e;
+                    }
+                } else {
+                    self.status = format!("unknown command {:?}", item.id);
+                }
+                iced::Task::none()
+            }
+        }
+    }
+
     pub fn update(&mut self, message: Message) -> iced::Task<Message> {
         // ribbon-originated events must not re-run contextual
         // auto-activation (the user just clicked a tab)
@@ -999,6 +1150,14 @@ impl Explorer {
                         let p = e.path.clone();
                         return self.navigate(p);
                     }
+                    // regular file: the menu.yaml open backend (§5)
+                    if fs::archive::resolve(&self.cwd).is_some() {
+                        self.status = "opening inside archives is not supported yet".into();
+                    } else if let Err(err) =
+                        crate::menu::open_files(&self.menu_cfg, &[e.path.clone()])
+                    {
+                        self.status = format!("Open: {err}");
+                    }
                 }
                 iced::Task::none()
             }
@@ -1095,6 +1254,46 @@ impl Explorer {
             }
             Message::SetView(index) => self.set_view_index(index),
             Message::WheelZoom(delta) => self.wheel_zoom(delta),
+            Message::ContextSelect(i) => {
+                self.context_select(i);
+                iced::Task::none()
+            }
+            Message::ContextBackground => {
+                let entries = if fs::archive::resolve(&self.cwd).is_some() {
+                    crate::menu::build_archive(&self.menu_cfg, 0, false, false)
+                } else {
+                    crate::menu::build_background(&self.menu_cfg, self.clipboard.is_some())
+                };
+                self.menu = Some(crate::menu::Open {
+                    entries,
+                    x: self.cursor.x,
+                    y: self.cursor.y,
+                    hover: None,
+                    nav_target: None,
+                });
+                iced::Task::none()
+            }
+            Message::ContextNav(path) => {
+                self.menu = Some(crate::menu::Open {
+                    entries: crate::menu::build_nav(&self.menu_cfg),
+                    x: self.cursor.x,
+                    y: self.cursor.y,
+                    hover: None,
+                    nav_target: Some(path),
+                });
+                iced::Task::none()
+            }
+            Message::MenuPick(i) => self.menu_dispatch(i),
+            Message::MenuHover(h) => {
+                if let Some(m) = &mut self.menu {
+                    m.hover = h;
+                }
+                iced::Task::none()
+            }
+            Message::CloseMenu => {
+                self.menu = None;
+                iced::Task::none()
+            }
             Message::FileScrollTo(target) => {
                 let (x, y) = if self.view_cfg.family(self.view_index)
                     == crate::view_step::Family::List
@@ -1298,6 +1497,10 @@ impl Explorer {
                 iced::Task::none()
             }
             Message::Event(e) => {
+                // track the cursor (context-menu placement)
+                if let iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) = &e {
+                    self.cursor = *position;
+                }
                 // splitter drag: track the cursor, end on left release
                 if self.bar_split {
                     use iced::mouse::{Button as MButton, Event as MEvent};
@@ -1339,7 +1542,7 @@ impl Explorer {
                     self.ctrl_held = ctrl;
                     return iced::Task::none();
                 }
-                if let Some(m) = crate::handle_key(e, self.renaming.is_some()) {
+                if let Some(m) = crate::handle_key(e, self.renaming.is_some(), self.menu.is_some()) {
                     return self.update(m);
                 }
                 iced::Task::none()

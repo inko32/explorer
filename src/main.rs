@@ -7,6 +7,7 @@ mod fonts;
 mod fs;
 mod icon;
 mod icons;
+mod menu;
 mod model;
 mod nav_pane;
 mod navigation;
@@ -170,11 +171,14 @@ fn window_size() -> iced::Size {
 
 /// Global keyboard shortcuts (binding table). When an inline rename editor is
 /// open, only Escape reaches the app — everything else belongs to the editor.
-pub fn handle_key(event: iced::Event, renaming: bool) -> Option<Message> {
+pub fn handle_key(event: iced::Event, renaming: bool, menu_open: bool) -> Option<Message> {
     use iced::keyboard::{key::Named, Event as KeyEvent, Key};
     let iced::Event::Keyboard(KeyEvent::KeyPressed { key, modifiers, .. }) = event else {
         return None;
     };
+    if menu_open {
+        return (key == Key::Named(Named::Escape)).then_some(Message::CloseMenu);
+    }
     if renaming {
         return (key == Key::Named(Named::Escape)).then_some(Message::CancelRename);
     }
