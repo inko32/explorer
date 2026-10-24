@@ -108,8 +108,15 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
                     .interaction(iced::mouse::Interaction::ResizingHorizontally),
             );
         }
+        // context menu above everything (SPEC/menu_spec.md)
+        if let Some(open) = &state.menu {
+            s = s.push(dbg("menu", crate::menu::layer(open, &state.menu_cfg, skin)));
+        }
         s.into()
     } else {
+        if let Some(open) = &state.menu {
+            return stack![framed, dbg("menu", crate::menu::layer(open, &state.menu_cfg, skin))].into();
+        }
         framed
     }
 }

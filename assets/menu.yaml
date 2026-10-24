@@ -1,0 +1,104 @@
+# Context menus — SPEC/menu_spec.md. ONE file for everything: menu
+# definitions, file-type groups, open behavior and the menu layout.
+# A user copy at ~/.config/explorer/menu.yaml overrides this file (same
+# override path as ribbon.yaml / folder-view.yaml); missing keys fall
+# back to the values below. Invalid entries produce a startup warning
+# and are skipped — a broken file never blocks file browsing.
+
+settings:
+  file_detection: extension   # extension | magic (magic is reserved: falls back to extension with a warning)
+  open_backend: kde           # kde | yaml
+  extensionless_group: ""     # file-type group for extensionless files ("" = none)
+  compound_extensions: []     # e.g. [.tar.gz, .tar.xz] matched before the final extension
+
+# §5 file opening. kde: the first command on PATH wins, paths passed as
+# individual arguments (no shell). yaml: extension -> argv, the paths are
+# appended; a missing handler is reported, nothing is silently skipped.
+open:
+  kde:
+    commands: [kde-open, xdg-open]
+  handlers: {}                # ".png": [gwenview]  /  ".txt": [kwrite]
+
+# Windows-style menu metrics
+layout:
+  min_width: 220.0
+  item_height: 24.0
+  gutter: 28.0                # left icon gutter width
+  icon_size: 16.0
+  separator_height: 9.0
+  pad_h: 6.0                  # right padding after the shortcut column
+  font_size: 12.0
+  corner_radius: 0.0
+
+# Built-in command defaults (label / shortcut / icon). Items in menus:
+# may override them. Only commands listed here (or items with a `run:`
+# argv) are valid; anything else is dropped with a warning.
+commands:
+  open:            { label: Open }
+  cut:             { label: Cut, shortcut: Ctrl+X }
+  copy:            { label: Copy, shortcut: Ctrl+C }
+  paste:           { label: Paste, shortcut: Ctrl+V }
+  delete:          { label: Delete, shortcut: Del }
+  rename:          { label: Rename, shortcut: F2 }
+  properties:      { label: Properties }
+  open_with:       { label: Open with... }
+  print:           { label: Print }
+  new_folder:      { label: New folder }
+  select_all:      { label: Select all, shortcut: Ctrl+A }
+  refresh:         { label: Refresh, shortcut: F5, icon: refresh }
+  open_new_window: { label: Open in new window }
+  extract_here:    { label: Extract here }
+
+# Menu definitions. Item fields: command, label, shortcut, icon, bold,
+# files/dirs (default true — what the command supports; items that
+# cannot operate on the whole selection are hidden), single (default
+# false — true = single object only), run (YAML-defined command argv;
+# the selected paths are appended).
+menus:
+  # §3.2 selection baseline (files and/or folders)
+  general:
+    - { command: open, bold: true }
+    - separator: true
+    - { command: cut }
+    - { command: copy }
+    - separator: true
+    - { command: delete }
+    - { command: rename, single: true }
+    - separator: true
+    - { command: open_with, dirs: false }
+    - { command: properties }
+  # right-click on empty folder space
+  background:
+    - { command: new_folder }
+    - separator: true
+    - { command: paste }
+    - { command: select_all }
+    - separator: true
+    - { command: refresh }
+    - { command: properties }
+  # right-click while browsing inside an archive (selection or
+  # background): the archive is read-only
+  archive:
+    - { command: extract_here }
+    - separator: true
+    - { command: copy }
+    - { command: properties }
+  # right-click a navigation pane element
+  nav:
+    - { command: open, bold: true }
+    - { command: open_new_window }
+    - separator: true
+    - { command: properties }
+
+# §3.3 file-type groups: names are stable and arbitrary. Group items
+# merge into the selection menu (§3.4): a command already present stays
+# put (no duplicates); a new command is inserted after its `after:`
+# command (default: before `properties`).
+file_types:
+  - name: imagefiles
+    extensions: [.png, .jpg, .jpeg, .gif, .webp, .bmp, .tiff, .svg]
+    items:
+      - { command: print, after: open }
+  - name: textfiles
+    extensions: [.txt, .log, .md, .csv]
+    items: []

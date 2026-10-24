@@ -175,6 +175,7 @@ fn item_chrome<'a>(
     mouse_area(styled)
         .on_press(Message::Select(i))
         .on_double_click(Message::Open(i))
+        .on_right_press(Message::ContextSelect(i))
         .on_enter(Message::Hover(Some(i)))
         .on_exit(Message::Hover(None))
         .into()
@@ -345,6 +346,9 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
     .on_show(|size| Message::FileAreaResized(size.width, size.height))
     .on_resize(|size| Message::FileAreaResized(size.width, size.height))
     .into();
+    // right-click on empty space (items capture their own first) opens
+    // the background menu (SPEC/menu_spec.md)
+    let area = crate::menu::on_right_free(area, Message::ContextBackground);
     // Windows-style scrollbar strip (arrow buttons at both ends); 0px
     // when the content fits, keeping the pane edge right-aligned
     let pane: Element<Message> = if family == vs::Family::List && !state.loading {
