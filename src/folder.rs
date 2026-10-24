@@ -145,6 +145,199 @@ impl<'a> Widget<Message, iced::Theme, iced::Renderer> for CtrlZoom<'a> {
     }
 }
 
+/// Rubber-band selection zone: a left press that no child captures
+/// (empty space) starts the marquee; moves/ends while dragging publish
+/// content coordinates (local + scroll). Items capture their own
+/// presses first, so dragging from an item never starts a marquee.
+struct MarqueeZone<'a> {
+    content: Element<'a, Message>,
+    scroll_x: f32,
+    scroll_y: f32,
+}
+
+#[derive(Default)]
+struct MarqueeZoneState {
+    dragging: bool,
+}
+
+impl<'a> Widget<Message, iced::Theme, iced::Renderer> for MarqueeZone<'a> {
+    fn size(&self) -> Size<Length> {
+        self.content.as_widget().size()
+    }
+
+    fn tag(&self) -> iced::advanced::widget::tree::Tag {
+        iced::advanced::widget::tree::Tag::of::<MarqueeZoneState>()
+    }
+
+    fn state(&self) -> iced::advanced::widget::tree::State {
+        iced::advanced::widget::tree::State::new(MarqueeZoneState::default())
+    }
+
+    fn children(&self) -> Vec<Tree> {
+        vec![Tree::new(&self.content)]
+    }
+
+    fn diff(&self, tree: &mut Tree) {
+        tree.diff_children(std::slice::from_ref(&self.content));
+    }
+
+    fn layout(
+        &mut self,
+        tree: &mut Tree,
+        renderer: &iced::Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        self.content
+            .as_widget_mut()
+            .layout(&mut tree.children[0], renderer, limits)
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut iced::Renderer,
+        theme: &iced::Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        self.content
+            .as_widget()
+            .draw(&tree.children[0], renderer, theme, style, layout, cursor, viewport);
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &iced::Renderer,
+        operation: &mut dyn Operation,
+    ) {
+        self.content
+            .as_widget_mut()
+            .operate(&mut tree.children[0], layout, renderer, operation);
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &iced::Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &iced::Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        let zone = tree.state.downcast_mut::<MarqueeZoneState>();
+        match event {
+            iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                self.content.as_widget_mut().update(
+                    &mut tree.children[0],
+                    event,
+                    layout,
+                    cursor,
+                    renderer,
+                    clipboard,
+                    shell,
+                    viewport,
+                );
+                if !shell.is_event_captured() && cursor.is_over(layout.bounds()) {
+                    if let Some(p) = cursor.position() {
+                        zone.dragging = true;
+                        let o = layout.bounds().position();
+                        shell.publish(Message::MarqueeBegin {
+                            x: p.x - o.x + self.scroll_x,
+                            y: p.y - o.y + self.scroll_y,
+                        });
+                        shell.capture_event();
+                    }
+                }
+            }
+            iced::Event::Mouse(mouse::Event::CursorMoved { position }) if zone.dragging => {
+                // the rectangle follows the pointer but stops at the
+                // pane's edge (no growth beyond it, no freeze)
+                let b = layout.bounds();
+                let o = b.position();
+                shell.publish(Message::MarqueeMove {
+                    x: (position.x - o.x).clamp(0.0, b.width) + self.scroll_x,
+                    y: (position.y - o.y).clamp(0.0, b.height) + self.scroll_y,
+                });
+                shell.capture_event();
+            }
+            iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+                if zone.dragging =>
+            {
+                zone.dragging = false;
+                shell.publish(Message::MarqueeEnd);
+                shell.capture_event();
+            }
+            _ => {
+                self.content.as_widget_mut().update(
+                    &mut tree.children[0],
+                    event,
+                    layout,
+                    cursor,
+                    renderer,
+                    clipboard,
+                    shell,
+                    viewport,
+                );
+            }
+        }
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+        renderer: &iced::Renderer,
+    ) -> mouse::Interaction {
+        self.content
+            .as_widget()
+            .mouse_interaction(&tree.children[0], layout, cursor, viewport, renderer)
+    }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut Tree,
+        layout: Layout<'b>,
+        renderer: &iced::Renderer,
+        viewport: &Rectangle,
+        translation: Vector,
+    ) -> Option<overlay::Element<'b, Message, iced::Theme, iced::Renderer>> {
+        self.content
+            .as_widget_mut()
+            .overlay(&mut tree.children[0], layout, renderer, viewport, translation)
+    }
+}
+
+/// The rubber-band rectangle (pane-local coordinates — plain
+/// spacer positioning, NOT float: float bounds are window-absolute).
+fn marquee_rect(x: f32, y: f32, w: f32, h: f32, skin: skin::Skin) -> Element<'static, Message> {
+    column![
+        Space::new().height(Length::Fixed(y.max(0.0))),
+        row![
+            Space::new().width(Length::Fixed(x.max(0.0))),
+            container(Space::new().width(Length::Fixed(w)).height(Length::Fixed(h))).style(
+                move |_t: &iced::Theme| container::Style {
+                    background: Some(Color { a: 0.35, ..skin.sel }.into()),
+                    border: iced::Border {
+                        color: skin.sel_border,
+                        width: 1.0,
+                        radius: 0.0.into(),
+                    },
+                    ..Default::default()
+                },
+            ),
+        ],
+    ]
+    .into()
+}
+
 /// Selection/hover chrome shared by the per-item renderers (§8.4:
 /// rounded rectangle, radius 4).
 fn item_chrome<'a>(
@@ -177,7 +370,7 @@ fn item_chrome<'a>(
         .on_double_click(Message::Open(i))
         .on_right_press(Message::ContextSelect(i))
         .on_enter(Message::Hover(Some(i)))
-        .on_exit(Message::Hover(None))
+        .on_exit(Message::HoverExit(i))
         .into()
 }
 
@@ -334,6 +527,19 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
         }
     };
 
+    // rubber-band selection rectangle overlay (all layouts)
+    let body: Element<Message> = if let Some(m) = &state.marquee {
+        let (x0, x1) = (m.x0.min(m.x1), m.x0.max(m.x1));
+        let (y0, y1) = (m.y0.min(m.y1), m.y0.max(m.y1));
+        stack![
+            body,
+            marquee_rect(x0 - state.scroll_x, y0 - state.scroll_y, x1 - x0, y1 - y0, skin),
+        ]
+        .into()
+    } else {
+        body
+    };
+
     // The Sensor reports the exact scrollable viewport size (iced's
     // on_scroll stays silent when the content fits, and window resize
     // events carry the WINDOW size — both wrong for the collapse rule).
@@ -349,6 +555,12 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
     // right-click on empty space (items capture their own first) opens
     // the background menu (SPEC/menu_spec.md)
     let area = crate::menu::on_right_free(area, Message::ContextBackground);
+    // a left press on empty space starts the rubber-band selection
+    let area: Element<Message> = Element::new(MarqueeZone {
+        content: area,
+        scroll_x: state.scroll_x,
+        scroll_y: state.scroll_y,
+    });
     // Windows-style scrollbar strip (arrow buttons at both ends); 0px
     // when the content fits, keeping the pane edge right-aligned
     let pane: Element<Message> = if family == vs::Family::List && !state.loading {
@@ -378,6 +590,7 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
     let view: Element<Message> = container(crate::scrollbar::wheel_boost(
         pane,
         offset,
+        (content - viewport_axis).max(0.0),
         cfg.input.scroll_speed,
         axis,
         Message::FileScrollTo,

@@ -28,6 +28,18 @@ pub enum Message {
     Up,
     Refresh,
     Select(usize),
+    /// A row's hover ended; clears only if that row is still the
+    /// hovered one (event order: moving up, the new row's enter
+    /// arrives before the old row's exit).
+    HoverExit(usize),
+    /// Navigation tree row hover (same guarded-exit pattern).
+    NavHover(Option<PathBuf>),
+    NavHoverExit(PathBuf),
+    /// Rubber-band selection drag on empty folder-view space (content
+    /// coordinates; the folder.rs MarqueeZone wrapper publishes these).
+    MarqueeBegin { x: f32, y: f32 },
+    MarqueeMove { x: f32, y: f32 },
+    MarqueeEnd,
     Hover(Option<usize>),
     Open(usize),
     ToggleDark,
@@ -218,12 +230,24 @@ struct ColDrag {
     start_w: f32,
 }
 
+/// Rubber-band selection rectangle (file-view content coordinates).
+pub struct Marquee {
+    pub x0: f32,
+    pub y0: f32,
+    pub x1: f32,
+    pub y1: f32,
+    /// Selection snapshot at drag start (Ctrl+drag adds to it).
+    base: std::collections::BTreeSet<usize>,
+}
+
 pub struct Explorer {
     pub window: Option<iced::window::Id>,
     pub cwd: PathBuf,
     pub entries: Vec<fs::Entry>,
     pub selected: std::collections::BTreeSet<usize>,
     pub hovered: Option<usize>,
+    /// Hovered navigation tree row.
+    pub nav_hover: Option<PathBuf>,
     back: Vec<PathBuf>,
     forward: Vec<PathBuf>,
     pub dark: bool,
@@ -244,6 +268,12 @@ pub struct Explorer {
     pub maximized: bool,
     /// Ctrl held (drives Ctrl+scroll view zoom over the file view).
     pub ctrl_held: bool,
+    /// Shift held (Shift+click range selection).
+    pub shift_held: bool,
+    /// Range-selection anchor (last plain/Ctrl click).
+    sel_anchor: Option<usize>,
+    /// Rubber-band selection in progress (folder view, all layouts).
+    pub marquee: Option<Marquee>,
     /// Last title-bar press (double-click detection: the 2nd press must not
     /// start a window drag, or the in-flight move scrambles the placement of
     /// the subsequent maximize).
@@ -373,6 +403,7 @@ impl Explorer {
             entries: Vec::new(),
             selected: Default::default(),
             hovered: None,
+            nav_hover: None,
             back: Vec::new(),
             forward: Vec::new(),
             dark: false,
@@ -387,6 +418,9 @@ impl Explorer {
             splitter_hover: false,
             maximized: false,
             ctrl_held: false,
+            shift_held: false,
+            sel_anchor: None,
+            marquee: None,
             last_title_press: None,
             self_border: true,
             frame_style: FrameStyle::Win8,
@@ -998,12 +1032,83 @@ impl Explorer {
         });
     }
 
+    /// Item rectangle in file-view CONTENT coordinates (before scroll),
+    /// shared by the Menu-key anchor and the rubber-band hit test.
+    fn item_rect(&self, i: usize, pane_w: f32) -> (f32, f32, f32, f32) {
+        use crate::view_step as vs;
+        let cfg = &self.view_cfg;
+        let s = cfg.icon_px(self.view_index);
+        match cfg.family(self.view_index) {
+            vs::Family::Content => {
+                let row_h = cfg.layouts.content.row_h;
+                (0.0, i as f32 * row_h, pane_w, row_h)
+            }
+            vs::Family::Details => {
+                let row_h = cfg.details_row_h(self.details_compact);
+                (0.0, cfg.layouts.details.header_h + i as f32 * row_h, pane_w, row_h)
+            }
+            vs::Family::List => {
+                let l = &cfg.layouts.list;
+                let longest = self
+                    .entries
+                    .iter()
+                    .map(|e| e.name.chars().count())
+                    .max()
+                    .unwrap_or(0);
+                let col_w = cfg.list_col_w(longest);
+                let rows = ((self.viewport_h / l.row_h).floor() as usize).max(1);
+                ((i / rows) as f32 * col_w, (i % rows) as f32 * l.row_h, col_w, l.row_h)
+            }
+            vs::Family::Tiles => {
+                let t = &cfg.layouts.tiles;
+                let cols = vs::grid_cols(t.cell_w, 0.0, pane_w);
+                ((i % cols) as f32 * t.cell_w, (i / cols) as f32 * t.cell_h, t.cell_w, t.cell_h)
+            }
+            vs::Family::SmallIcon => {
+                let m = cfg.small_icon(s);
+                let cols = vs::grid_cols(m.cell_w, m.gap, pane_w);
+                (
+                    (i % cols) as f32 * (m.cell_w + m.gap),
+                    (i / cols) as f32 * (m.cell_h + m.gap),
+                    m.cell_w,
+                    m.cell_h,
+                )
+            }
+            vs::Family::IconTop => {
+                let m = cfg.icon_top(s);
+                let cols = vs::grid_cols(m.cell_w, m.gap, pane_w);
+                (
+                    (i % cols) as f32 * (m.cell_w + m.gap),
+                    (i / cols) as f32 * (m.cell_h + m.gap),
+                    m.cell_w,
+                    m.cell_h,
+                )
+            }
+        }
+    }
+
+    /// Rubber-band: select every item whose cell intersects the marquee.
+    fn marquee_update(&mut self) {
+        let Some(m) = &self.marquee else { return };
+        let (x0, x1) = (m.x0.min(m.x1), m.x0.max(m.x1));
+        let (y0, y1) = (m.y0.min(m.y1), m.y0.max(m.y1));
+        let pane_w = self.file_pane_width();
+        let mut hits = m.base.clone();
+        for i in 0..self.entries.len() {
+            let (ix, iy, iw, ih) = self.item_rect(i, pane_w);
+            if ix < x1 && ix + iw > x0 && iy < y1 && iy + ih > y0 {
+                hits.insert(i);
+            }
+        }
+        if hits != self.selected {
+            self.selected = hits;
+        }
+    }
+
     /// Left-bottom corner of file-view item `i` in window coordinates
     /// (Menu-key anchor). Best-effort: recomputed from the same layout
     /// math as ui.rs + folder.rs.
     fn item_anchor(&self, i: usize) -> (f32, f32) {
-        use crate::view_step as vs;
-        let cfg = &self.view_cfg;
         let (ft, fr, _, fl) =
             crate::border::frame_insets_pub(self.self_border, self.frame_style);
         let title_h = if self.self_border { crate::border::TITLEBAR_H } else { 0.0 };
@@ -1021,58 +1126,8 @@ impl Explorer {
         let pane_x = fl + nav_w + self.ribbon.nav_gap()
             + if nav_w > 0.0 { 4.0 } else { 0.0 };
         let pane_y = ft + title_h + ribbon_h + band_h;
-        let pane_w = self.file_pane_width();
-        let s = cfg.icon_px(self.view_index);
-        match cfg.family(self.view_index) {
-            vs::Family::Content => {
-                let row_h = cfg.layouts.content.row_h;
-                (pane_x, pane_y + (i + 1) as f32 * row_h - self.scroll_y)
-            }
-            vs::Family::Details => {
-                let row_h = cfg.details_row_h(self.details_compact);
-                let h = cfg.layouts.details.header_h;
-                (pane_x, pane_y + h + (i + 1) as f32 * row_h - self.scroll_y)
-            }
-            vs::Family::List => {
-                let l = &cfg.layouts.list;
-                let longest = self
-                    .entries
-                    .iter()
-                    .map(|e| e.name.chars().count())
-                    .max()
-                    .unwrap_or(0);
-                let col_w = cfg.list_col_w(longest);
-                let rows = ((self.viewport_h / l.row_h).floor() as usize).max(1);
-                (
-                    pane_x + (i / rows) as f32 * col_w - self.scroll_x,
-                    pane_y + (i % rows + 1) as f32 * l.row_h,
-                )
-            }
-            vs::Family::Tiles => {
-                let t = &cfg.layouts.tiles;
-                let cols = vs::grid_cols(t.cell_w, 0.0, pane_w);
-                (
-                    pane_x + (i % cols) as f32 * t.cell_w,
-                    pane_y + (i / cols + 1) as f32 * t.cell_h - self.scroll_y,
-                )
-            }
-            vs::Family::SmallIcon => {
-                let m = cfg.small_icon(s);
-                let cols = vs::grid_cols(m.cell_w, m.gap, pane_w);
-                (
-                    pane_x + (i % cols) as f32 * (m.cell_w + m.gap),
-                    pane_y + (i / cols) as f32 * (m.cell_h + m.gap) + m.cell_h - self.scroll_y,
-                )
-            }
-            vs::Family::IconTop => {
-                let m = cfg.icon_top(s);
-                let cols = vs::grid_cols(m.cell_w, m.gap, pane_w);
-                (
-                    pane_x + (i % cols) as f32 * (m.cell_w + m.gap),
-                    pane_y + (i / cols) as f32 * (m.cell_h + m.gap) + m.cell_h - self.scroll_y,
-                )
-            }
-        }
+        let (x, y, _, h) = self.item_rect(i, self.file_pane_width());
+        (pane_x + x - self.scroll_x, pane_y + y + h - self.scroll_y)
     }
 
     /// Menu item activated: close the menu, then dispatch (§8: every
@@ -1299,8 +1354,28 @@ impl Explorer {
                 iced::Task::none()
             }
             Message::Select(i) => {
+                if i >= self.entries.len() {
+                    return iced::Task::none();
+                }
+                if self.ctrl_held {
+                    // Ctrl+click toggles the item, keeps the rest
+                    if !self.selected.remove(&i) {
+                        self.selected.insert(i);
+                    }
+                    self.sel_anchor = Some(i);
+                    self.last_click = None;
+                    return iced::Task::none();
+                }
+                if self.shift_held {
+                    // Shift+click: the anchor..=item range
+                    let anchor = self.sel_anchor.unwrap_or(i);
+                    self.selected = (anchor.min(i)..=anchor.max(i)).collect();
+                    self.last_click = None;
+                    return iced::Task::none();
+                }
                 self.selected.clear();
                 self.selected.insert(i);
+                self.sel_anchor = Some(i);
                 // double-click emulation: two presses on the same row within 400ms
                 let now = std::time::Instant::now();
                 if let Some((last_i, t)) = self.last_click {
@@ -1318,8 +1393,51 @@ impl Explorer {
                 self.last_click = Some((i, now));
                 iced::Task::none()
             }
+            Message::MarqueeBegin { x, y } => {
+                self.marquee = Some(Marquee {
+                    x0: x,
+                    y0: y,
+                    x1: x,
+                    y1: y,
+                    // Ctrl+drag adds to the selection; plain drag replaces
+                    base: if self.ctrl_held { self.selected.clone() } else { Default::default() },
+                });
+                // a plain click on empty space releases the selection
+                // (the zero-size marquee intersects nothing)
+                self.marquee_update();
+                iced::Task::none()
+            }
+            Message::MarqueeMove { x, y } => {
+                if let Some(m) = &mut self.marquee {
+                    m.x1 = x;
+                    m.y1 = y;
+                }
+                self.marquee_update();
+                iced::Task::none()
+            }
+            Message::MarqueeEnd => {
+                self.marquee_update();
+                self.marquee = None;
+                iced::Task::none()
+            }
             Message::Hover(h) => {
                 self.hovered = h;
+                iced::Task::none()
+            }
+            Message::HoverExit(i) => {
+                if self.hovered == Some(i) {
+                    self.hovered = None;
+                }
+                iced::Task::none()
+            }
+            Message::NavHover(h) => {
+                self.nav_hover = h;
+                iced::Task::none()
+            }
+            Message::NavHoverExit(p) => {
+                if self.nav_hover.as_ref() == Some(&p) {
+                    self.nav_hover = None;
+                }
                 iced::Task::none()
             }
             Message::Open(i) => {
@@ -1762,6 +1880,7 @@ impl Explorer {
                 ) = &e
                 {
                     let ctrl = m.control();
+                    self.shift_held = m.shift();
                     if !ctrl && self.ctrl_held {
                         // §7: Ctrl released — reset the delta accumulator
                         self.zoom_acc = 0.0;
