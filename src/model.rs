@@ -307,6 +307,8 @@ pub struct Explorer {
     col_drag: Option<ColDrag>,
     pub sort: SortBy,
     pub show_hidden: bool,
+    /// Font sizes (assets/fonts.yaml).
+    pub fonts: crate::fonts::FontSizes,
     /// The ribbon (rs-ribbon framework + explorer commanding).
     pub ribbon: crate::ribbon::Ribbon,
     /// File-view scroll offsets (List scrolls horizontally, §8.1).
@@ -436,6 +438,7 @@ impl Explorer {
             col_drag: None,
             sort: SortBy::Name,
             show_hidden: false,
+            fonts: crate::fonts::FontSizes::load(),
             ribbon: crate::ribbon::Ribbon::new(),
             scroll_x: 0.0,
             scroll_y: 0.0,
@@ -487,6 +490,22 @@ impl Explorer {
                 .file_name()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_else(|| self.cwd.display().to_string())
+        }
+    }
+
+    /// Window-icon glyph for the current location (title bar, 16px):
+    /// Computer / home / a drive root / inside an archive / folder.
+    pub fn location_icon(&self) -> &'static str {
+        if self.cwd == Path::new("/") {
+            "computer"
+        } else if fs::archive::resolve(&self.cwd).is_some() {
+            "archive"
+        } else if self.volumes.iter().any(|v| v.mount == self.cwd) {
+            "drive"
+        } else if std::env::var_os("HOME").map(PathBuf::from).as_deref() == Some(self.cwd.as_path()) {
+            "home"
+        } else {
+            "folder"
         }
     }
 

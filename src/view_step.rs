@@ -181,7 +181,7 @@ impl Default for ContentCfg {
             row_h: 48.0,
             icon: 32.0,
             name_size: 12.0,
-            prop_size: 11.0,
+            prop_size: 12.0,
             spacing: 2.0,
             pad_h: 8.0,
             pad_w: 8.0,
@@ -212,7 +212,7 @@ impl Default for TilesCfg {
             cell_h: 64.0,
             icon: 48.0,
             name_size: 12.0,
-            prop_size: 11.0,
+            prop_size: 12.0,
             line_spacing: 1.0,
             icon_text_gap: 8.0,
             pad: 8.0,
@@ -394,7 +394,7 @@ impl Default for StyleCfg {
         Self {
             corner_radius: 4.0,
             font_size: 12.0,
-            prop_size: 11.0,
+            prop_size: 12.0,
         }
     }
 }

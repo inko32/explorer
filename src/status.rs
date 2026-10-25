@@ -50,7 +50,7 @@ pub(crate) fn statusbar(state: &Explorer, skin: skin::Skin) -> Element<'_, Messa
 
     container(
         row![
-            text(left).size(11.0).color(skin.subtle),
+            text(left).size(state.fonts.statusbar).color(skin.subtle),
             Space::new().width(Length::Fill),
             // SPEC/folder-spec.md §5: a view button is active only when
             // the current step index is exactly its preset

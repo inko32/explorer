@@ -275,7 +275,7 @@ metrics:
   band_height: 32
   tree_item_height: 22
   tree_indention: 8
-  tree_font_scale: 0.7
+  tree_font_scale: 0.75  # icon(16px) x scale = 12px nav labels
   bar_button_multiplier: 2.2
   gap_scale: 0.5
   # extra px the group titles sit lower (the bottom line follows)

@@ -487,7 +487,7 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
     };
     let body: Element<Message> = if state.loading {
         container(
-            container(text("Loading…").size(12.0).color(skin.subtle))
+            container(text("Loading…").size(cfg.style.font_size).color(skin.subtle))
                 .width(Length::Fill)
                 .center_x(Length::Fill)
                 .center_y(Length::Fill),

@@ -352,7 +352,7 @@ fn draw_menu_level_offset(
                 Size::new(w - 48.0, 25.0),
             ),
             ctx.label(cmd),
-            12.0,
+            ctx.fonts.ribbon.menu,
             if enabled { ctx.theme.text } else { ctx.theme.text_disabled },
             Horizontal::Left,
             Vertical::Center,
@@ -424,7 +424,7 @@ fn app_menu_scene(ctx: &Ctx) -> Scene {
             &mut scene,
             Rectangle::new(Point::new(x + 4.0, 6.0), Size::new(right_w - 10.0, 18.0)),
             header,
-            11.0,
+            ctx.fonts.ribbon.menu,
             ctx.theme.text,
             Horizontal::Left,
             Vertical::Center,
@@ -475,7 +475,7 @@ fn app_menu_scene(ctx: &Ctx) -> Scene {
                     &mut scene,
                     Rectangle::new(Point::new(x + 4.0, y + 2.0), Size::new(right_w - 34.0, 16.0)),
                     label,
-                    11.0,
+                    ctx.fonts.ribbon.menu,
                     ctx.theme.text,
                     Horizontal::Left,
                     Vertical::Center,
@@ -484,7 +484,7 @@ fn app_menu_scene(ctx: &Ctx) -> Scene {
                     &mut scene,
                     Rectangle::new(Point::new(x + 4.0, y + 17.0), Size::new(right_w - 34.0, 12.0)),
                     desc,
-                    9.0,
+                    ctx.fonts.ribbon.menu,
                     ctx.theme.group_label,
                     Horizontal::Left,
                     Vertical::Center,
@@ -549,7 +549,7 @@ fn combo_scene(ctx: &Ctx, cmd: u32) -> Scene {
             &mut scene,
             Rectangle::new(Point::new(10.0, y), Size::new(w - 18.0, 24.0)),
             label.clone(),
-            12.0,
+            ctx.fonts.ribbon.menu,
             if i == selected { Color::WHITE } else { ctx.theme.text },
             Horizontal::Left,
             Vertical::Center,
@@ -711,7 +711,7 @@ fn gallery_scene(ctx: &Ctx, cmd: u32, scroll: usize) -> Scene {
                     &mut scene,
                     Rectangle::new(Point::new(8.0, y), Size::new(width - 16.0, header_h)),
                     label,
-                    10.0,
+                    ctx.fonts.ribbon.menu,
                     ctx.theme.group_label,
                     Horizontal::Left,
                     Vertical::Center,
@@ -745,7 +745,7 @@ fn gallery_scene(ctx: &Ctx, cmd: u32, scroll: usize) -> Scene {
                         &mut scene,
                         Rectangle::new(Point::new(x - 1.0, y + g.item_height + 2.0), Size::new(cell_w - 2.0, 12.0)),
                         label.clone(),
-                        9.0,
+                        ctx.fonts.ribbon.menu,
                         ctx.theme.text,
                         Horizontal::Center,
                         Vertical::Center,
@@ -833,9 +833,9 @@ fn color_scene(ctx: &Ctx, cmd: u32) -> Scene {
     let t = Target::ColorSwatch { cmd, sel: SwatchSel::Automatic };
     hover_row(ctx, &mut scene, row, t.clone(), enabled);
     scene.push(Node::new(row, Cmd::Hit).target(t).tip(cmd));
-    text(&mut scene, Rectangle::new(Point::new(10.0, y), Size::new(16.0, 21.0)), "A", 12.0, ctx.theme.text, Horizontal::Left, Vertical::Center);
+    text(&mut scene, Rectangle::new(Point::new(10.0, y), Size::new(16.0, 21.0)), "A", ctx.fonts.ribbon.menu, ctx.theme.text, Horizontal::Left, Vertical::Center);
     let auto_label = ctx.str_prop(cmd, PropertyKey::AutomaticColorLabel).unwrap_or_else(|| "Automatic".into());
-    text(&mut scene, Rectangle::new(Point::new(28.0, y), Size::new(width - 40.0, 21.0)), auto_label, 11.5, ctx.theme.text, Horizontal::Left, Vertical::Center);
+    text(&mut scene, Rectangle::new(Point::new(28.0, y), Size::new(width - 40.0, 21.0)), auto_label, ctx.fonts.ribbon.menu, ctx.theme.text, Horizontal::Left, Vertical::Center);
     y += 22.0;
 
     if !monochrome {
@@ -843,9 +843,9 @@ fn color_scene(ctx: &Ctx, cmd: u32) -> Scene {
         let t = Target::ColorSwatch { cmd, sel: SwatchSel::NoColor };
         hover_row(ctx, &mut scene, row, t.clone(), enabled);
         scene.push(Node::new(row, Cmd::Hit).target(t).tip(cmd));
-        text(&mut scene, Rectangle::new(Point::new(10.0, y), Size::new(16.0, 21.0)), "Ø", 12.0, ctx.theme.text, Horizontal::Left, Vertical::Center);
+        text(&mut scene, Rectangle::new(Point::new(10.0, y), Size::new(16.0, 21.0)), "Ø", ctx.fonts.ribbon.menu, ctx.theme.text, Horizontal::Left, Vertical::Center);
         let label = ctx.str_prop(cmd, PropertyKey::NoColorLabel).unwrap_or_else(|| "No Color".into());
-        text(&mut scene, Rectangle::new(Point::new(28.0, y), Size::new(width - 40.0, 21.0)), label, 11.5, ctx.theme.text, Horizontal::Left, Vertical::Center);
+        text(&mut scene, Rectangle::new(Point::new(28.0, y), Size::new(width - 40.0, 21.0)), label, ctx.fonts.ribbon.menu, ctx.theme.text, Horizontal::Left, Vertical::Center);
         y += 22.0;
     }
 
@@ -873,14 +873,14 @@ fn color_scene(ctx: &Ctx, cmd: u32) -> Scene {
     };
 
     let theme_label = ctx.str_prop(cmd, PropertyKey::ThemeColorsCategoryLabel).unwrap_or_else(|| "Theme Colors".into());
-    text_bold(&mut scene, Rectangle::new(Point::new(8.0, y), Size::new(width - 16.0, 14.0)), theme_label, 10.0, ctx.theme.group_label, Horizontal::Left, Vertical::Center);
+    text_bold(&mut scene, Rectangle::new(Point::new(8.0, y), Size::new(width - 16.0, 14.0)), theme_label, ctx.fonts.ribbon.menu, ctx.theme.group_label, Horizontal::Left, Vertical::Center);
     y += 16.0;
     let tc = theme_colors.clone();
     grid(&mut scene, y, &tc, &|i| SwatchSel::Theme(i));
     y += (theme_colors.len() as f32 / 10.0).ceil() * (swatch + gap) + 2.0;
 
     let std_label = ctx.str_prop(cmd, PropertyKey::StandardColorsCategoryLabel).unwrap_or_else(|| "Standard Colors".into());
-    text_bold(&mut scene, Rectangle::new(Point::new(8.0, y), Size::new(width - 16.0, 14.0)), std_label, 10.0, ctx.theme.group_label, Horizontal::Left, Vertical::Center);
+    text_bold(&mut scene, Rectangle::new(Point::new(8.0, y), Size::new(width - 16.0, 14.0)), std_label, ctx.fonts.ribbon.menu, ctx.theme.group_label, Horizontal::Left, Vertical::Center);
     y += 16.0;
     let sc = standard_colors.clone();
     grid(&mut scene, y, &sc, &|i| SwatchSel::Standard(i));
@@ -888,7 +888,7 @@ fn color_scene(ctx: &Ctx, cmd: u32) -> Scene {
 
     if !recent.is_empty() {
         let label = ctx.str_prop(cmd, PropertyKey::RecentColorsCategoryLabel).unwrap_or_else(|| "Recent Colors".into());
-        text_bold(&mut scene, Rectangle::new(Point::new(8.0, y), Size::new(width - 16.0, 14.0)), label, 10.0, ctx.theme.group_label, Horizontal::Left, Vertical::Center);
+        text_bold(&mut scene, Rectangle::new(Point::new(8.0, y), Size::new(width - 16.0, 14.0)), label, ctx.fonts.ribbon.menu, ctx.theme.group_label, Horizontal::Left, Vertical::Center);
         y += 16.0;
         let rc = recent.clone();
         grid(&mut scene, y, &rc, &|i| SwatchSel::Recent(i));
@@ -900,7 +900,7 @@ fn color_scene(ctx: &Ctx, cmd: u32) -> Scene {
     hover_row(ctx, &mut scene, more, t.clone(), enabled);
     scene.push(Node::new(more, Cmd::Hit).target(t).tip(cmd));
     let label = ctx.str_prop(cmd, PropertyKey::MoreColorsLabel).unwrap_or_else(|| "More Colors…".into());
-    text(&mut scene, Rectangle::new(Point::new(10.0, y), Size::new(width - 20.0, 21.0)), label, 11.5, ctx.theme.text, Horizontal::Left, Vertical::Center);
+    text(&mut scene, Rectangle::new(Point::new(10.0, y), Size::new(width - 20.0, 21.0)), label, ctx.fonts.ribbon.menu, ctx.theme.text, Horizontal::Left, Vertical::Center);
 
     scene
 }
@@ -967,7 +967,7 @@ fn font_scene(ctx: &Ctx, cmd: u32, scroll: usize) -> Scene {
             &mut scene,
             Rectangle::new(Point::new(161.0, y), Size::new(42.0, 18.0)),
             *size,
-            11.0,
+            ctx.fonts.ribbon.menu,
             if selected { Color::WHITE } else { ctx.theme.text },
             Horizontal::Left,
             Vertical::Center,
@@ -1034,8 +1034,8 @@ fn font_scene(ctx: &Ctx, cmd: u32, scroll: usize) -> Scene {
     let shrink = Rectangle::new(Point::new(28.0, height - 26.0), Size::new(22.0, 22.0));
     quad(&mut scene, grow, Fill::Color(Color::TRANSPARENT), Some((ctx.theme.border, 1.0)), ctx.theme.button_radius);
     quad(&mut scene, shrink, Fill::Color(Color::TRANSPARENT), Some((ctx.theme.border, 1.0)), ctx.theme.button_radius);
-    text(&mut scene, grow, "A↑", 10.0, ctx.theme.text, Horizontal::Center, Vertical::Center);
-    text(&mut scene, shrink, "A↓", 10.0, ctx.theme.text, Horizontal::Center, Vertical::Center);
+    text(&mut scene, grow, "A↑", ctx.fonts.ribbon.menu, ctx.theme.text, Horizontal::Center, Vertical::Center);
+    text(&mut scene, shrink, "A↓", ctx.fonts.ribbon.menu, ctx.theme.text, Horizontal::Center, Vertical::Center);
     scene.push(Node::new(grow, Cmd::Hit).target(Target::FontGrow(cmd)).tip(cmd));
     scene.push(Node::new(shrink, Cmd::Hit).target(Target::FontShrink(cmd)).tip(cmd));
 
@@ -1078,7 +1078,7 @@ fn overflow_scene(ctx: &Ctx) -> Scene {
         if let Some(img) = image {
             svg(&mut scene, Rectangle::new(Point::new(8.0, y + 5.0), Size::new(16.0, 16.0)), img.clone(), 1.0);
         }
-        text(&mut scene, Rectangle::new(Point::new(30.0, y), Size::new(w - 38.0, 26.0)), label.clone(), 12.0, ctx.theme.text, Horizontal::Left, Vertical::Center);
+        text(&mut scene, Rectangle::new(Point::new(30.0, y), Size::new(w - 38.0, 26.0)), label.clone(), ctx.fonts.ribbon.menu, ctx.theme.text, Horizontal::Left, Vertical::Center);
         y += 26.0;
     }
     scene
@@ -1131,7 +1131,7 @@ fn qat_menu_scene(ctx: &Ctx) -> Scene {
         &mut scene,
         Rectangle::new(Point::new(8.0, 2.0), Size::new(width - 16.0, title_h)),
         "Customize Quick Access Toolbar",
-        10.5,
+        ctx.fonts.ribbon.menu,
         ctx.theme.text,
         Horizontal::Left,
         Vertical::Center,
@@ -1163,9 +1163,9 @@ fn qat_menu_scene(ctx: &Ctx) -> Scene {
         let cb = Rectangle::new(Point::new(10.0, y + 5.0), Size::new(12.0, 12.0));
         quad(&mut scene, cb, Fill::Color(Color::WHITE), Some((ctx.theme.border, 1.0)), ctx.theme.field_radius);
         if in_qat.contains(cmd) {
-            text(&mut scene, cb, "✓", 11.0, ctx.theme.selection, Horizontal::Center, Vertical::Center);
+            text(&mut scene, cb, "✓", ctx.fonts.ribbon.menu, ctx.theme.selection, Horizontal::Center, Vertical::Center);
         }
-        text(&mut scene, Rectangle::new(Point::new(28.0, y), Size::new(width - 36.0, row_h)), ctx.label(*cmd), 11.5, ctx.theme.text, Horizontal::Left, Vertical::Center);
+        text(&mut scene, Rectangle::new(Point::new(28.0, y), Size::new(width - 36.0, row_h)), ctx.label(*cmd), ctx.fonts.ribbon.menu, ctx.theme.text, Horizontal::Left, Vertical::Center);
         y += row_h;
     }
 
@@ -1181,9 +1181,9 @@ fn qat_menu_scene(ctx: &Ctx) -> Scene {
     let cb = Rectangle::new(Point::new(10.0, y + 5.0), Size::new(12.0, 12.0));
     quad(&mut scene, cb, Fill::Color(Color::WHITE), Some((ctx.theme.border, 1.0)), 1.0);
     if ctx.view().qat_dock() == crate::ribbon::enums::ControlDock::Bottom {
-        text(&mut scene, cb, "✓", 11.0, ctx.theme.selection, Horizontal::Center, Vertical::Center);
+        text(&mut scene, cb, "✓", ctx.fonts.ribbon.menu, ctx.theme.selection, Horizontal::Center, Vertical::Center);
     }
-    text(&mut scene, Rectangle::new(Point::new(28.0, y), Size::new(width - 36.0, row_h)), "Show Below the Ribbon", 11.5, ctx.theme.text, Horizontal::Left, Vertical::Center);
+    text(&mut scene, Rectangle::new(Point::new(28.0, y), Size::new(width - 36.0, row_h)), "Show Below the Ribbon", ctx.fonts.ribbon.menu, ctx.theme.text, Horizontal::Left, Vertical::Center);
     y += row_h;
 
     // minimize row
@@ -1194,9 +1194,9 @@ fn qat_menu_scene(ctx: &Ctx) -> Scene {
     let cb = Rectangle::new(Point::new(10.0, y + 5.0), Size::new(12.0, 12.0));
     quad(&mut scene, cb, Fill::Color(Color::WHITE), Some((ctx.theme.border, 1.0)), 1.0);
     if ctx.view().minimized() {
-        text(&mut scene, cb, "✓", 11.0, ctx.theme.selection, Horizontal::Center, Vertical::Center);
+        text(&mut scene, cb, "✓", ctx.fonts.ribbon.menu, ctx.theme.selection, Horizontal::Center, Vertical::Center);
     }
-    text(&mut scene, Rectangle::new(Point::new(28.0, y), Size::new(width - 36.0, row_h)), "Minimize the Ribbon", 11.5, ctx.theme.text, Horizontal::Left, Vertical::Center);
+    text(&mut scene, Rectangle::new(Point::new(28.0, y), Size::new(width - 36.0, row_h)), "Minimize the Ribbon", ctx.fonts.ribbon.menu, ctx.theme.text, Horizontal::Left, Vertical::Center);
 
     scene
 }
@@ -1221,7 +1221,7 @@ pub fn tooltip_scene(ctx: &Ctx, cmd: u32) -> Scene {
     let desc_lines = if desc.is_empty() {
         Vec::new()
     } else {
-        wrap_width(ctx, &desc, 10.0, width - 20.0)
+        wrap_width(ctx, &desc, ctx.fonts.ribbon.menu, width - 20.0)
     };
     let keytip = ctx.keytip(cmd);
     let key_line = if ctx.state.keytips { None } else { keytip.map(|k| format!("Alt, {k}")) };
@@ -1249,7 +1249,7 @@ pub fn tooltip_scene(ctx: &Ctx, cmd: u32) -> Scene {
             Size::new(width - 16.0, 18.0),
         ),
         title,
-        11.5,
+        ctx.fonts.ribbon.menu,
         ctx.theme.text,
         Horizontal::Left,
         Vertical::Center,
@@ -1262,7 +1262,7 @@ pub fn tooltip_scene(ctx: &Ctx, cmd: u32) -> Scene {
                 Size::new(width - 16.0, 13.0),
             ),
             line.clone(),
-            10.0,
+            ctx.fonts.ribbon.menu,
             ctx.theme.group_label,
             Horizontal::Left,
             Vertical::Center,

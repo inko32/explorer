@@ -1,0 +1,43 @@
+# Font sizes, px at 100% scaling (96 DPI), plus the font-family
+# fallback list. A user copy at ~/.config/explorer/fonts.yaml overrides
+# this file (same override path as the other configs). Everything
+# defaults to 12px.
+#
+# Folder-view / context-menu / nav-tree label sizes live in their own
+# files (folder-view.yaml style.*, menu.yaml layout.font_size,
+# ribbon.yaml metrics.tree_font_scale).
+
+# Fallback list: the first AVAILABLE family wins; cosmic-text falls
+# back per glyph through the system fonts. "Segoe UI" is used when it
+# is embedded (`make build FEATURES=embed-segoe`) or installed on the
+# system — otherwise it is silently skipped. To prefer Noto even when
+# Segoe is embedded, remove the first entry.
+family:
+  - Segoe UI           # primary when embedded/installed, else ignored
+  - Noto Sans
+  - Noto Sans CJK SC
+  - Noto Sans CJK JP
+  - Noto Sans CJK TC
+  - Noto Sans CJK KR
+  - sans-serif           # system fallback
+
+base: 12.0
+
+ribbon:
+  tab: 12.0           # tab strip labels (File, Home, View…)
+  button_large: 12.0  # large-button labels (+ trailing ▾)
+  button_small: 12.0  # small/medium button labels, combo + spinner text
+  group_label: 12.0   # group captions ("Clipboard", "Panes", …)
+  keytip: 12.0        # keytip badges (Alt)
+  menu: 12.0          # dropdown / popup menu items and tooltips
+  glyph: 12.0         # « overflow, ↗ dialog-launcher glyphs
+
+titlebar:
+  title: 12.0         # window title
+  block: 12.0         # contextual-tab block labels in the title bar
+
+statusbar: 12.0       # status bar text
+
+pane:
+  title: 12.0         # side pane: file name
+  body: 12.0          # side pane: preview text / secondary lines
