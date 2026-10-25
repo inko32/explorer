@@ -27,16 +27,43 @@ export PATH := $(TMPROOT)/cargo/bin:$(PATH)
 
 all: build
 
+# setup-env:
+# 	@ln -sf $(CARGO_TARGET_DIR) target
+# 	@mkdir -p $(CARGO_HOME) $(RUSTUP_HOME)
+# 	@if ! rustup toolchain list --no-self-update 2>/dev/null | grep -q "$(TOOLCHAIN)"; then \
+# 		echo "==> Installing Rust toolchain '$(TOOLCHAIN)' into $(TMPROOT)..."; \
+# 		rustup toolchain install $(TOOLCHAIN) --profile minimal --no-self-update; \
+# 	fi
+# 	@if ! rustup +$(TOOLCHAIN) target list --installed 2>/dev/null | grep -q "$(TARGET)"; then \
+# 		echo "==> Adding target '$(TARGET)' for $(TOOLCHAIN)..."; \
+# 		rustup +$(TOOLCHAIN) target add $(TARGET); \
+# 	fi
 setup-env:
 	@ln -sf $(CARGO_TARGET_DIR) target
 	@mkdir -p $(CARGO_HOME) $(RUSTUP_HOME)
 	@if ! rustup toolchain list --no-self-update 2>/dev/null | grep -q "$(TOOLCHAIN)"; then \
-		echo "==> Installing Rust toolchain '$(TOOLCHAIN)' into $(TMPROOT)..."; \
-		rustup toolchain install $(TOOLCHAIN) --profile minimal --no-self-update; \
+		echo "==> Installing Rust toolchain '$(TOOLCHAIN)'..."; \
+		n=1; while [ $$n -le 3 ]; do \
+			if rustup toolchain install $(TOOLCHAIN) --profile minimal --no-self-update; then \
+				break; \
+			fi; \
+			echo "==> Download failed, retrying ($$n/3)..."; \
+			n=$$((n + 1)); \
+			sleep 2; \
+		done; \
+		[ $$n -le 3 ] || exit 1; \
 	fi
 	@if ! rustup +$(TOOLCHAIN) target list --installed 2>/dev/null | grep -q "$(TARGET)"; then \
 		echo "==> Adding target '$(TARGET)' for $(TOOLCHAIN)..."; \
-		rustup +$(TOOLCHAIN) target add $(TARGET); \
+		n=1; while [ $$n -le 3 ]; do \
+			if rustup +$(TOOLCHAIN) target add $(TARGET); then \
+				break; \
+			fi; \
+			echo "==> Download failed, retrying ($$n/3)..."; \
+			n=$$((n + 1)); \
+			sleep 2; \
+		done; \
+		[ $$n -le 3 ] || exit 1; \
 	fi
 
 build: setup-env
