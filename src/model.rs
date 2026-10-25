@@ -60,12 +60,12 @@ pub enum Message {
     SelectAll,
     SelectNone,
     InvertSelection,
-    /// Set the view to a step index (SPEC/folder-spec.md §5 preset pick).
+    /// Set the view to a step index (SPEC/FOLDER-SPEC.MD §5 preset pick).
     SetView(u8),
     /// Ctrl+scroll over the file view: accumulated wheel delta in §7
     /// units (Lines converted to notch deltas, Pixels as-is).
     WheelZoom(f32),
-    /// Right-click a file-view item (SPEC/menu_spec.md).
+    /// Right-click a file-view item (SPEC/MENU_SPEC.MD).
     ContextSelect(usize),
     /// Right-click empty folder-view space.
     ContextBackground,
@@ -284,9 +284,9 @@ pub struct Explorer {
     pub frame_style: FrameStyle,
     pub clipboard: Option<(ClipMode, Vec<PathBuf>)>,
     /// Folder view configuration (`assets/folder-view.yaml`,
-    /// SPEC/folder-spec.md): step sizes, layout metrics, enabled mask.
+    /// SPEC/FOLDER-SPEC.MD): step sizes, layout metrics, enabled mask.
     pub view_cfg: crate::view_step::ViewCfg,
-    /// View step index (SPEC/folder-spec.md §3).
+    /// View step index (SPEC/FOLDER-SPEC.MD §3).
     pub view_index: u8,
     /// §6 enabled mask (resolved from folder-view.yaml at startup).
     #[allow(dead_code)] // the config is read via view_cfg.mask(); this
@@ -1009,7 +1009,7 @@ impl Explorer {
             .replace("{selection_count}", &self.selected.len().to_string())
     }
 
-    // ---- context menus (SPEC/menu_spec.md) ----
+    // ---- context menus (SPEC/MENU_SPEC.MD) ----
 
     /// Right-click a file-view item: Windows selects it first when it is
     /// not part of the selection, then opens the menu at the cursor.
@@ -1446,6 +1446,8 @@ impl Explorer {
                 iced::Task::none()
             }
             Message::Hover(h) => {
+                // TODO(perf): render_hz hover throttle (performance.yaml)
+                // was here — disabled, see the input_hz note
                 self.hovered = h;
                 iced::Task::none()
             }
@@ -1847,6 +1849,9 @@ impl Explorer {
             }
             Message::Event(e) => {
                 // track the cursor (context-menu placement)
+                // TODO(perf): assets/performance.yaml input_hz throttling
+                // lived here — disabled (the high CPU on fast mouse moves
+                // was not caused by this layer; re-evaluate with a profile)
                 if let iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) = &e {
                     self.cursor = *position;
                 }

@@ -1,0 +1,18 @@
+# Performance tuning. A user copy at ~/.config/explorer/performance.yaml
+# overrides this file (same override path as the other configs).
+#
+# TODO(perf): CURRENTLY DISABLED — the throttles that read this file are
+# commented out in model.rs (the high CPU on fast mouse moves was not
+# caused by this layer; re-enable only with a profile in hand).
+#
+# Rates in Hz; 0 = unlimited. A file manager does not need display-rate
+# pointer processing — these caps cut per-move work (state churn, tree
+# rebuilds, repaints) without affecting clicks, drags or typing.
+
+# Cap on mouse-move message processing. Splitter drags and rubber-band
+# selection always run live (they need the continuous stream).
+input_hz: 60.0
+
+# Cap on hover-driven highlight updates (the pointer-driven repaints
+# the app owns).
+render_hz: 30.0

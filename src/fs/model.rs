@@ -1,4 +1,4 @@
-//! Plain-data filesystem model. No egui, no GIO types leak past this file.
+//! Plain-data filesystem model. No GIO types leak past this file.
 
 use std::fmt;
 use std::path::PathBuf;

@@ -10,7 +10,7 @@
 # ContextAvailable=NotAvailable so they stay hidden (see mod.rs).
 #
 # Structure mirrors the real Windows 10 File Explorer ribbon
-# (SPEC/ribbon-list.txt). Custom explorer-only commands that have no Win10
+# (SPEC/RIBBON-LIST.TXT). Custom explorer-only commands that have no Win10
 # equivalent are kept on purpose: dark mode, custom border, Win8 frame,
 # open terminal, paste symbolic link, delete as sudo, filters, tree expander.
 
