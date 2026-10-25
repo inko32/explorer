@@ -6,9 +6,9 @@ description = "Windows 8 style file explorer for POSIX/Windows — iced spike"
 license = "MIT"
 
 [features]
-# Embed Segoe UI in the binary (assets/fonts/segoeui.ttf). Default: off
-# (system fonts only). `make build FEATURES=embed-segoe`.
-embed-segoe = []
+# Embed the UI font (assets/fonts/selawik.regular.ttf, SIL OFL).
+# Default: off (system fonts only). `make build FEATURES=embed-selawik`.
+embed-selawik = []
 
 [dependencies]
 iced = { git = "https://github.com/iced-rs/iced", rev = "cd04b74ca7073766f654535d6e72c452ef749d07", default-features = false, features = ["wgpu", "tiny-skia", "wayland", "crisp", "thread-pool", "svg", "image", "advanced"] } # wgpu primary + tiny-skia fallback (D17); pick at runtime via --render
@@ -24,5 +24,5 @@ fontdb = "0.23"  # system font probing for the fonts.yaml fallback list (already
 opt-level = 2
 debug = false
 strip = "symbols"
-codegen-units = 1
-lto = true
+# codegen-units = 1
+# lto = true

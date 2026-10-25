@@ -2,31 +2,29 @@
 //! family is the UI default (the fonts.yaml fallback list), and the
 //! font sizes (FontSizes, assets/fonts.yaml).
 //!
-//! Primary = the system Noto Sans family (per fonts.yaml); Segoe UI is
-//! NOT embedded by default — build with `make build FEATURES=embed-segoe`
-//! to embed it (assets/fonts/segoeui.ttf), then naming "Segoe UI" in the
-//! fallback list (e.g. as primary) uses it. Per-glyph fallback across
-//! system fonts is cosmic-text's job.
-//!
-//! Provenance: Segoe UI is Microsoft's artwork (like the extracted icon
-//! PNGs, D14) — fine for private use, must be replaced with a
-//! metric-compatible free face before any public release.
+//! Primary = Selawik (per fonts.yaml) — Microsoft's OPEN Segoe
+//! alternative (SIL OFL, metric-compatible), used when embedded or
+//! system-installed. Embedded only with `make build FEATURES=embed-selawik`
+//! (assets/fonts/selawik.regular.ttf) — off by default. "Segoe UI" stays
+//! in the fallback list for systems that have it installed. Per-glyph
+//! fallback (CJK, …) is cosmic-text's system-font job.
 
 use iced::Font;
 
-/// Family name of the Win8 reference font.
-#[cfg(feature = "embed-segoe")]
-pub const UI_FONT_NAME: &str = "Segoe UI";
+/// Family name of the embedded face (Selawik: the open Segoe-metric font).
+#[cfg(feature = "embed-selawik")]
+pub const UI_FONT_NAME: &str = "Selawik";
 
-/// Embedded Segoe UI face — only with the `embed-segoe` cargo feature
-/// (off by default, so the binary ships no Microsoft artwork).
-#[cfg(feature = "embed-segoe")]
-pub const SEGOE_BYTES: &[u8] = include_bytes!("../assets/fonts/segoeui.ttf");
+/// The embedded face — only with the `embed-selawik` cargo feature
+/// (off by default; Selawik is SIL OFL, free to ship).
+#[cfg(feature = "embed-selawik")]
+pub const EMBED_BYTES: &[u8] = include_bytes!("../assets/fonts/selawik.regular.ttf");
 
 /// Shipped fallback list (fonts.yaml `family:`): Segoe UI first — it
-/// resolves only when embedded (feature `embed-segoe`) or installed,
+/// resolves only when embedded (feature `embed-selawik`) or installed,
 /// otherwise it is skipped.
 pub const DEFAULT_FAMILIES: &[&str] = &[
+    "Selawik",
     "Segoe UI",
     "Noto Sans",
     "Noto Sans CJK SC",
@@ -53,7 +51,7 @@ pub fn resolve_primary(families: &[String]) -> Font {
         if name.eq_ignore_ascii_case("sans-serif") {
             break; // system fallback: let cosmic-text pick
         }
-        #[cfg(feature = "embed-segoe")]
+        #[cfg(feature = "embed-selawik")]
         if name == UI_FONT_NAME {
             return Font::new(UI_FONT_NAME);
         }

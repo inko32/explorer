@@ -8,12 +8,13 @@
 # ribbon.yaml metrics.tree_font_scale).
 
 # Fallback list: the first AVAILABLE family wins; cosmic-text falls
-# back per glyph through the system fonts. "Segoe UI" is used when it
-# is embedded (`make build FEATURES=embed-segoe`) or installed on the
-# system — otherwise it is silently skipped. To prefer Noto even when
-# Segoe is embedded, remove the first entry.
+# back per glyph through the system fonts. Selawik is the open (SIL OFL)
+# Segoe-metric face — used when embedded (`make build
+# FEATURES=embed-selawik`) or installed; "Segoe UI" covers Windows
+# systems. Both are silently skipped when unavailable.
 family:
-  - Segoe UI           # primary when embedded/installed, else ignored
+  - Selawik            # primary when embedded/installed, else ignored
+  - Segoe UI           # Windows systems
   - Noto Sans
   - Noto Sans CJK SC
   - Noto Sans CJK JP

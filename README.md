@@ -34,7 +34,7 @@ make run ARGS="--dpi=125"      # absolute content scale (percent of 96 dpi)
 make run ARGS="--size=900x560" # window size in logical px
 make run ARGS="/usr/bin"       # initial folder (default $HOME)
 
-make build FEATURES=embed-segoe   # embed Segoe UI (off by default)
+make build FEATURES=embed-selawik # embed the UI font (Selawik, SIL OFL; off by default)
 ```
 
 ## Configuration

@@ -83,10 +83,10 @@ fn main() -> iced::Result {
         Explorer::update,
         ui::view,
     );
-    // Segoe UI is embedded only with the `embed-segoe` cargo feature
-    // (off by default: the binary ships no Microsoft artwork)
-    #[cfg(feature = "embed-segoe")]
-    let app = app.fonts([fonts::SEGOE_BYTES]);
+    // Selawik is embedded only with the `embed-selawik` cargo feature
+    // (off by default; it is SIL OFL — free to ship when enabled)
+    #[cfg(feature = "embed-selawik")]
+    let app = app.fonts([fonts::EMBED_BYTES]);
     app.scale_factor(|state: &Explorer| state.dpi_multiplier())
     // fonts.yaml fallback list: first installed family wins
     .font(fonts::default_font())
