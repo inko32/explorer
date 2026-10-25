@@ -29,6 +29,9 @@ layout:
   pad_h: 6.0                  # right padding after the shortcut column
   font_size: 12.0
   corner_radius: 0.0
+  # render the menu as an independent overlay layer instead of in-window
+  # (experimental; may not appear until the next input event)
+  popup: false
 
 # Built-in command defaults (label / shortcut / icon). Items in menus:
 # may override them. Only commands listed here (or items with a `run:`

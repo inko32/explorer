@@ -344,7 +344,7 @@ const ALWAYS_DISABLED: &[u32] = &[
 // ---------------------------------------------------------------------------
 // context + `when` expressions (contextual tab visibility rules)
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub struct Context {
     pub is_drive: bool,
     pub inside_archive: bool,
@@ -446,7 +446,7 @@ mod tests {
 // ---------------------------------------------------------------------------
 // snapshot: everything the commanding layer needs from the Explorer model
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq)]
 pub struct Snapshot {
     pub ctx: Context,
     pub has_clipboard: bool,
@@ -851,6 +851,17 @@ impl Ribbon {
             None,
         );
         self.framework.flush_pending_invalidations();
+    }
+
+    /// Sync only when the snapshot actually changed since the last one
+    /// (update() runs per input event — mouse moves must not re-query
+    /// every command). Returns whether it changed.
+    pub fn sync_changed(&mut self, snap: &Snapshot) -> bool {
+        if self.shared.borrow().snap == *snap {
+            return false;
+        }
+        self.sync(snap.clone());
+        true
     }
 
     /// Win8-style contextual-tab auto-activation: when a context appears
