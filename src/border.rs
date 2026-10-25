@@ -2,6 +2,7 @@
 //! ring, title bar (window icon, QAT, contextual blocks, title), and the
 //! caption buttons (_ [] X) overlay.
 
+use iced::Widget as _;
 use iced::widget::{button, container, mouse_area, row, stack, text, Space};
 use iced::{Color, Element, Length};
 
@@ -71,7 +72,7 @@ pub(crate) fn resize_zone(
     if let Some(y) = ay {
         c = c.align_y(y);
     }
-    c.into()
+    c.boxed()
 }
 
 /// Window frame (exposed border):
@@ -182,7 +183,7 @@ pub(crate) fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'st
             snap: true,
         })
         .on_press(msg)
-        .into()
+        .boxed()
     };
     let ghost = Color::from_rgba(1.0, 1.0, 1.0, 0.18);
     container(
@@ -202,7 +203,7 @@ pub(crate) fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'st
     })
     .align_x(iced::Alignment::End)
     .align_y(iced::Alignment::Start)
-    .into()
+    .boxed()
 }
 
 /// Invisible resize ring around the window edges (custom border mode).
@@ -222,7 +223,7 @@ pub(crate) fn resize_frame(margin: f32) -> Element<'static, Message> {
         resize_zone(ResizeDir::Sw, c, c, None, Some(Alignment::End)),
         resize_zone(ResizeDir::Se, c, c, Some(Alignment::End), Some(Alignment::End)),
     ]
-    .into()
+    .boxed()
 }
 
 // ---------------- title bar ----------------
@@ -239,10 +240,10 @@ fn contextual_blocks(state: &Explorer) -> Element<'static, Message> {
     let (_, fr, _, fl) = frame_insets(state);
     if state.win_w - fl - fr < state.ribbon.sacrifice().0 * state.dpi_multiplier() {
         // ribbon sacrificed: no tabs, no blocks
-        return Space::new().width(Length::Fixed(0.0)).height(Length::Fixed(0.0)).into();
+        return Space::new().width(Length::Fixed(0.0)).height(Length::Fixed(0.0)).boxed();
     }
     let selected = state.ribbon.framework().view().selected_tab();
-    let mut r = row![].height(Length::Fixed(TITLEBAR_H));
+    let mut r: iced::widget::Row<Element<'_, Message>> = row![].height(Length::Fixed(TITLEBAR_H));
     let mut prev_end = 0.0f32;
     for b in state.ribbon.contextual_blocks() {
         // the block spans exactly its tab run on the strip below
@@ -250,7 +251,7 @@ fn contextual_blocks(state: &Explorer) -> Element<'static, Message> {
         let bw = b.w;
         let gap = (bx - prev_end).max(0.0);
         if gap > 0.0 {
-            r = r.push(Space::new().width(Length::Fixed(gap)));
+            r = r.push(Space::new().width(Length::Fixed(gap)).boxed());
         }
         prev_end = bx + bw;
         let accent = b.color;
@@ -283,10 +284,10 @@ fn contextual_blocks(state: &Explorer) -> Element<'static, Message> {
             .height(Length::Fixed(TITLEBAR_H))
             .align_y(iced::Alignment::End);
         r = r.push(
-            mouse_area(block).on_press(Message::BlockPress(b.first_tab)),
+            mouse_area(block).on_press(Message::BlockPress(b.first_tab)).boxed(),
         );
     }
-    r.into()
+    r.boxed()
 }
 
 /// Title-bar QAT ("show above the ribbon"): icon buttons right of the
@@ -304,8 +305,8 @@ fn titlebar_qat(state: &Explorer, skin: skin::Skin) -> Element<'static, Message>
         .width(Length::Fixed(6.0))
         .center_x(Length::Fixed(6.0))
     };
-    let mut qat = row![].spacing(2).align_y(iced::Alignment::Center);
-    qat = qat.push(vline());
+    let mut qat: iced::widget::Row<Element<'static, Message>> = row![].spacing(2).align_y(iced::Alignment::Center);
+    qat = qat.push(vline().boxed());
     for (cmd, icon_name, _enabled) in state.ribbon.qat_buttons() {
         qat = qat.push(
             mouse_area(
@@ -320,7 +321,8 @@ fn titlebar_qat(state: &Explorer, skin: skin::Skin) -> Element<'static, Message>
                 verb: crate::ribbon::enums::ExecutionVerb::Execute,
                 key: None,
                 value: None,
-            })),
+            }))
+            .boxed(),
         );
     }
     qat = qat.push(
@@ -331,10 +333,11 @@ fn titlebar_qat(state: &Explorer, skin: skin::Skin) -> Element<'static, Message>
                 .center_x(Length::Fixed(14.0))
                 .center_y(Length::Fixed(22.0)),
         )
-        .on_press(Message::ToggleQatDock),
+        .on_press(Message::ToggleQatDock)
+        .boxed(),
     );
-    qat = qat.push(vline());
-    container(qat).height(Length::Fill).center_y(Length::Fill).into()
+    qat = qat.push(vline().boxed());
+    container(qat).height(Length::Fill).center_y(Length::Fill).boxed()
 }
 
 pub(crate) fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
@@ -381,7 +384,7 @@ pub(crate) fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Messag
     )
     .on_press(Message::TitlebarPress)
     .on_double_click(Message::TitlebarDoubleClick)
-    .into();
+    .boxed();
     let mut head = row![
         // the window icon follows the current folder (16x16)
         container(icon(state.location_icon(), 16.0, skin))
@@ -408,5 +411,5 @@ pub(crate) fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Messag
     .width(Length::Fill)
     .height(Length::Fixed(TITLEBAR_H))
     .style(bg(skin.accent));
-    stack![base, dbg("ctx_blocks", contextual_blocks(state))].into()
+    stack![base, dbg("ctx_blocks", contextual_blocks(state))].boxed()
 }

@@ -80,6 +80,7 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
+use iced::Widget as _;
 use iced::Element;
 
 use crate::model::{Explorer, Message, SortBy};
@@ -1113,7 +1114,7 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
         .theme(theme(state.dark))
         .fonts(state.fonts.clone())
         .on_event(Message::Ribbon)
-        .into()
+        .boxed()
 }
 
 #[cfg(test)]

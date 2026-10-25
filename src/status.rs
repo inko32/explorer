@@ -1,5 +1,6 @@
 //! Status bar: item counts left, view-mode selector right.
 
+use iced::Widget as _;
 use iced::widget::{button, container, row, text, Space};
 use iced::{Color, Element, Length};
 
@@ -64,6 +65,6 @@ pub(crate) fn statusbar(state: &Explorer, skin: skin::Skin) -> Element<'_, Messa
     .width(Length::Fill)
     .height(Length::Fixed(24.0))
     .style(bg(skin.status_bg))
-    .into()
+    .boxed()
 }
 

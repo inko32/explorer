@@ -3,8 +3,9 @@
 //! 2 Details, 3 List, 4..=14 small icons (name right), 15..=47 icon on
 //! top (name below).
 
+use iced::Widget as _;
 use iced::advanced::widget::{Operation, Tree, Widget};
-use iced::advanced::{Clipboard, Layout, Shell, layout, overlay, renderer};
+use iced::advanced::{Layout, Shell, layout, overlay, renderer};
 use iced::widget::{column, container, mouse_area, row, scrollable, stack, text, text_input, Space};
 use iced::{Color, Element, Length, Rectangle, Size, Vector, mouse};
 
@@ -22,6 +23,8 @@ pub(crate) fn file_scrollable_id() -> iced::widget::Id {
 /// scrolling (the event is captured before the scrollable can see it).
 /// Transparent wrapper: state/layout/draw all delegate to the content
 /// (same pattern as iced's `Container`).
+impl iced::advanced::widget::Meta for CtrlZoom<'_> {}
+
 struct CtrlZoom<'a> {
     content: Element<'a, Message>,
     ctrl: bool,
@@ -31,23 +34,19 @@ struct CtrlZoom<'a> {
 
 impl<'a> Widget<Message, iced::Theme, iced::Renderer> for CtrlZoom<'a> {
     fn size(&self) -> Size<Length> {
-        self.content.as_widget().size()
+        self.content.size()
     }
 
     fn tag(&self) -> iced::advanced::widget::tree::Tag {
-        self.content.as_widget().tag()
+        self.content.tag()
     }
 
     fn state(&self) -> iced::advanced::widget::tree::State {
-        self.content.as_widget().state()
+        self.content.state()
     }
 
-    fn children(&self) -> Vec<Tree> {
-        self.content.as_widget().children()
-    }
-
-    fn diff(&self, tree: &mut Tree) {
-        self.content.as_widget().diff(tree);
+    fn diff(&mut self, tree: &mut Tree) {
+        self.content.diff(tree);
     }
 
     fn layout(
@@ -55,8 +54,8 @@ impl<'a> Widget<Message, iced::Theme, iced::Renderer> for CtrlZoom<'a> {
         tree: &mut Tree,
         renderer: &iced::Renderer,
         limits: &layout::Limits,
-    ) -> layout::Node {
-        self.content.as_widget_mut().layout(tree, renderer, limits)
+    ) {
+        self.content.layout(tree, renderer, limits)
     }
 
     fn draw(
@@ -65,35 +64,35 @@ impl<'a> Widget<Message, iced::Theme, iced::Renderer> for CtrlZoom<'a> {
         renderer: &mut iced::Renderer,
         theme: &iced::Theme,
         style: &renderer::Style,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
         self.content
-            .as_widget()
+            
             .draw(tree, renderer, theme, style, layout, cursor, viewport);
     }
 
     fn operate(
         &mut self,
         tree: &mut Tree,
-        layout: Layout<'_>,
+        layout: Layout,
+        viewport: &Rectangle,
         renderer: &iced::Renderer,
         operation: &mut dyn Operation,
     ) {
         self.content
-            .as_widget_mut()
-            .operate(tree, layout, renderer, operation);
+            
+            .operate(tree, layout, viewport, renderer, operation);
     }
 
     fn update(
         &mut self,
         tree: &mut Tree,
         event: &iced::Event,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         renderer: &iced::Renderer,
-        clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
@@ -113,35 +112,36 @@ impl<'a> Widget<Message, iced::Theme, iced::Renderer> for CtrlZoom<'a> {
                 return;
             }
         }
-        self.content.as_widget_mut().update(
-            tree, event, layout, cursor, renderer, clipboard, shell, viewport,
+        self.content.update(
+            tree, event, layout, cursor, renderer, shell, viewport,
         );
     }
 
     fn mouse_interaction(
         &self,
         tree: &Tree,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         viewport: &Rectangle,
         renderer: &iced::Renderer,
     ) -> mouse::Interaction {
         self.content
-            .as_widget()
+            
             .mouse_interaction(tree, layout, cursor, viewport, renderer)
     }
 
     fn overlay<'b>(
         &'b mut self,
         tree: &'b mut Tree,
-        layout: Layout<'b>,
+        layout: Layout,
         renderer: &iced::Renderer,
         viewport: &Rectangle,
         translation: Vector,
-    ) -> Option<overlay::Element<'b, Message, iced::Theme, iced::Renderer>> {
+        window: Size,
+    ) -> Vec<overlay::Element<'b, Message, iced::Theme, iced::Renderer>> {
         self.content
-            .as_widget_mut()
-            .overlay(tree, layout, renderer, viewport, translation)
+            
+            .overlay(tree, layout, renderer, viewport, translation, window)
     }
 }
 
@@ -149,6 +149,8 @@ impl<'a> Widget<Message, iced::Theme, iced::Renderer> for CtrlZoom<'a> {
 /// (empty space) starts the marquee; moves/ends while dragging publish
 /// content coordinates (local + scroll). Items capture their own
 /// presses first, so dragging from an item never starts a marquee.
+impl iced::advanced::widget::Meta for MarqueeZone<'_> {}
+
 struct MarqueeZone<'a> {
     content: Element<'a, Message>,
     scroll_x: f32,
@@ -162,7 +164,7 @@ struct MarqueeZoneState {
 
 impl<'a> Widget<Message, iced::Theme, iced::Renderer> for MarqueeZone<'a> {
     fn size(&self) -> Size<Length> {
-        self.content.as_widget().size()
+        self.content.size()
     }
 
     fn tag(&self) -> iced::advanced::widget::tree::Tag {
@@ -173,12 +175,8 @@ impl<'a> Widget<Message, iced::Theme, iced::Renderer> for MarqueeZone<'a> {
         iced::advanced::widget::tree::State::new(MarqueeZoneState::default())
     }
 
-    fn children(&self) -> Vec<Tree> {
-        vec![Tree::new(&self.content)]
-    }
-
-    fn diff(&self, tree: &mut Tree) {
-        tree.diff_children(std::slice::from_ref(&self.content));
+    fn diff(&mut self, tree: &mut Tree) {
+        tree.diff_children(std::slice::from_mut(&mut self.content));
     }
 
     fn layout(
@@ -186,10 +184,11 @@ impl<'a> Widget<Message, iced::Theme, iced::Renderer> for MarqueeZone<'a> {
         tree: &mut Tree,
         renderer: &iced::Renderer,
         limits: &layout::Limits,
-    ) -> layout::Node {
+    ) {
         self.content
-            .as_widget_mut()
-            .layout(&mut tree.children[0], renderer, limits)
+            
+            .layout(&mut tree.children[0], renderer, limits);
+        tree.size = tree.children[0].size;
     }
 
     fn draw(
@@ -198,48 +197,47 @@ impl<'a> Widget<Message, iced::Theme, iced::Renderer> for MarqueeZone<'a> {
         renderer: &mut iced::Renderer,
         theme: &iced::Theme,
         style: &renderer::Style,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
         self.content
-            .as_widget()
+            
             .draw(&tree.children[0], renderer, theme, style, layout, cursor, viewport);
     }
 
     fn operate(
         &mut self,
         tree: &mut Tree,
-        layout: Layout<'_>,
+        layout: Layout,
+        viewport: &Rectangle,
         renderer: &iced::Renderer,
         operation: &mut dyn Operation,
     ) {
         self.content
-            .as_widget_mut()
-            .operate(&mut tree.children[0], layout, renderer, operation);
+            
+            .operate(&mut tree.children[0], layout, viewport, renderer, operation);
     }
 
     fn update(
         &mut self,
         tree: &mut Tree,
         event: &iced::Event,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         renderer: &iced::Renderer,
-        clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
         let zone = tree.state.downcast_mut::<MarqueeZoneState>();
         match event {
             iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-                self.content.as_widget_mut().update(
+                self.content.update(
                     &mut tree.children[0],
                     event,
                     layout,
                     cursor,
                     renderer,
-                    clipboard,
                     shell,
                     viewport,
                 );
@@ -274,13 +272,12 @@ impl<'a> Widget<Message, iced::Theme, iced::Renderer> for MarqueeZone<'a> {
                 shell.capture_event();
             }
             _ => {
-                self.content.as_widget_mut().update(
+                self.content.update(
                     &mut tree.children[0],
                     event,
                     layout,
                     cursor,
                     renderer,
-                    clipboard,
                     shell,
                     viewport,
                 );
@@ -291,27 +288,28 @@ impl<'a> Widget<Message, iced::Theme, iced::Renderer> for MarqueeZone<'a> {
     fn mouse_interaction(
         &self,
         tree: &Tree,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         viewport: &Rectangle,
         renderer: &iced::Renderer,
     ) -> mouse::Interaction {
         self.content
-            .as_widget()
+            
             .mouse_interaction(&tree.children[0], layout, cursor, viewport, renderer)
     }
 
     fn overlay<'b>(
         &'b mut self,
         tree: &'b mut Tree,
-        layout: Layout<'b>,
+        layout: Layout,
         renderer: &iced::Renderer,
         viewport: &Rectangle,
         translation: Vector,
-    ) -> Option<overlay::Element<'b, Message, iced::Theme, iced::Renderer>> {
+        window: Size,
+    ) -> Vec<overlay::Element<'b, Message, iced::Theme, iced::Renderer>> {
         self.content
-            .as_widget_mut()
-            .overlay(&mut tree.children[0], layout, renderer, viewport, translation)
+            
+            .overlay(&mut tree.children[0], layout, renderer, viewport, translation, window)
     }
 }
 
@@ -335,14 +333,14 @@ fn marquee_rect(x: f32, y: f32, w: f32, h: f32, skin: skin::Skin) -> Element<'st
             ),
         ],
     ]
-    .into()
+    .boxed()
 }
 
 /// Selection/hover chrome shared by the per-item renderers (§8.4:
 /// rounded rectangle, radius 4).
 fn item_chrome<'a>(
     i: usize,
-    content: impl Into<Element<'a, Message>>,
+    content: impl iced::Widget<Message, iced::Theme, iced::Renderer> + 'a,
     state: &'a Explorer,
     skin: skin::Skin,
 ) -> Element<'a, Message> {
@@ -356,7 +354,7 @@ fn item_chrome<'a>(
         Color::TRANSPARENT
     };
     let border_color = if selected { skin.sel_border } else { Color::TRANSPARENT };
-    let styled = container(content.into()).style(move |_t: &iced::Theme| container::Style {
+    let styled = container(content).style(move |_t: &iced::Theme| container::Style {
         background: Some(bgc.into()),
         border: iced::Border {
             color: border_color,
@@ -371,7 +369,7 @@ fn item_chrome<'a>(
         .on_right_press(Message::ContextSelect(i))
         .on_enter(Message::Hover(Some(i)))
         .on_exit(Message::HoverExit(i))
-        .into()
+        .boxed()
 }
 
 /// Vertical spacer reserving scroll height for virtualized rows.
@@ -390,7 +388,7 @@ fn row_window(total: usize, row_h: f32, scroll_y: f32, viewport_h: f32) -> (usiz
 /// The file-list scrollable (vertical; List uses a horizontal one). The
 /// built-in scrollbar is hidden — the Windows-style strip in
 /// `scrollbar.rs` sits beside the scrollable instead.
-fn file_scrollable(content: iced::widget::Column<'_, Message>) -> scrollable::Scrollable<'_, Message> {
+fn file_scrollable(content: iced::widget::Column<iced::Element<'_, Message>>) -> iced::Element<'_, Message> {
     scrollable(content)
         .id(file_scrollable_id())
         // Fill so the empty area beside a narrower grid still scrolls
@@ -401,10 +399,11 @@ fn file_scrollable(content: iced::widget::Column<'_, Message>) -> scrollable::Sc
             scrollable::Scrollbar::hidden(),
         ))
         .on_scroll(|vp| Message::Scrolled {
-            x: vp.absolute_offset().x,
-            y: vp.absolute_offset().y,
-            height: vp.bounds().height,
+            x: vp.viewport.absolute_offset().x,
+            y: vp.viewport.absolute_offset().y,
+            height: vp.viewport.bounds.height,
         })
+        .boxed()
 }
 
 /// Grid view shared by the Tiles / SmallIcon / IconTop families:
@@ -424,7 +423,7 @@ fn grid_view<'a>(
     let (first, last) = row_window(total_rows, pitch, state.scroll_y, state.viewport_h);
     let mut rows = column![].spacing(0);
     if first > 0 {
-        rows = rows.push(vspacer(first as f32 * pitch));
+        rows = rows.push(vspacer(first as f32 * pitch).boxed());
     }
     for r in first..last {
         let mut line = row![].spacing(gap);
@@ -433,15 +432,15 @@ fn grid_view<'a>(
             if let Some(e) = state.entries.get(idx) {
                 line = line.push(cell(idx, e));
             } else {
-                line = line.push(Space::new().width(Length::Fixed(cell_w)));
+                line = line.push(Space::new().width(Length::Fixed(cell_w)).boxed());
             }
         }
-        rows = rows.push(container(line).height(Length::Fixed(pitch)));
+        rows = rows.push(container(line).height(Length::Fixed(pitch)).boxed());
     }
     if last < total_rows {
-        rows = rows.push(vspacer((total_rows - last) as f32 * pitch));
+        rows = rows.push(vspacer((total_rows - last) as f32 * pitch).boxed());
     }
-    file_scrollable(rows).into()
+    file_scrollable(rows).boxed()
 }
 
 pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Element<'_, Message> {
@@ -494,7 +493,7 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
         )
         .width(Length::Fill)
         .height(Length::Fill)
-        .into()
+        .boxed()
     } else {
         match family {
             vs::Family::Content => content_view(state, skin, inner_w),
@@ -509,7 +508,7 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
                     details_view(state, skin),
                     container(details_header(state, skin)).width(Length::Fill),
                 ]
-                .into()
+                .boxed()
             }
             vs::Family::List => list_view(state, skin, inner_w),
             vs::Family::SmallIcon => {
@@ -535,7 +534,7 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
             body,
             marquee_rect(x0 - state.scroll_x, y0 - state.scroll_y, x1 - x0, y1 - y0, skin),
         ]
-        .into()
+        .boxed()
     } else {
         body
     };
@@ -551,16 +550,16 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
     )
     .on_show(|size| Message::FileAreaResized(size.width, size.height))
     .on_resize(|size| Message::FileAreaResized(size.width, size.height))
-    .into();
+    .boxed();
     // right-click on empty space (items capture their own first) opens
     // the background menu (SPEC/menu_spec.md)
     let area = crate::menu::on_right_free(area, Message::ContextBackground);
     // a left press on empty space starts the rubber-band selection
-    let area: Element<Message> = Element::new(MarqueeZone {
+    let area: Element<Message> = MarqueeZone {
         content: area,
         scroll_x: state.scroll_x,
         scroll_y: state.scroll_y,
-    });
+    }.boxed();
     // Windows-style scrollbar strip (arrow buttons at both ends); 0px
     // when the content fits, keeping the pane edge right-aligned
     let pane: Element<Message> = if family == vs::Family::List && !state.loading {
@@ -570,7 +569,7 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
                 state.scroll_x, inner_w, content, line, skin, Message::FileScrollTo,
             ));
         }
-        c.into()
+        c.boxed()
     } else {
         let mut r = row![area];
         if need_strip {
@@ -578,7 +577,7 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
                 state.scroll_y, state.viewport_h, content, line, skin, Message::FileScrollTo,
             ));
         }
-        r.into()
+        r.boxed()
     };
     // wheel speed boost (folder-view.yaml input.scroll_speed): captures
     // plain wheel events; Ctrl+wheel zoom is handled by CtrlZoom below
@@ -598,12 +597,12 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
         .width(Length::Fill)
         .height(Length::Fill)
         .style(bg(skin.window_bg))
-        .into();
-    Element::new(CtrlZoom {
+        .boxed();
+    CtrlZoom {
         content: view,
         ctrl: state.ctrl_held,
         notch_delta: cfg.input.notch_delta,
-    })
+    }.boxed()
 }
 
 /// Details column header (Name / Date modified / Type / Size). The
@@ -635,11 +634,12 @@ fn details_header(state: &Explorer, skin: skin::Skin) -> Element<'static, Messag
         )
         .interaction(iced::mouse::Interaction::ResizingHorizontally)
         .on_press(Message::ColumnSplitBegin(col));
-        cols = cols.push(handle);
+        cols = cols.push(handle.boxed());
         cols = cols.push(
             container(text(label).size(prop).color(skin.subtle))
                 .width(Length::Fixed(w - 4.0))
-                .padding([4.0, 8.0]),
+                .padding([4.0, 8.0])
+                .boxed(),
         );
     }
     container(cols.height(Length::Fixed(d.header_h)).align_y(iced::Alignment::Center))
@@ -653,7 +653,7 @@ fn details_header(state: &Explorer, skin: skin::Skin) -> Element<'static, Messag
             },
             ..Default::default()
         })
-        .into()
+        .boxed()
 }
 
 // ---------------------------------------------------------------------------
@@ -665,7 +665,7 @@ fn content_view(state: &Explorer, skin: skin::Skin, width: f32) -> Element<'_, M
     let (first, last) = row_window(total, row_h, state.scroll_y, state.viewport_h);
     let mut rows = column![].spacing(0);
     if first > 0 {
-        rows = rows.push(vspacer(first as f32 * row_h));
+        rows = rows.push(vspacer(first as f32 * row_h).boxed());
     }
     for i in first..last {
         if let Some(e) = state.entries.get(i) {
@@ -673,9 +673,9 @@ fn content_view(state: &Explorer, skin: skin::Skin, width: f32) -> Element<'_, M
         }
     }
     if last < total {
-        rows = rows.push(vspacer((total - last) as f32 * row_h));
+        rows = rows.push(vspacer((total - last) as f32 * row_h).boxed());
     }
-    file_scrollable(rows).into()
+    file_scrollable(rows).boxed()
 }
 
 /// §8.1 Content row: 32px icon, name (semibold) + 2 property lines,
@@ -787,7 +787,7 @@ fn details_view(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     );
     let mut rows = column![vspacer(d.header_h)].spacing(0);
     if first > 0 {
-        rows = rows.push(vspacer(first as f32 * row_h));
+        rows = rows.push(vspacer(first as f32 * row_h).boxed());
     }
     for i in first..last {
         if let Some(e) = state.entries.get(i) {
@@ -795,9 +795,9 @@ fn details_view(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         }
     }
     if last < total {
-        rows = rows.push(vspacer((total - last) as f32 * row_h));
+        rows = rows.push(vspacer((total - last) as f32 * row_h).boxed());
     }
-    file_scrollable(rows).into()
+    file_scrollable(rows).boxed()
 }
 
 fn file_row<'a>(i: usize, e: &Entry, state: &'a Explorer, skin: skin::Skin) -> Element<'a, Message> {
@@ -806,15 +806,17 @@ fn file_row<'a>(i: usize, e: &Entry, state: &'a Explorer, skin: skin::Skin) -> E
     let row_h = state.view_cfg.details_row_h(state.details_compact);
     let [date_w, type_w, size_w] = state.details_cols;
     let name_cell: Element<Message> = if state.renaming.as_ref().map(|(ri, _)| *ri) == Some(i) {
-        let buf = state.renaming.as_ref().map(|(_, b)| b.clone()).unwrap_or_default();
-        text_input("Name", &buf)
+        // text_input borrows the value — borrow the state's buffer ('a);
+        // the submit payload owns a clone
+        let buf = &state.renaming.as_ref().expect("matched above").1;
+        text_input("Name", buf)
             .on_input(Message::RenameInput)
-            .on_submit(Message::CommitRename(buf))
+            .on_submit(Message::CommitRename(buf.clone()))
             .size(font)
             .padding(2)
-            .into()
+            .boxed()
     } else {
-        text(e.name.clone()).size(font).color(skin.text).into()
+        text(e.name.clone()).size(font).color(skin.text).boxed()
     };
 
     let content = row![
@@ -858,9 +860,9 @@ fn list_view(state: &Explorer, skin: skin::Skin, width: f32) -> Element<'_, Mess
     let view_cols = (width / col_w).ceil() as usize + 3;
     let first = ((state.scroll_x / col_w).floor() as usize).saturating_sub(1);
     let last = (first + view_cols).min(total_cols);
-    let mut strip = row![].spacing(0);
+    let mut strip: iced::widget::Row<Element<'_, Message>> = row![].spacing(0);
     if first > 0 {
-        strip = strip.push(Space::new().width(Length::Fixed(first as f32 * col_w)));
+        strip = strip.push(Space::new().width(Length::Fixed(first as f32 * col_w)).boxed());
     }
     for c in first..last {
         let mut col = column![].spacing(0);
@@ -870,12 +872,12 @@ fn list_view(state: &Explorer, skin: skin::Skin, width: f32) -> Element<'_, Mess
                 col = col.push(list_cell(idx, e, state, skin, col_w));
             }
         }
-        strip = strip.push(container(col).width(Length::Fixed(col_w)));
+        strip = strip.push(container(col).width(Length::Fixed(col_w)).boxed());
     }
     if last < total_cols {
         strip = strip.push(Space::new().width(Length::Fixed(
             (total_cols - last) as f32 * col_w,
-        )));
+        )).boxed());
     }
     scrollable(strip)
         .id(file_scrollable_id())
@@ -885,11 +887,11 @@ fn list_view(state: &Explorer, skin: skin::Skin, width: f32) -> Element<'_, Mess
             scrollable::Scrollbar::hidden(),
         ))
         .on_scroll(|vp| Message::Scrolled {
-            x: vp.absolute_offset().x,
-            y: vp.absolute_offset().y,
-            height: vp.bounds().height,
+            x: vp.viewport.absolute_offset().x,
+            y: vp.viewport.absolute_offset().y,
+            height: vp.viewport.bounds.height,
         })
-        .into()
+        .boxed()
 }
 
 /// §8.1 List cell: icon + name, 1 line, truncated with ellipsis.

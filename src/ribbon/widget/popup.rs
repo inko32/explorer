@@ -1299,21 +1299,20 @@ pub struct RibbonOverlay<'a, Message, Th, Renderer> {
     pub origin: Point,
     /// Width of the clicked anchor element (0 = point-like anchor).
     pub width_hint: f32,
+    /// The overlay's own layout, computed at construction from the
+    /// window size (the new Overlay trait has no layout phase).
+    pub layout: iced::advanced::Layout,
+    pub window: Size,
     pub mapper: Option<&'a dyn Fn(RibbonEvent) -> Message>,
     pub _phantom: std::marker::PhantomData<(Th, Renderer)>,
 }
 
-impl<'a, Message, Th, Renderer> overlay::Overlay<Message, Th, Renderer>
-    for RibbonOverlay<'a, Message, Th, Renderer>
-where
-    Renderer: iced::advanced::Renderer
-        + iced::advanced::text::Renderer
-        + iced::advanced::svg::Renderer
-        + iced::advanced::image::Renderer<Handle = iced::widget::image::Handle>,
-    Message: Clone,
-{
-    fn layout(&mut self, _renderer: &Renderer, bounds: Size) -> iced::advanced::layout::Node {
+impl<'a, Message, Th, Renderer> RibbonOverlay<'a, Message, Th, Renderer> {
+    /// Compute the flipped position and store the layout (the window
+    /// size comes from Widget::overlay's `window` parameter).
+    pub fn position(&mut self) {
         let size = self.scene.size;
+        let bounds = self.window;
         let mut pos = self.origin;
         if pos.x + size.width > bounds.width - 2.0 {
             // out of the window on the right: align the menu's right
@@ -1335,22 +1334,31 @@ where
             }
         }
         self.origin = pos;
-        iced::advanced::layout::Node::new(size).move_to(pos)
+        self.layout = iced::advanced::Layout::new(size).move_to(pos);
     }
+}
 
+impl<'a, Message, Th, Renderer> overlay::Overlay<Message, Th, Renderer>
+    for RibbonOverlay<'a, Message, Th, Renderer>
+where
+    Renderer: iced::advanced::Renderer
+        + iced::advanced::text::Renderer
+        + iced::advanced::svg::Renderer
+        + iced::advanced::image::Renderer<Handle = iced::widget::image::Handle>,
+    Message: Clone,
+{
     fn draw(
         &self,
         renderer: &mut Renderer,
         _theme: &Th,
         _style: &renderer::Style,
-        layout: iced::advanced::Layout<'_>,
         _cursor: mouse::Cursor,
     ) {
         super::draw_scene(
             &self.scene,
             renderer,
-            layout.position(),
-            &layout.bounds(),
+            self.layout.position(),
+            &self.layout.bounds(),
             self.theme,
         );
     }
@@ -1358,12 +1366,11 @@ where
     fn update(
         &mut self,
         event: &iced::Event,
-        layout: iced::advanced::Layout<'_>,
         cursor: mouse::Cursor,
         _renderer: &Renderer,
-        _clipboard: &mut dyn iced::advanced::Clipboard,
         shell: &mut Shell<'_, Message>,
     ) {
+        let layout = self.layout;
         if self.tooltip {
             return;
         }
@@ -1455,7 +1462,6 @@ where
 
     fn mouse_interaction(
         &self,
-        _layout: iced::advanced::Layout<'_>,
         _cursor: mouse::Cursor,
         _renderer: &Renderer,
     ) -> mouse::Interaction {

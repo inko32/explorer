@@ -15,6 +15,7 @@
 use iced::Font;
 
 /// Family name of the Win8 reference font.
+#[cfg(feature = "embed-segoe")]
 pub const UI_FONT_NAME: &str = "Segoe UI";
 
 /// Embedded Segoe UI face — only with the `embed-segoe` cargo feature
@@ -54,11 +55,12 @@ pub fn resolve_primary(families: &[String]) -> Font {
         }
         #[cfg(feature = "embed-segoe")]
         if name == UI_FONT_NAME {
-            return Font::with_name(UI_FONT_NAME);
+            return Font::new(UI_FONT_NAME);
         }
+
         if installed(name) {
             // Font::with_name needs 'static: startup-only, leaked once
-            return Font::with_name(name.clone().leak());
+            return Font::new(name.clone().leak());
         }
     }
     Font::DEFAULT // SansSerif
@@ -67,6 +69,13 @@ pub fn resolve_primary(families: &[String]) -> Font {
 /// The UI default font (all widgets that don't override it).
 pub fn default_font() -> Font {
     resolve_primary(&FontSizes::load().family)
+}
+
+/// The resolved primary family, probed once (the ribbon's text
+/// measurement calls this per glyph string — keep it cached).
+pub fn primary() -> Font {
+    static PRIMARY: std::sync::OnceLock<Font> = std::sync::OnceLock::new();
+    *PRIMARY.get_or_init(default_font)
 }
 
 // ---------------------------------------------------------------------------

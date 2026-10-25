@@ -697,9 +697,10 @@ impl Explorer {
             self.scroll_x = 0.0;
             (Some(0.0), Some(offset))
         };
-        iced::widget::operation::scroll_to(
+        iced::widget::operation::scrollable::scroll_to(
             crate::folder::file_scrollable_id(),
-            iced::widget::operation::AbsoluteOffset { x, y },
+            iced::widget::operation::scrollable::AbsoluteOffset { x, y },
+        iced::widget::operation::Animation::Instant,
         )
     }
 
@@ -804,9 +805,10 @@ impl Explorer {
             return iced::Task::none(); // already visible
         };
         let y = (target.clamp(0.0, max_scroll) / max_scroll.max(f32::EPSILON)).clamp(0.0, 1.0);
-        iced::widget::operation::snap_to(
+        iced::widget::operation::scrollable::snap_to(
             crate::nav_pane::nav_scrollable_id(),
-            iced::widget::operation::RelativeOffset { x: None, y: Some(y) },
+            iced::widget::operation::scrollable::RelativeOffset { x: None, y: Some(y) },
+        iced::widget::operation::Animation::Instant,
         )
     }
 
@@ -1640,20 +1642,22 @@ impl Explorer {
                     self.scroll_y = target.max(0.0);
                     (None, Some(self.scroll_y))
                 };
-                iced::widget::operation::scroll_to(
+                iced::widget::operation::scrollable::scroll_to(
                     crate::folder::file_scrollable_id(),
-                    iced::widget::operation::AbsoluteOffset { x, y },
-                )
+                    iced::widget::operation::scrollable::AbsoluteOffset { x, y },
+                iced::widget::operation::Animation::Instant,
+        )
             }
             Message::NavScrollTo(target) => {
                 self.nav.scroll_y = target.max(0.0);
-                iced::widget::operation::scroll_to(
+                iced::widget::operation::scrollable::scroll_to(
                     crate::nav_pane::nav_scrollable_id(),
-                    iced::widget::operation::AbsoluteOffset {
+                    iced::widget::operation::scrollable::AbsoluteOffset {
                         x: None,
                         y: Some(self.nav.scroll_y),
                     },
-                )
+                iced::widget::operation::Animation::Instant,
+        )
             }
             Message::ToggleSidePane(m) => {
                 self.pane = if self.pane == m {

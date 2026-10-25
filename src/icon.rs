@@ -12,6 +12,7 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
+use iced::Widget as _;
 use iced::widget::{image, svg, Space};
 use iced::{Element, Length};
 
@@ -393,14 +394,14 @@ pub fn view<Message: 'static>(name: &str, size: f32, skin: &Skin) -> Element<'st
         return image(handle)
             .width(Length::Fixed(size))
             .height(Length::Fixed(size))
-            .into();
+            .boxed();
     }
     if let Some(def) = icons.defs.get(name) {
         if def.svg.is_some() || def.file.is_none() {
             return svg(crate::icons::builtin_svg(name, skin))
                 .width(Length::Fixed(size))
                 .height(Length::Fixed(size))
-                .into();
+                .boxed();
         }
     } else {
         // not in the registry — builtin SVGs may still serve it
@@ -408,10 +409,10 @@ pub fn view<Message: 'static>(name: &str, size: f32, skin: &Skin) -> Element<'st
         return svg(crate::icons::builtin_svg(name, skin))
             .width(Length::Fixed(size))
             .height(Length::Fixed(size))
-            .into();
+            .boxed();
     }
     // unknown name: blank
-    Space::new().width(Length::Fixed(size)).height(Length::Fixed(size)).into()
+    Space::new().width(Length::Fixed(size)).height(Length::Fixed(size)).boxed()
 }
 
 /// Icon for a filesystem entry — extension-based names today; thumbnails

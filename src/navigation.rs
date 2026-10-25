@@ -3,6 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
+use iced::Widget as _;
 use iced::widget::{button, container, mouse_area, row, text, Space};
 use iced::{Element, Length};
 
@@ -40,9 +41,9 @@ fn nav_circle(icon_name: &'static str, enabled: bool, msg: Message, skin: skin::
             snap: true,
         });
     if enabled {
-        btn.on_press(msg).into()
+        btn.on_press(msg).boxed()
     } else {
-        btn.into()
+        btn.boxed()
     }
 }
 
@@ -92,7 +93,7 @@ pub(crate) fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Mes
                 background: None,
                 ..Default::default()
             })
-            .into();
+            .boxed();
         let cell_el: Element<Message> = if is_last {
             cell
         } else {
@@ -110,7 +111,7 @@ pub(crate) fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Mes
                     snap: true,
                 })
                 .on_press(Message::Navigate(target))
-                .into()
+                .boxed()
         };
         crumbs = crumbs.push(cell_el);
         if !is_last {
@@ -183,14 +184,14 @@ pub(crate) fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Mes
     .on_enter(Message::SplitterHover(true))
     .on_exit(Message::SplitterHover(false))
     .interaction(iced::mouse::Interaction::ResizingHorizontally);
-    let mut band = row![
+    let mut band: iced::widget::Row<Element<'_, Message>> = row![
         nav_circle("back", !state.back_is_empty(), Message::Back, skin, inner, btn_mult),
         nav_circle("forward", !state.forward_is_empty(), Message::Forward, skin, inner, btn_mult),
         nav_circle("up", state.cwd.parent().is_some(), Message::Up, skin, inner, btn_mult),
         crumb_bar,
     ];
     if show_search {
-        band = band.push(splitter).push(search);
+        band = band.push(splitter.boxed()).push(search.boxed());
     }
     container(band.spacing(2).align_y(iced::Alignment::Center))
         .width(Length::Fill)
@@ -198,7 +199,7 @@ pub(crate) fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Mes
         .center_y(Length::Fixed(state.ribbon.band_height()))
         .padding([0.0, 4.0])
         .style(bg(skin.toolbar_bg))
-        .into()
+        .boxed()
 }
 
 // ---------------- nav pane ----------------
