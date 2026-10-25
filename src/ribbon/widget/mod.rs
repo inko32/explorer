@@ -46,6 +46,8 @@ const TOOLTIP_DELAY: Duration = Duration::from_millis(600);
 pub struct Ribbon<'a, Message, Th = IcedTheme, Renderer = iced::Renderer> {
     fw: &'a RibbonFramework,
     theme: Theme,
+    /// Font sizes (assets/fonts.yaml); defaults are all 12px.
+    fonts: crate::fonts::FontSizes,
     on_event: Option<Box<dyn Fn(RibbonEvent) -> Message + 'a>>,
     _phantom: std::marker::PhantomData<(Th, Renderer)>,
 }
@@ -56,6 +58,7 @@ impl<'a, Message, Th, Renderer> Ribbon<'a, Message, Th, Renderer> {
         Self {
             fw,
             theme: Theme::windows10(),
+            fonts: crate::fonts::FontSizes::load(),
             on_event: None,
             _phantom: std::marker::PhantomData,
         }
@@ -64,6 +67,12 @@ impl<'a, Message, Th, Renderer> Ribbon<'a, Message, Th, Renderer> {
     /// Use a custom [`Theme`] instead of the Windows 10 default.
     pub fn theme(mut self, theme: Theme) -> Self {
         self.theme = theme;
+        self
+    }
+
+    /// Font sizes for every ribbon text run (assets/fonts.yaml).
+    pub fn fonts(mut self, fonts: crate::fonts::FontSizes) -> Self {
+        self.fonts = fonts;
         self
     }
 
@@ -120,6 +129,7 @@ where
                 fw: self.fw,
                 theme: &self.theme,
                 state,
+                fonts: &self.fonts,
                 measure,
             };
             layout::ribbon_scene(&ctx, width)
@@ -493,6 +503,7 @@ where
                     fw: self.fw,
                     theme: &self.theme,
                     state,
+                    fonts: &self.fonts,
                     measure,
                 };
                 let scene = popup::popup_scene(&ctx, popup);
@@ -565,6 +576,7 @@ where
                         fw: self.fw,
                         theme: &self.theme,
                         state,
+                        fonts: &self.fonts,
                         measure,
                     };
                     popup::tooltip_scene(&ctx, tip)

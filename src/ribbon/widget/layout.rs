@@ -124,6 +124,8 @@ pub struct Ctx<'a> {
     pub fw: &'a RibbonFramework,
     pub theme: &'a Theme,
     pub state: &'a super::State,
+    /// Font sizes (assets/fonts.yaml).
+    pub fonts: &'a crate::fonts::FontSizes,
     /// Accurate text measurement (paragraph shaping), keyed by the widget.
     pub measure: &'a dyn Fn(&str, f32) -> f32,
 }
@@ -586,7 +588,7 @@ fn tab_strip(
             scene,
             Rectangle::new(Point::new(x, strip_y), Size::new(w, STRIP_H)),
             label,
-            12.5,
+            ctx.fonts.ribbon.tab,
             text_color,
             Horizontal::Center,
             Vertical::Center,
@@ -720,7 +722,7 @@ fn tab_strip(
         scene,
         file_rect,
         file_label,
-        12.5,
+        ctx.fonts.ribbon.tab,
         Color::WHITE,
         Horizontal::Center,
         Vertical::Center,
@@ -820,7 +822,7 @@ fn finish_contextual(
             None,
             0.0,
         );
-        let label_w = ctx.text_w(&name, 10.0) + 6.0;
+        let label_w = ctx.text_w(&name, ctx.fonts.ribbon.keytip) + 6.0;
         text(
             scene,
             Rectangle::new(
@@ -828,7 +830,7 @@ fn finish_contextual(
                 Size::new(label_w, 11.0),
             ),
             name,
-            10.0,
+            ctx.fonts.ribbon.keytip,
             color.accent(),
             Horizontal::Left,
             Vertical::Center,
@@ -1103,10 +1105,10 @@ fn scale_ladder(group: &GroupSpec, policy: Option<&ScalingSpec>) -> Vec<GroupSca
 /// button (wrapped label + padding).
 fn popup_group_width(ctx: &Ctx, group: &GroupSpec) -> f32 {
     let label = group.label.clone().unwrap_or_else(|| group.id.clone());
-    let lines = wrap_balanced(ctx, &label, 11.0, 2);
+    let lines = wrap_balanced(ctx, &label, ctx.fonts.ribbon.button_large, 2);
     let max_line = lines
         .iter()
-        .map(|l| ctx.text_w(l, 11.0))
+        .map(|l| ctx.text_w(l, ctx.fonts.ribbon.button_large))
         .fold(0.0f32, f32::max);
     max_line.max(40.0) + 12.0
 }
@@ -1431,7 +1433,7 @@ pub fn tab_content(
             scene,
             rect,
             "«",
-            13.0,
+            ctx.fonts.ribbon.glyph,
             ctx.theme.text,
             Horizontal::Center,
             Vertical::Center,
@@ -1655,23 +1657,23 @@ fn button_width_scaled(ctx: &Ctx, b: &ButtonSpec, size: CtrlSize) -> f32 {
         .unwrap_or_default();
     match size {
         CtrlSize::Large => {
-            let lines = wrap_balanced(ctx, &label, 11.0, 2);
+            let lines = wrap_balanced(ctx, &label, ctx.fonts.ribbon.button_large, 2);
             let max_line = lines
                 .iter()
-                .map(|l| ctx.text_w(l, 11.0))
+                .map(|l| ctx.text_w(l, ctx.fonts.ribbon.button_large))
                 .fold(0.0f32, f32::max);
             max_line.max(28.0) + 12.0
         }
         CtrlSize::Medium => {
-            let lines = wrap_width(ctx, &label, 11.0, 64.0);
+            let lines = wrap_width(ctx, &label, ctx.fonts.ribbon.button_large, 64.0);
             let max_line = lines
                 .iter()
                 .take(2)
-                .map(|l| ctx.text_w(l, 11.0))
+                .map(|l| ctx.text_w(l, ctx.fonts.ribbon.button_large))
                 .fold(0.0f32, f32::max);
             (max_line + 16.0 + 8.0).max(52.0)
         }
-        CtrlSize::Small => (ctx.text_w(&label, 11.0) + 16.0 + 8.0).max(40.0),
+        CtrlSize::Small => (ctx.text_w(&label, ctx.fonts.ribbon.button_small) + 16.0 + 8.0).max(40.0),
     }
 }
 
@@ -1681,7 +1683,7 @@ fn gallery_width(ctx: &Ctx, g: &GallerySpec) -> f32 {
             .command
             .as_ref()
             .map(|c| match c {
-                CommandRef::Id(id) => ctx.text_w(&ctx.label(*id), 11.0),
+                CommandRef::Id(id) => ctx.text_w(&ctx.label(*id), ctx.fonts.ribbon.button_small),
                 _ => 0.0,
             })
             .unwrap_or(0.0);
@@ -1871,7 +1873,7 @@ fn build_group(
             Size::new(width + 6.0, FOOTER_H - 2.0),
         ),
         label,
-        10.5,
+        ctx.fonts.ribbon.group_label,
         ctx.theme.group_label,
         Horizontal::Center,
         Vertical::Center,
@@ -1901,7 +1903,7 @@ fn build_group(
             scene,
             rect,
             "↗",
-            9.0,
+            ctx.fonts.ribbon.glyph,
             ctx.theme.group_label,
             Horizontal::Center,
             Vertical::Center,
@@ -2054,7 +2056,7 @@ fn large_content(
     );
     // at most 2 lines; the arrow follows the last line ("Move to ▾",
     // alone on the second line for single-line labels: "Paste ▾")
-    let mut lines = wrap_balanced(ctx, label, 11.0, 2);
+    let mut lines = wrap_balanced(ctx, label, ctx.fonts.ribbon.button_large, 2);
     lines.truncate(2);
     if chevron_color.is_some() && lines.len() == 1 {
         lines.push(String::new());
@@ -2066,13 +2068,13 @@ fn large_content(
             Size::new(rect.width, LARGE_LINE_H),
         );
         if i == last && chevron_color.is_some() {
-            text_arrow(ctx, scene, lrect, line, 11.0, chevron_color.unwrap_or(text_color));
+            text_arrow(ctx, scene, lrect, line, ctx.fonts.ribbon.button_large, chevron_color.unwrap_or(text_color));
         } else {
             text(
                 scene,
                 lrect,
                 line.clone(),
-                11.0,
+                ctx.fonts.ribbon.button_large,
                 text_color,
                 Horizontal::Center,
                 Vertical::Center,
@@ -2207,7 +2209,7 @@ fn build_button_like(
             );
             if show_label {
                 let max_w = (rect.width - 22.0).max(10.0);
-                let lines = wrap_width(ctx, &label, 11.0, max_w);
+                let lines = wrap_width(ctx, &label, ctx.fonts.ribbon.button_large, max_w);
                 let n = if size == CtrlSize::Medium && !compact {
                     2
                 } else {
@@ -2224,7 +2226,7 @@ fn build_button_like(
                             Size::new(max_w, line_h),
                         ),
                         line.clone(),
-                        11.0,
+                        ctx.fonts.ribbon.button_large,
                         text_color,
                         Horizontal::Left,
                         Vertical::Center,
@@ -2331,7 +2333,7 @@ fn build_split_large(
     // the arrow follows the label as if it were a trailing character
     // ("Move\nto ▼", alone on the second line for single-line labels:
     // "Paste\n▼") — self-drawn, so it works with any font
-    let mut lines = wrap_balanced(ctx, &label, 11.0, 2);
+    let mut lines = wrap_balanced(ctx, &label, ctx.fonts.ribbon.button_large, 2);
     if lines.len() == 1 {
         lines.push(String::new());
     }
@@ -2344,13 +2346,13 @@ fn build_split_large(
             Size::new(drop_rect.width, line_h),
         );
         if i == last {
-            text_arrow(ctx, scene, lrect, line, 11.0, text_color);
+            text_arrow(ctx, scene, lrect, line, ctx.fonts.ribbon.button_large, text_color);
         } else {
             text(
                 scene,
                 lrect,
                 line.clone(),
-                11.0,
+                ctx.fonts.ribbon.button_large,
                 text_color,
                 Horizontal::Center,
                 Vertical::Center,
@@ -2454,12 +2456,12 @@ fn build_combo(ctx: &Ctx, scene: &mut Scene, rect: Rectangle, cmd: u32) {
             })
             .unwrap_or_default()
     };
-    let caret_x = rect.x + 6.0 + ctx.text_w(&content, 11.5);
+    let caret_x = rect.x + 6.0 + ctx.text_w(&content, ctx.fonts.ribbon.button_small);
     text(
         scene,
         text_rect,
         content,
-        11.5,
+        ctx.fonts.ribbon.button_small,
         if enabled { ctx.theme.text } else { ctx.theme.text_disabled },
         Horizontal::Left,
         Vertical::Center,
@@ -2550,12 +2552,12 @@ fn build_spinner(ctx: &Ctx, scene: &mut Scene, rect: Rectangle, cmd: u32) {
         Point::new(rect.x + 4.0, rect.y),
         Size::new(rect.width - 20.0, rect.height),
     );
-    let caret_x = rect.x + 6.0 + ctx.text_w(&formatted, 11.5);
+    let caret_x = rect.x + 6.0 + ctx.text_w(&formatted, ctx.fonts.ribbon.button_small);
     text(
         scene,
         text_rect,
         formatted,
-        11.5,
+        ctx.fonts.ribbon.button_small,
         if enabled { ctx.theme.text } else { ctx.theme.text_disabled },
         Horizontal::Left,
         Vertical::Center,
@@ -2657,7 +2659,7 @@ fn build_font_control(ctx: &Ctx, scene: &mut Scene, rect: Rectangle, cmd: u32) {
             Size::new(rect.width - 22.0, rect.height),
         ),
         label,
-        11.5,
+        ctx.fonts.ribbon.button_small,
         if enabled { ctx.theme.text } else { ctx.theme.text_disabled },
         Horizontal::Left,
         Vertical::Center,
@@ -2858,7 +2860,7 @@ fn build_gallery(
                     Size::new(g.item_width + 4.0, 12.0),
                 ),
                 label,
-                9.0,
+                ctx.fonts.ribbon.menu,
                 ctx.theme.text,
                 Horizontal::Center,
                 Vertical::Center,

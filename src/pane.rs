@@ -97,10 +97,10 @@ pub fn view(state: &Explorer, skin: skin::Skin, width: f32) -> Element<'_, Messa
         .and_then(|&i| state.entries.get(i));
     let content: Element<Message> = match (state.pane, entry) {
         (Mode::Preview, Some(e)) => preview(state, e, skin),
-        (Mode::Details, Some(e)) => details(e, skin),
+        (Mode::Details, Some(e)) => details(e, skin, &state.fonts),
         (_, _) => container(
             text("Select an item")
-                .size(12.0)
+                .size(state.fonts.pane.body)
                 .color(skin.subtle)
                 .width(Length::Fill)
                 .align_x(iced::alignment::Horizontal::Center),
@@ -121,7 +121,7 @@ pub fn view(state: &Explorer, skin: skin::Skin, width: f32) -> Element<'_, Messa
 fn preview<'a>(state: &'a Explorer, e: &'a crate::fs::Entry, skin: skin::Skin) -> Element<'a, Message> {
     match &state.pane_content {
         Content::Text(s) => scrollable(
-            container(text(s.clone()).size(11.0).color(skin.text))
+            container(text(s.clone()).size(state.fonts.pane.body).color(skin.text))
                 .padding(8.0)
                 .width(Length::Fill),
         )
@@ -141,12 +141,12 @@ fn preview<'a>(state: &'a Explorer, e: &'a crate::fs::Entry, skin: skin::Skin) -
             container(crate::icon::for_entry(e, 48.0, &skin))
                 .width(Length::Fill)
                 .align_x(iced::alignment::Horizontal::Center),
-            container(text(e.name.clone()).size(12.0).color(skin.text))
+            container(text(e.name.clone()).size(state.fonts.pane.title).color(skin.text))
                 .width(Length::Fill)
                 .align_x(iced::alignment::Horizontal::Center),
             container(
                 text(if e.is_dir() { "Folder" } else { "No preview available" })
-                    .size(11.0)
+                    .size(state.fonts.pane.body)
                     .color(skin.subtle),
             )
             .width(Length::Fill)
@@ -160,14 +160,14 @@ fn preview<'a>(state: &'a Explorer, e: &'a crate::fs::Entry, skin: skin::Skin) -
 }
 
 /// Details pane: icon, file name, size.
-fn details<'a>(e: &'a crate::fs::Entry, skin: skin::Skin) -> Element<'a, Message> {
+fn details<'a>(e: &'a crate::fs::Entry, skin: skin::Skin, fonts: &crate::fonts::FontSizes) -> Element<'a, Message> {
     column![
         container(crate::icon::for_entry(e, 48.0, &skin))
             .width(Length::Fill)
             .align_x(iced::alignment::Horizontal::Center),
         container(
             text(e.name.clone())
-                .size(12.0)
+                .size(fonts.pane.title)
                 .color(skin.text)
                 .width(Length::Fill)
                 .align_x(iced::alignment::Horizontal::Center),
@@ -179,7 +179,7 @@ fn details<'a>(e: &'a crate::fs::Entry, skin: skin::Skin) -> Element<'a, Message
             } else {
                 crate::model::format_size(e.size)
             })
-            .size(11.0)
+            .size(fonts.pane.body)
             .color(skin.subtle),
         )
         .width(Length::Fill)

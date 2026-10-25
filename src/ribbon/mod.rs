@@ -1111,6 +1111,7 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
     crate::ribbon::image::set_dark(state.dark);
     RibbonWidget::new(state.ribbon.framework())
         .theme(theme(state.dark))
+        .fonts(state.fonts.clone())
         .on_event(Message::Ribbon)
         .into()
 }

@@ -48,7 +48,7 @@ layouts:
     row_h: 48.0             # 32px icon + 2x8 padding
     icon: 32.0
     name_size: 12.0         # semibold name
-    prop_size: 11.0         # property lines
+    prop_size: 12.0         # property lines
     spacing: 2.0            # between the text lines
     pad_h: 8.0              # vertical padding inside the row
     pad_w: 8.0              # horizontal padding
@@ -59,7 +59,7 @@ layouts:
     cell_h: 64.0
     icon: 48.0
     name_size: 12.0
-    prop_size: 11.0
+    prop_size: 12.0
     line_spacing: 1.0
     icon_text_gap: 8.0
     pad: 8.0                # padding inside the cell
@@ -121,4 +121,4 @@ icon_top:
 style:
   corner_radius: 4.0        # hover/selection rounded rectangle
   font_size: 12.0           # system UI font, 9 pt; all item labels
-  prop_size: 11.0           # property lines (Content/Tiles) + Details header
+  prop_size: 12.0           # property lines (Content/Tiles) + Details header

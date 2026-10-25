@@ -130,7 +130,7 @@ impl Default for MetricsSpec {
             band_height: 32.0,
             tree_item_height: 22.0,
             tree_indention: 14.0,
-            tree_font_scale: 0.7,
+            tree_font_scale: 0.75,
             bar_button_multiplier: 2.2,
             gap_scale: 1.0,
             footer_shift: 3.0,

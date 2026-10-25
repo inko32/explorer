@@ -265,7 +265,7 @@ fn contextual_blocks(state: &Explorer) -> Element<'static, Message> {
         let label_color = Color::from_rgb(accent.r * 0.6, accent.g * 0.6, accent.b * 0.6);
         let solid = container(
             container(
-                text(b.label.clone()).size(12.0).color(label_color).width(Length::Shrink),
+                text(b.label.clone()).size(state.fonts.titlebar.block).color(label_color).width(Length::Shrink),
             )
             .width(Length::Fixed(bw))
             .height(Length::Fixed(24.0))
@@ -370,7 +370,7 @@ pub(crate) fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Messag
     let drag_title: Element<Message> = mouse_area(
         container(
             text(elide(&state.title(), title_w, 8.75))
-                .size(14.0)
+                .size(state.fonts.titlebar.title)
                 .color(skin.title_text)
                 .width(Length::Shrink),
         )
@@ -383,7 +383,8 @@ pub(crate) fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Messag
     .on_double_click(Message::TitlebarDoubleClick)
     .into();
     let mut head = row![
-        container(icon("folder", 16.0, skin))
+        // the window icon follows the current folder (16x16)
+        container(icon(state.location_icon(), 16.0, skin))
             .width(Length::Fixed(icon_zone_w))
             .height(Length::Fill)
             .center_x(Length::Fixed(icon_zone_w))
