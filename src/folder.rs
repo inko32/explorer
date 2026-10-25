@@ -1,4 +1,4 @@
-//! File view pane — SPEC/folder-spec.md: the 48-step Ctrl+scroll zoom
+//! File view pane — SPEC/FOLDER-SPEC.MD: the 48-step Ctrl+scroll zoom
 //! scale (§3 index map, §8 layout metrics). Index 0 Content, 1 Tiles,
 //! 2 Details, 3 List, 4..=14 small icons (name right), 15..=47 icon on
 //! top (name below).
@@ -552,7 +552,7 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
     .on_resize(|size| Message::FileAreaResized(size.width, size.height))
     .boxed();
     // right-click on empty space (items capture their own first) opens
-    // the background menu (SPEC/menu_spec.md)
+    // the background menu (SPEC/MENU_SPEC.MD)
     let area = crate::menu::on_right_free(area, Message::ContextBackground);
     // a left press on empty space starts the rubber-band selection
     let area: Element<Message> = MarqueeZone {

@@ -452,7 +452,7 @@ pub struct Snapshot {
     pub ctx: Context,
     pub has_clipboard: bool,
     pub has_items: bool,
-    /// Current view step index (SPEC/folder-spec.md); the view commands
+    /// Current view step index (SPEC/FOLDER-SPEC.MD); the view commands
     /// light up only when it equals their preset (§5 bullet rule).
     pub view_index: u8,
     /// The side pane shown right of the folder view (Preview XOR Details).

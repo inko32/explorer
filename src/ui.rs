@@ -152,7 +152,7 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
                     .boxed(),
             );
         }
-        // context menu above everything (SPEC/menu_spec.md): in-window
+        // context menu above everything (SPEC/MENU_SPEC.MD): in-window
         // by default, overlay layer with menu.yaml layout.popup
         if let Some(open) = &state.menu {
             let el = if state.menu_cfg.layout.popup {

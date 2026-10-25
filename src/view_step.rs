@@ -1,4 +1,4 @@
-//! Folder view configuration — SPEC/folder-spec.md as data, not code.
+//! Folder view configuration — SPEC/FOLDER-SPEC.MD as data, not code.
 //!
 //! Everything the spec fixes is configurable: the §3/§4 step→size map,
 //! the §3 layout families (per-index ranges), the §5 presets, the §6

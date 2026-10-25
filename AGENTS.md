@@ -1,7 +1,6 @@
 Important info
-1. check out Makefile before you want to use cargo. always use make, not cargo.
-2. SPEC/ARCHITECTURE.md is important, when you need, check it. 
-3. SPEC/UI-SPEC.md is the UI configuration, not always up-to-date, the code is the source of fact.
+1. check out Makefile before you want to use cargo. always use make, not cargo. if you need extra cargo operations, update Makefile.
+2. files in SPEC/ are good reference, but not up-to-date. the code is always the source of fact.
 
 This is a native desktop GUI application written in Rust with iced.
 

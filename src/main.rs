@@ -10,6 +10,9 @@ mod icons;
 mod menu;
 mod model;
 mod nav_pane;
+// TODO(perf): assets/performance.yaml rate caps — disabled, see model.rs
+#[allow(dead_code)]
+mod perf;
 mod navigation;
 mod pane;
 // Ribbon: the vendored rs-ribbon framework (Windows Ribbon Framework

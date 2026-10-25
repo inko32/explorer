@@ -1,4 +1,4 @@
-//! Context menus — SPEC/menu_spec.md. ONE YAML file
+//! Context menus — SPEC/MENU_SPEC.MD. ONE YAML file
 //! (`assets/menu.yaml`; user override ~/.config/explorer/menu.yaml)
 //! defines the menus (selection / background / archive / nav), the
 //! file-type groups, the open backend and the Windows-style layout.
