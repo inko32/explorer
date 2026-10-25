@@ -1,6 +1,7 @@
 //! View composition + Win8 skin. iced widgets, styled to the UI-SPEC.
 
 
+use iced::Widget as _;
 use iced::widget::{column, container, mouse_area, row, stack, Space};
 use iced::{Element, Length};
 
@@ -18,7 +19,7 @@ fn pane_splitter(msg: Message, skin: skin::Skin) -> Element<'static, Message> {
     )
     .on_press(msg)
     .interaction(iced::mouse::Interaction::ResizingHorizontally)
-    .into()
+    .boxed()
 }
 
 /// A functionless spacer (window background; with `line` the grey
@@ -26,7 +27,7 @@ fn pane_splitter(msg: Message, skin: skin::Skin) -> Element<'static, Message> {
 fn spacer(w: f32, skin: skin::Skin, line: bool) -> Element<'static, Message> {
     container(Space::new().width(Length::Fixed(w)).height(Length::Fill))
         .style(bg(if line { skin.sep } else { skin.window_bg }))
-        .into()
+        .boxed()
 }
 
 pub fn view(state: &Explorer) -> Element<'_, Message> {
@@ -56,7 +57,7 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
     if nav_w > 0.0 {
         let nav = dbg("nav_pane", crate::nav_pane::nav_pane(state, skin, nav_w));
         let fv = dbg("file_view", crate::folder::file_view(state, skin, content_w - nav_w - side_w));
-        let mut main = row![
+        let mut main: iced::widget::Row<Element<'_, Message>> = row![
             nav,
             dbg("nav_splitter", pane_splitter(Message::BeginNavSplit, skin)),
             // functionless spacer (yaml metrics.nav_gap)
@@ -73,12 +74,12 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
             main = main.push(spacer(1.0, skin, true));
             main = main.push(dbg("side_pane", crate::pane::view(state, skin, side_w)));
         }
-        root = root.push(dbg("main_row", main));
+        root = root.push(dbg("main_row", main.boxed()));
     } else {
         // the nav-gap spacer belongs to the folder view: it shows even
         // with the nav pane hidden
         let fv = dbg("file_view", crate::folder::file_view(state, skin, content_w - side_w));
-        let mut main = row![
+        let mut main: iced::widget::Row<Element<'_, Message>> = row![
             spacer(state.ribbon.nav_gap(), skin, false),
             container(fv).width(Length::Fill).height(Length::Fill)
         ]
@@ -89,7 +90,7 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
             main = main.push(spacer(1.0, skin, true));
             main = main.push(dbg("side_pane", crate::pane::view(state, skin, side_w)));
         }
-        root = root.push(dbg("main_row", main));
+        root = root.push(dbg("main_row", main.boxed()));
     }
     root = root.push(dbg("statusbar", crate::status::statusbar(state, skin)));
     let framed: Element<Message> = if state.self_border {
@@ -118,7 +119,7 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
                 background: Some(skin.accent_dark.into()),
                 ..Default::default()
             })
-            .into()
+            .boxed()
         } else {
             container(root)
                 .width(Length::Fill)
@@ -133,21 +134,22 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
                     background: Some(crate::border::frame_color(state, skin).into()),
                     ..Default::default()
                 })
-                .into()
+                .boxed()
         }
     } else {
-        root.into()
+        root.boxed()
     };
     if state.self_border {
         let grab = if state.frame_style == crate::model::FrameStyle::Win8 { 8.0 } else { 5.0 };
-        let mut s = stack![dbg("frame", framed), dbg("resize_ring", crate::border::resize_frame(grab)),
+        let mut s: iced::widget::Stack<Element<'_, Message>> = stack![dbg("frame", framed), dbg("resize_ring", crate::border::resize_frame(grab)),
                            dbg("captions", crate::border::caption_overlay(state, skin))];
         // splitter drag: hold the resize cursor window-wide while dragging
         // (the pointer leaves the small splitter target mid-drag)
         if state.bar_split || state.pane_split || state.nav_split {
             s = s.push(
                 mouse_area(Space::new().width(Length::Fill).height(Length::Fill))
-                    .interaction(iced::mouse::Interaction::ResizingHorizontally),
+                    .interaction(iced::mouse::Interaction::ResizingHorizontally)
+                    .boxed(),
             );
         }
         // context menu above everything (SPEC/menu_spec.md): in-window
@@ -160,7 +162,7 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
             };
             s = s.push(dbg("menu", el));
         }
-        s.into()
+        s.boxed()
     } else {
         if let Some(open) = &state.menu {
             let el = if state.menu_cfg.layout.popup {
@@ -168,7 +170,7 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
             } else {
                 crate::menu::layer(open, &state.menu_cfg, skin)
             };
-            return stack![framed, dbg("menu", el)].into();
+            return stack![framed, dbg("menu", el)].boxed();
         }
         framed
     }

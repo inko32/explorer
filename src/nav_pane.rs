@@ -8,6 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
+use iced::Widget as _;
 use iced::widget::{column, container, mouse_area, row, scrollable, text, Space};
 use iced::{Color, Element, Length};
 
@@ -80,14 +81,14 @@ fn tree_item(
             let a: Element<Message> = container(icon(icon_name, m.arrow, skin))
                 .width(Length::Fixed(m.indent))
                 .center_x(Length::Fixed(m.indent))
-                .into();
+                .boxed();
             // the arrow toggles the node, it does not navigate to it
             match path {
-                Some(p) => mouse_area(a).on_press(Message::NavToggle(p)).into(),
+                Some(p) => mouse_area(a).on_press(Message::NavToggle(p)).boxed(),
                 None => a,
             }
         }
-        None => Space::new().width(Length::Fixed(m.indent)).into(),
+        None => Space::new().width(Length::Fixed(m.indent)).boxed(),
     };
 
     let item: Element<Message> = container(
@@ -115,7 +116,7 @@ fn tree_item(
         },
         ..Default::default()
     })
-    .into();
+    .boxed();
     match navigate {
         Some(p) => mouse_area(item)
             .on_press(Message::Navigate(p.clone()))
@@ -123,7 +124,7 @@ fn tree_item(
             .on_enter(Message::NavHover(Some(p.clone())))
             .on_exit(Message::NavHoverExit(p))
             .interaction(iced::mouse::Interaction::Pointer)
-            .into(),
+            .boxed(),
         None => item,
     }
 }
@@ -161,12 +162,12 @@ fn section_header(
     )
     .on_press(Message::NavSectionToggle(section))
     .interaction(iced::mouse::Interaction::Pointer)
-    .into()
+    .boxed()
 }
 
 /// One folder/archive node with its (cached) children when expanded.
 fn push_tree_node<'a>(
-    list: iced::widget::Column<'a, Message>,
+    list: iced::widget::Column<iced::Element<'a, Message>>,
     state: &Explorer,
     path: &Path,
     label: String,
@@ -174,7 +175,7 @@ fn push_tree_node<'a>(
     indent: usize,
     m: NavMetrics,
     skin: skin::Skin,
-) -> iced::widget::Column<'a, Message> {
+) -> iced::widget::Column<iced::Element<'a, Message>> {
     let kids = state.nav.children.get(path);
     let expanded = state.nav.expanded.contains(path);
     let has_children = kids.map(|k| !k.is_empty()).unwrap_or(false);
@@ -418,7 +419,7 @@ pub(crate) fn nav_pane(state: &Explorer, skin: skin::Skin, width: f32) -> Elemen
             .width(Length::Fixed(1.0))
             .height(Length::Fill)
             .style(bg(skin.sep))
-            .into()
+            .boxed()
     };
     container(
         // wheel speed boost (folder-view.yaml input.scroll_speed)
@@ -437,15 +438,15 @@ pub(crate) fn nav_pane(state: &Explorer, skin: skin::Skin, width: f32) -> Elemen
                             horizontal: scrollable::Scrollbar::hidden(),
                         })
                         .on_scroll(|vp| Message::NavScrolled {
-                            y: vp.absolute_offset().y,
-                            height: vp.bounds().height,
+                            y: vp.viewport.absolute_offset().y,
+                            height: vp.viewport.bounds.height,
                         }),
                 )
                 .on_show(|size| Message::NavAreaResized(size.width, size.height))
                 .on_resize(|size| Message::NavAreaResized(size.width, size.height)),
                 bar,
             ]
-            .into(),
+            .boxed(),
             state.nav.scroll_y,
             (content_height(state) - state.nav.viewport_h).max(0.0),
             state.view_cfg.input.scroll_speed,
@@ -456,7 +457,7 @@ pub(crate) fn nav_pane(state: &Explorer, skin: skin::Skin, width: f32) -> Elemen
     .width(Length::Fixed(width))
     .height(Length::Fill)
     .style(bg(skin.nav_bg))
-    .into()
+    .boxed()
 }
 
 // ---------------- file view ----------------

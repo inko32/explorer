@@ -11,6 +11,7 @@
 
 use std::path::Path;
 
+use iced::Widget as _;
 use iced::widget::{column, container, scrollable, text};
 use iced::{Element, Length};
 
@@ -108,13 +109,13 @@ pub fn view(state: &Explorer, skin: skin::Skin, width: f32) -> Element<'_, Messa
         .width(Length::Fill)
         .height(Length::Fill)
         .center_y(Length::Fill)
-        .into(),
+        .boxed(),
     };
     container(content)
         .width(Length::Fixed(width))
         .height(Length::Fill)
         .style(bg(skin.window_bg))
-        .into()
+        .boxed()
 }
 
 /// Preview pane: text / image / fallback note.
@@ -126,7 +127,7 @@ fn preview<'a>(state: &'a Explorer, e: &'a crate::fs::Entry, skin: skin::Skin) -
                 .width(Length::Fill),
         )
         .height(Length::Fill)
-        .into(),
+        .boxed(),
         Content::Image(handle) => container(
             iced::widget::image(handle.clone())
                 .content_fit(iced::ContentFit::Contain)
@@ -136,7 +137,7 @@ fn preview<'a>(state: &'a Explorer, e: &'a crate::fs::Entry, skin: skin::Skin) -
         .padding(8.0)
         .width(Length::Fill)
         .height(Length::Fill)
-        .into(),
+        .boxed(),
         Content::None => column![
             container(crate::icon::for_entry(e, 48.0, &skin))
                 .width(Length::Fill)
@@ -155,7 +156,7 @@ fn preview<'a>(state: &'a Explorer, e: &'a crate::fs::Entry, skin: skin::Skin) -
         .spacing(8)
         .padding(8)
         .width(Length::Fill)
-        .into(),
+        .boxed(),
     }
 }
 
@@ -188,5 +189,5 @@ fn details<'a>(e: &'a crate::fs::Entry, skin: skin::Skin, fonts: &crate::fonts::
     .spacing(8)
     .padding(8)
     .width(Length::Fill)
-    .into()
+    .boxed()
 }

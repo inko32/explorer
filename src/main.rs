@@ -83,10 +83,10 @@ fn main() -> iced::Result {
     // Segoe UI is embedded only with the `embed-segoe` cargo feature
     // (off by default: the binary ships no Microsoft artwork)
     #[cfg(feature = "embed-segoe")]
-    let app = app.font(fonts::SEGOE_BYTES);
+    let app = app.fonts([fonts::SEGOE_BYTES]);
     app.scale_factor(|state: &Explorer| state.dpi_multiplier())
     // fonts.yaml fallback list: first installed family wins
-    .default_font(fonts::default_font())
+    .font(fonts::default_font())
     .title(|state: &Explorer| state.title())
     .theme(|state: &Explorer| state.theme())
     .subscription(|_state: &Explorer| {

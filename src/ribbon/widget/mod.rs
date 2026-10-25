@@ -17,12 +17,12 @@ use iced::advanced::renderer;
 use iced::advanced::svg;
 use iced::advanced::text;
 use iced::advanced::widget::Tree;
-use iced::advanced::{Clipboard, Shell, Widget};
+use iced::advanced::{Shell, Widget};
 use iced::keyboard;
 use iced::mouse;
 use iced::overlay;
 use iced::{
-    Background, Color, Element, Length, Point, Rectangle, Size,
+    Background, Color, Length, Point, Rectangle, Size,
     Theme as IcedTheme, Vector,
 };
 
@@ -43,6 +43,8 @@ use state::Target::*;
 const TOOLTIP_DELAY: Duration = Duration::from_millis(600);
 
 /// The ribbon widget.
+impl<'a, Message, Th, Renderer> iced::advanced::widget::Meta for Ribbon<'a, Message, Th, Renderer> {}
+
 pub struct Ribbon<'a, Message, Th = IcedTheme, Renderer = iced::Renderer> {
     fw: &'a RibbonFramework,
     theme: Theme,
@@ -106,10 +108,10 @@ where
         tree: &mut Tree,
         _renderer: &Renderer,
         limits: &ilayout::Limits,
-    ) -> ilayout::Node {
+    ) {
         let state = tree.state.downcast_mut::<State>();
-        let width = if limits.max().width.is_finite() {
-            limits.max().width
+        let width = if limits.bounds().width.is_finite() {
+            limits.bounds().width
         } else {
             960.0
         };
@@ -142,7 +144,7 @@ where
         );
         let size = scene.size;
         state.scene = Some(scene);
-        ilayout::Node::new(size)
+        tree.size = size;
     }
 
     fn draw(
@@ -151,7 +153,7 @@ where
         renderer: &mut Renderer,
         _theme: &Th,
         _style: &renderer::Style,
-        layout: Layout<'_>,
+        layout: Layout,
         _cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
@@ -179,10 +181,9 @@ where
         &mut self,
         tree: &mut Tree,
         event: &iced::Event,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         _renderer: &Renderer,
-        _clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         _viewport: &Rectangle,
     ) {
@@ -446,7 +447,7 @@ where
     fn mouse_interaction(
         &self,
         tree: &Tree,
-        _layout: Layout<'_>,
+        _layout: Layout,
         _cursor: mouse::Cursor,
         _viewport: &Rectangle,
         _renderer: &Renderer,
@@ -464,11 +465,12 @@ where
     fn overlay<'b>(
         &'b mut self,
         tree: &'b mut Tree,
-        layout: Layout<'_>,
+        layout: Layout,
         _renderer: &Renderer,
         _viewport: &Rectangle,
         translation: Vector,
-    ) -> Option<overlay::Element<'b, Message, Th, Renderer>> {
+        window: Size,
+    ) -> Vec<overlay::Element<'b, Message, Th, Renderer>> {
         let state = tree.state.downcast_mut::<State>();
 
         // context popup requested via IUIContextualUI
@@ -513,7 +515,16 @@ where
                     // parent — the group stays visible behind the menu,
                     // like the Windows ribbon.
                     (Some(child), Some(parent)) => {
-                        let mut merged = popup::popup_scene(&ctx, parent)?;
+                        // (no `?` here: this returns Vec, not Option)
+                        let mut merged = match popup::popup_scene(&ctx, parent) {
+                            Some(m) => m,
+                            None => {
+                                state.popup_drawing = false;
+                                close_all_popups(state);
+                                state.popup_bounds = None;
+                                return Vec::new();
+                            }
+                        };
                         let mut size = merged.size;
                         let dx = popup.origin.x - parent.origin.x;
                         let dy = popup.origin.y - parent.origin.y;
@@ -532,7 +543,7 @@ where
                         state.popup_drawing = false;
                         close_all_popups(state);
                         state.popup_bounds = None;
-                        return None;
+                        return Vec::new();
                     }
                 }
             };
@@ -542,7 +553,7 @@ where
             }
             state.popup_bounds = Some((origin, scene.size));
             let width_hint = popup.width_hint;
-            return Some(overlay::Element::new(Box::new(
+            let mut overlay =
                 popup::RibbonOverlay::<Message, Th, Renderer> {
                     fw: self.fw,
                     theme: &self.theme,
@@ -551,10 +562,13 @@ where
                     tooltip: false,
                     origin,
                     width_hint,
+                    layout: Layout::new(Size::ZERO),
+                    window,
                     mapper: self.on_event.as_deref(),
                     _phantom: std::marker::PhantomData,
-                },
-            )));
+                };
+            overlay.position();
+            return vec![overlay::Element::new(Box::new(overlay))];
         }
 
         // tooltip overlay
@@ -592,7 +606,7 @@ where
                         .unwrap_or(state.hover_pos.x),
                     ribbon_bottom + 1.0,
                 );
-                return Some(overlay::Element::new(Box::new(
+                let mut overlay =
                     popup::RibbonOverlay::<Message, Th, Renderer> {
                         fw: self.fw,
                         theme: &self.theme,
@@ -601,37 +615,26 @@ where
                         tooltip: true,
                         origin: tooltip_origin,
                         width_hint: 0.0,
+                        layout: Layout::new(Size::ZERO),
+                        window,
                         mapper: self.on_event.as_deref(),
                         _phantom: std::marker::PhantomData,
-                    },
-                )));
+                    };
+                overlay.position();
+                return vec![overlay::Element::new(Box::new(overlay))];
             }
         }
 
         let _ = (layout, translation);
-        None
+        Vec::new()
     }
 }
 
-impl<'a, Message, Th, Renderer> From<Ribbon<'a, Message, Th, Renderer>>
-    for Element<'a, Message, Th, Renderer>
-where
-    Message: Clone + 'a,
-    Th: 'a,
-    Renderer: iced::advanced::Renderer
-        + text::Renderer
-        + svg::Renderer
-        + iced::advanced::image::Renderer<Handle = iced::widget::image::Handle>
-        + 'a,
-{
-    fn from(ribbon: Ribbon<'a, Message, Th, Renderer>) -> Self {
-        Element::new(ribbon)
-    }
-}
+
 
 /// Accurate text width via the renderer's paragraph shaper.
 pub(crate) fn text_measure<Renderer>(
-    renderer: &Renderer,
+    _renderer: &Renderer,
     content: &str,
     size: f32,
 ) -> f32
@@ -644,11 +647,13 @@ where
         bounds: Size::new(f32::INFINITY, f32::INFINITY),
         size: size.into(),
         line_height: text::LineHeight::Absolute((size * 1.2).into()),
-        font: renderer.default_font(),
+        font: crate::fonts::primary(),
         align_x: iced::alignment::Horizontal::Left.into(),
         align_y: iced::alignment::Vertical::Top,
         shaping: text::Shaping::Basic,
         wrapping: text::Wrapping::None,
+        ellipsis: text::Ellipsis::default(),
+        hint_factor: None,
     });
     paragraph.min_bounds().width
 }
@@ -1585,7 +1590,7 @@ pub fn draw_scene<Renderer>(
                     if content.is_empty() {
                         continue;
                     }
-                    let font = renderer.default_font();
+                    let font = crate::fonts::primary();
                     // never let a label spill outside its box
                     let clip = rect.expand(2.0).intersection(viewport).unwrap_or(rect);
                     // iced's cached-text pipeline treats `position` as the
@@ -1625,6 +1630,8 @@ pub fn draw_scene<Renderer>(
                                 align_y: *valign,
                                 shaping: text::Shaping::Basic,
                                 wrapping: text::Wrapping::None,
+                                ellipsis: text::Ellipsis::default(),
+                                hint_factor: None,
                             },
                             Point::new(anchor.x + dx, anchor.y),
                             *color,
@@ -1652,10 +1659,11 @@ pub fn draw_scene<Renderer>(
                             );
                         }
                         crate::ribbon::image::IconHandle::Raster(handle) => {
+                            // Image: pub fields now (no builder methods)
+                            let mut image = iced::advanced::image::Image::new(handle);
+                            image.opacity = *opacity;
                             renderer.draw_image(
-                                iced::advanced::image::Image::new(handle)
-                                    .opacity(*opacity)
-                                    .snap(true),
+                                image,
                                 rect,
                                 clip,
                             );
@@ -1686,11 +1694,13 @@ pub fn draw_scene<Renderer>(
                             bounds: badge.size(),
                             size: 9.0.into(),
                             line_height: text::LineHeight::Absolute(11.0.into()),
-                            font: renderer.default_font(),
+                            font: crate::fonts::primary(),
                             align_x: iced::alignment::Horizontal::Center.into(),
                             align_y: iced::alignment::Vertical::Center,
                             shaping: text::Shaping::Basic,
                             wrapping: text::Wrapping::None,
+                            ellipsis: text::Ellipsis::default(),
+                            hint_factor: None,
                         },
                         badge.position(),
                         theme.keytip_text,

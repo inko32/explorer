@@ -10,8 +10,9 @@
 
 use std::path::{Path, PathBuf};
 
+use iced::Widget as _;
 use iced::advanced::widget::{Operation, Tree, Widget, tree};
-use iced::advanced::{Clipboard, Layout, Shell, layout, overlay, renderer};
+use iced::advanced::{Layout, Renderer as _, Shell, layout, overlay, renderer};
 use iced::widget::{Space, column, container, mouse_area, row, text};
 use iced::{Color, Element, Length, Point, Rectangle, Size, Vector, mouse};
 use serde::Deserialize;
@@ -557,7 +558,7 @@ pub fn view<'a>(open: &'a Open, cfg: &'a MenuCfg, skin: skin::Skin) -> Element<'
         })
         .fold(l.min_width, f32::max)
         .ceil();
-    let mut col = column![].spacing(0);
+    let mut col: iced::widget::Column<iced::Element<'_, Message>> = column![].spacing(0);
     for (i, entry) in open.entries.iter().enumerate() {
         match entry {
             Entry::Sep => {
@@ -577,7 +578,8 @@ pub fn view<'a>(open: &'a Open, cfg: &'a MenuCfg, skin: skin::Skin) -> Element<'
                         .align_y(iced::Alignment::Center),
                     )
                     .width(Length::Fill)
-                    .height(Length::Fixed(l.separator_height)),
+                    .height(Length::Fixed(l.separator_height))
+                    .boxed(),
                 );
             }
             Entry::Item(item) => col = col.push(item_row(i, item, open.hover == Some(i), l, skin)),
@@ -599,7 +601,7 @@ pub fn view<'a>(open: &'a Open, cfg: &'a MenuCfg, skin: skin::Skin) -> Element<'
             },
             ..Default::default()
         })
-        .into()
+        .boxed()
 }
 
 fn item_row<'a>(
@@ -616,16 +618,16 @@ fn item_row<'a>(
     };
     let icon_el: Element<Message> = match &item.icon {
         Some(name) => crate::ui_common::icon(name, l.icon_size, skin),
-        None => Space::new().width(Length::Fixed(l.icon_size)).into(),
+        None => Space::new().width(Length::Fixed(l.icon_size)).boxed(),
     };
-    let mut r = row![
+    let mut r: iced::widget::Row<iced::Element<'_, Message>> = row![
         container(icon_el).width(Length::Fixed(l.gutter)).align_x(iced::alignment::Horizontal::Center),
         text(item.label.clone()).size(l.font_size).font(bold).color(color),
     ];
     if !item.shortcut.is_empty() {
         r = r
-            .push(Space::new().width(Length::Fixed(l.gutter)))
-            .push(text(item.shortcut.clone()).size(l.font_size).color(skin.subtle));
+            .push(Space::new().width(Length::Fixed(l.gutter)).boxed())
+            .push(text(item.shortcut.clone()).size(l.font_size).color(skin.subtle).boxed());
     }
     let mut cell = container(r.align_y(iced::Alignment::Center))
         .width(Length::Fill)
@@ -647,9 +649,9 @@ fn item_row<'a>(
         .on_enter(Message::MenuHover(Some(i)))
         .on_exit(Message::MenuHover(None));
     if item.enabled {
-        area.on_press(Message::MenuPick(i)).into()
+        area.on_press(Message::MenuPick(i)).boxed()
     } else {
-        area.into()
+        area.boxed()
     }
 }
 
@@ -665,29 +667,28 @@ pub fn on_right_free<'a>(
         on_free: Message,
     }
 
+    impl iced::advanced::widget::Meta for OnRightFree<'_> {}
+
     impl<'a> Widget<Message, iced::Theme, iced::Renderer> for OnRightFree<'a> {
         fn size(&self) -> Size<Length> {
-            self.content.as_widget().size()
+            self.content.size()
         }
         fn tag(&self) -> tree::Tag {
-            self.content.as_widget().tag()
+            self.content.tag()
         }
         fn state(&self) -> tree::State {
-            self.content.as_widget().state()
+            self.content.state()
         }
-        fn children(&self) -> Vec<Tree> {
-            self.content.as_widget().children()
-        }
-        fn diff(&self, tree: &mut Tree) {
-            self.content.as_widget().diff(tree);
+        fn diff(&mut self, tree: &mut Tree) {
+            self.content.diff(tree);
         }
         fn layout(
             &mut self,
             tree: &mut Tree,
             renderer: &iced::Renderer,
             limits: &layout::Limits,
-        ) -> layout::Node {
-            self.content.as_widget_mut().layout(tree, renderer, limits)
+        ) {
+            self.content.layout(tree, renderer, limits)
         }
         fn draw(
             &self,
@@ -695,38 +696,38 @@ pub fn on_right_free<'a>(
             renderer: &mut iced::Renderer,
             theme: &iced::Theme,
             style: &renderer::Style,
-            layout: Layout<'_>,
+            layout: Layout,
             cursor: mouse::Cursor,
             viewport: &Rectangle,
         ) {
             self.content
-                .as_widget()
+                
                 .draw(tree, renderer, theme, style, layout, cursor, viewport);
         }
         fn operate(
             &mut self,
             tree: &mut Tree,
-            layout: Layout<'_>,
+            layout: Layout,
+            viewport: &Rectangle,
             renderer: &iced::Renderer,
             operation: &mut dyn Operation,
         ) {
             self.content
-                .as_widget_mut()
-                .operate(tree, layout, renderer, operation);
+                
+                .operate(tree, layout, viewport, renderer, operation);
         }
         fn update(
             &mut self,
             tree: &mut Tree,
             event: &iced::Event,
-            layout: Layout<'_>,
+            layout: Layout,
             cursor: mouse::Cursor,
             renderer: &iced::Renderer,
-            clipboard: &mut dyn Clipboard,
             shell: &mut Shell<'_, Message>,
             viewport: &Rectangle,
         ) {
-            self.content.as_widget_mut().update(
-                tree, event, layout, cursor, renderer, clipboard, shell, viewport,
+            self.content.update(
+                tree, event, layout, cursor, renderer, shell, viewport,
             );
             if matches!(
                 event,
@@ -741,30 +742,31 @@ pub fn on_right_free<'a>(
         fn mouse_interaction(
             &self,
             tree: &Tree,
-            layout: Layout<'_>,
+            layout: Layout,
             cursor: mouse::Cursor,
             viewport: &Rectangle,
             renderer: &iced::Renderer,
         ) -> mouse::Interaction {
             self.content
-                .as_widget()
+                
                 .mouse_interaction(tree, layout, cursor, viewport, renderer)
         }
         fn overlay<'b>(
             &'b mut self,
             tree: &'b mut Tree,
-            layout: Layout<'b>,
+            layout: Layout,
             renderer: &iced::Renderer,
             viewport: &Rectangle,
             translation: Vector,
-        ) -> Option<overlay::Element<'b, Message, iced::Theme, iced::Renderer>> {
+            window: Size,
+        ) -> Vec<overlay::Element<'b, Message, iced::Theme, iced::Renderer>> {
             self.content
-                .as_widget_mut()
-                .overlay(tree, layout, renderer, viewport, translation)
+                
+                .overlay(tree, layout, renderer, viewport, translation, window)
         }
     }
 
-    Element::new(OnRightFree { content, on_free })
+    OnRightFree { content, on_free }.boxed()
 }
 
 #[cfg(test)]
@@ -920,11 +922,13 @@ pub fn layer<'a>(open: &'a Open, cfg: &'a MenuCfg, skin: skin::Skin) -> Element<
             Vector::new(tx.max(0.0) - bounds.x, ty.max(0.0) - bounds.y)
         },
     );
-    iced::widget::stack![Element::new(Shield { on_press: Message::CloseMenu }), menu].into()
+    iced::widget::stack![Shield { on_press: Message::CloseMenu }.boxed(), menu].boxed()
 }
 
 /// Modal shield under an open menu: captures all mouse/touch events so
 /// the UI behind the menu stays inert; a press closes the menu.
+impl iced::advanced::widget::Meta for Shield {}
+
 struct Shield {
     on_press: Message,
 }
@@ -936,11 +940,11 @@ impl Widget<Message, iced::Theme, iced::Renderer> for Shield {
 
     fn layout(
         &mut self,
-        _tree: &mut Tree,
+        tree: &mut Tree,
         _renderer: &iced::Renderer,
         limits: &layout::Limits,
-    ) -> layout::Node {
-        layout::Node::new(limits.resolve(Length::Fill, Length::Fill, Size::ZERO))
+    ) {
+        tree.size = limits.resolve(Length::Fill, Length::Fill, Size::ZERO);
     }
 
     fn draw(
@@ -949,7 +953,7 @@ impl Widget<Message, iced::Theme, iced::Renderer> for Shield {
         _renderer: &mut iced::Renderer,
         _theme: &iced::Theme,
         _style: &renderer::Style,
-        _layout: Layout<'_>,
+        _layout: Layout,
         _cursor: mouse::Cursor,
         _viewport: &Rectangle,
     ) {
@@ -959,10 +963,9 @@ impl Widget<Message, iced::Theme, iced::Renderer> for Shield {
         &mut self,
         _tree: &mut Tree,
         event: &iced::Event,
-        _layout: Layout<'_>,
+        _layout: Layout,
         _cursor: mouse::Cursor,
         _renderer: &iced::Renderer,
-        _clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         _viewport: &Rectangle,
     ) {
@@ -989,7 +992,7 @@ impl Widget<Message, iced::Theme, iced::Renderer> for Shield {
 /// overlays right after the menu opens). Overlays get events before the
 /// whole base UI, so the menu is modal by construction.
 pub fn host<'a>(open: &'a Open, cfg: &'a MenuCfg, skin: skin::Skin) -> Element<'a, Message> {
-    Element::new(MenuHost { open, cfg, skin })
+    MenuHost { open, cfg, skin }.boxed()
 }
 
 struct MenuHost<'a> {
@@ -998,18 +1001,39 @@ struct MenuHost<'a> {
     skin: skin::Skin,
 }
 
+/// Host state: the widget tree of the menu content.
+struct MenuHostState {
+    tree: Tree,
+}
+
+impl Default for MenuHostState {
+    fn default() -> Self {
+        Self { tree: Tree::empty() }
+    }
+}
+
+impl iced::advanced::widget::Meta for MenuHost<'_> {}
+
 impl<'a> Widget<Message, iced::Theme, iced::Renderer> for MenuHost<'a> {
     fn size(&self) -> Size<Length> {
         Size::new(Length::Fixed(0.0), Length::Fixed(0.0))
     }
 
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<MenuHostState>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(MenuHostState::default())
+    }
+
     fn layout(
         &mut self,
-        _tree: &mut Tree,
+        tree: &mut Tree,
         _renderer: &iced::Renderer,
         _limits: &layout::Limits,
-    ) -> layout::Node {
-        layout::Node::new(Size::ZERO)
+    ) {
+        tree.size = Size::ZERO;
     }
 
     fn draw(
@@ -1018,7 +1042,7 @@ impl<'a> Widget<Message, iced::Theme, iced::Renderer> for MenuHost<'a> {
         _renderer: &mut iced::Renderer,
         _theme: &iced::Theme,
         _style: &renderer::Style,
-        _layout: Layout<'_>,
+        _layout: Layout,
         _cursor: mouse::Cursor,
         _viewport: &Rectangle,
     ) {
@@ -1026,18 +1050,36 @@ impl<'a> Widget<Message, iced::Theme, iced::Renderer> for MenuHost<'a> {
 
     fn overlay<'b>(
         &'b mut self,
-        _tree: &'b mut Tree,
-        _layout: Layout<'b>,
-        _renderer: &iced::Renderer,
+        tree: &'b mut Tree,
+        _layout: Layout,
+        renderer: &iced::Renderer,
         _viewport: &Rectangle,
         _translation: Vector,
-    ) -> Option<overlay::Element<'b, Message, iced::Theme, iced::Renderer>> {
-        Some(overlay::Element::new(Box::new(MenuOverlay {
-            content: view(self.open, self.cfg, self.skin),
-            tree: None,
-            x: self.open.x,
-            y: self.open.y,
-        })))
+        window: Size,
+    ) -> Vec<overlay::Element<'b, Message, iced::Theme, iced::Renderer>> {
+        let state = tree.state.downcast_mut::<MenuHostState>();
+        // lay the menu out now (overlays self-position): the content
+        // size is known from its tree after layout
+        let mut content = view(self.open, self.cfg, self.skin);
+        state.tree.diff(&mut content);
+        content.layout(
+            &mut state.tree,
+            renderer,
+            &layout::Limits::new(Size::ZERO, window),
+        );
+        let size = state.tree.size;
+        // anchor = left-top corner; flip to the right and/or bottom
+        // corner when the menu would leave the window
+        let (x, y) = (self.open.x, self.open.y);
+        let tx = if x + size.width > window.width - 4.0 { x - size.width } else { x };
+        let ty = if y + size.height > window.height - 4.0 { y - size.height } else { y };
+        let menu_layout = Layout::new(size).move_to(Point::new(tx.max(0.0), ty.max(0.0)));
+        vec![overlay::Element::new(Box::new(MenuOverlay {
+            content,
+            tree: &mut state.tree,
+            layout: menu_layout,
+            window,
+        }))]
     }
 }
 
@@ -1045,75 +1087,47 @@ impl<'a> Widget<Message, iced::Theme, iced::Renderer> for MenuHost<'a> {
 /// captures all pointer events (modal).
 struct MenuOverlay<'a> {
     content: Element<'a, Message>,
-    tree: Option<Tree>,
-    x: f32,
-    y: f32,
+    tree: &'a mut Tree,
+    layout: Layout,
+    window: Size,
 }
 
 impl<'a> overlay::Overlay<Message, iced::Theme, iced::Renderer> for MenuOverlay<'a> {
-    fn layout(&mut self, renderer: &iced::Renderer, bounds: Size) -> layout::Node {
-        let tree = self.tree.get_or_insert_with(|| Tree::new(&self.content));
-        self.content.as_widget().diff(tree);
-        let node = self.content.as_widget_mut().layout(
-            tree,
-            renderer,
-            &layout::Limits::new(Size::ZERO, bounds),
-        );
-        // anchor = left-top corner; flip to the right and/or bottom
-        // corner when the menu would leave the window
-        let size = node.size();
-        let tx = if self.x + size.width > bounds.width - 4.0 {
-            self.x - size.width
-        } else {
-            self.x
-        };
-        let ty = if self.y + size.height > bounds.height - 4.0 {
-            self.y - size.height
-        } else {
-            self.y
-        };
-        node.move_to(Point::new(tx.max(0.0), ty.max(0.0)))
-    }
-
     fn draw(
         &self,
         renderer: &mut iced::Renderer,
         theme: &iced::Theme,
         style: &renderer::Style,
-        layout: Layout<'_>,
         cursor: mouse::Cursor,
     ) {
-        let viewport = layout.bounds();
-        self.content.as_widget().draw(
-            self.tree.as_ref().expect("layout ran"),
-            renderer,
-            theme,
-            style,
-            layout,
-            cursor,
-            &viewport,
-        );
+        renderer.with_layer(self.layout.bounds(), |renderer| {
+            self.content.draw(
+                self.tree,
+                renderer,
+                theme,
+                style,
+                self.layout,
+                cursor,
+                &Rectangle::with_size(self.window),
+            );
+        });
     }
 
     fn update(
         &mut self,
         event: &iced::Event,
-        layout: Layout<'_>,
         cursor: mouse::Cursor,
         renderer: &iced::Renderer,
-        clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
     ) {
-        let viewport = layout.bounds();
-        self.content.as_widget_mut().update(
-            self.tree.as_mut().expect("layout ran"),
+        self.content.update(
+            self.tree,
             event,
-            layout,
+            self.layout,
             cursor,
             renderer,
-            clipboard,
             shell,
-            &viewport,
+            &Rectangle::with_size(self.window),
         );
         // modal: no pointer event reaches the UI behind the menu
         match event {
@@ -1134,16 +1148,14 @@ impl<'a> overlay::Overlay<Message, iced::Theme, iced::Renderer> for MenuOverlay<
 
     fn mouse_interaction(
         &self,
-        layout: Layout<'_>,
         cursor: mouse::Cursor,
         renderer: &iced::Renderer,
     ) -> mouse::Interaction {
-        let viewport = layout.bounds();
-        self.content.as_widget().mouse_interaction(
-            self.tree.as_ref().expect("layout ran"),
-            layout,
+        self.content.mouse_interaction(
+            self.tree,
+            self.layout,
             cursor,
-            &viewport,
+            &Rectangle::with_size(self.window),
             renderer,
         )
     }

@@ -5,8 +5,9 @@
 //! `Message::NavScrollTo`), the model issues `operation::scroll_to` and
 //! the scrollable reports its position back via on_scroll.
 
+use iced::Widget as _;
 use iced::advanced::widget::{Operation, Tree, Widget, tree};
-use iced::advanced::{Clipboard, Layout, Renderer as _, Shell, layout, renderer};
+use iced::advanced::{Layout, Renderer as _, Shell, layout, renderer};
 use iced::{Color, Element, Length, Point, Rectangle, Size, mouse};
 
 use crate::model::Message;
@@ -46,6 +47,8 @@ struct State {
     drag_grab: Option<f32>,
 }
 
+impl iced::advanced::widget::Meta for WinScrollbar {}
+
 struct WinScrollbar {
     axis: Axis,
     /// Current scroll offset (px), fed back from the scrollable.
@@ -69,7 +72,7 @@ pub(crate) fn vertical(
     skin: skin::Skin,
     on_scroll: fn(f32) -> Message,
 ) -> Element<'static, Message> {
-    Element::new(WinScrollbar { axis: Axis::Vertical, offset, viewport, content, line, skin, on_scroll })
+    WinScrollbar { axis: Axis::Vertical, offset, viewport, content, line, skin, on_scroll }.boxed()
 }
 
 pub(crate) fn horizontal(
@@ -80,7 +83,7 @@ pub(crate) fn horizontal(
     skin: skin::Skin,
     on_scroll: fn(f32) -> Message,
 ) -> Element<'static, Message> {
-    Element::new(WinScrollbar { axis: Axis::Horizontal, offset, viewport, content, line, skin, on_scroll })
+    WinScrollbar { axis: Axis::Horizontal, offset, viewport, content, line, skin, on_scroll }.boxed()
 }
 
 /// Axis-parallel/-perpendicular decomposition of a point/size.
@@ -233,11 +236,11 @@ impl Widget<Message, iced::Theme, iced::Renderer> for WinScrollbar {
 
     fn layout(
         &mut self,
-        _tree: &mut Tree,
+        tree: &mut Tree,
         _renderer: &iced::Renderer,
         limits: &layout::Limits,
-    ) -> layout::Node {
-        let size = limits.resolve(
+    ) {
+        tree.size = limits.resolve(
             match self.axis {
                 Axis::Vertical => Length::Fixed(THICKNESS),
                 Axis::Horizontal => Length::Fill,
@@ -248,17 +251,15 @@ impl Widget<Message, iced::Theme, iced::Renderer> for WinScrollbar {
             },
             Size::ZERO,
         );
-        layout::Node::new(size)
     }
 
     fn update(
         &mut self,
         tree: &mut Tree,
         event: &iced::Event,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         _renderer: &iced::Renderer,
-        _clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         _viewport: &Rectangle,
     ) {
@@ -326,7 +327,7 @@ impl Widget<Message, iced::Theme, iced::Renderer> for WinScrollbar {
         renderer: &mut iced::Renderer,
         _theme: &iced::Theme,
         _style: &renderer::Style,
-        layout: Layout<'_>,
+        layout: Layout,
         _cursor: mouse::Cursor,
         _viewport: &Rectangle,
     ) {
@@ -392,7 +393,7 @@ impl Widget<Message, iced::Theme, iced::Renderer> for WinScrollbar {
     fn mouse_interaction(
         &self,
         _tree: &Tree,
-        _layout: Layout<'_>,
+        _layout: Layout,
         _cursor: mouse::Cursor,
         _viewport: &Rectangle,
         _renderer: &iced::Renderer,
@@ -412,6 +413,8 @@ impl Widget<Message, iced::Theme, iced::Renderer> for WinScrollbar {
 /// `operation::scroll_to`. Ctrl+wheel is left alone (the CtrlZoom
 /// wrapper around the file view owns it). Transparent wrapper:
 /// state/layout/draw delegate to the content.
+impl iced::advanced::widget::Meta for WheelBoost<'_> {}
+
 struct WheelBoost<'a> {
     content: Element<'a, Message>,
     /// Current scroll offset along `axis`.
@@ -431,28 +434,24 @@ pub(crate) fn wheel_boost<'a>(
     axis: Axis,
     on_scroll: fn(f32) -> Message,
 ) -> Element<'a, Message> {
-    Element::new(WheelBoost { content, offset, max_scroll, multiplier, axis, on_scroll })
+    WheelBoost { content, offset, max_scroll, multiplier, axis, on_scroll }.boxed()
 }
 
 impl<'a> Widget<Message, iced::Theme, iced::Renderer> for WheelBoost<'a> {
     fn size(&self) -> Size<Length> {
-        self.content.as_widget().size()
+        self.content.size()
     }
 
     fn tag(&self) -> tree::Tag {
-        self.content.as_widget().tag()
+        self.content.tag()
     }
 
     fn state(&self) -> tree::State {
-        self.content.as_widget().state()
+        self.content.state()
     }
 
-    fn children(&self) -> Vec<Tree> {
-        self.content.as_widget().children()
-    }
-
-    fn diff(&self, tree: &mut Tree) {
-        self.content.as_widget().diff(tree);
+    fn diff(&mut self, tree: &mut Tree) {
+        self.content.diff(tree);
     }
 
     fn layout(
@@ -460,8 +459,8 @@ impl<'a> Widget<Message, iced::Theme, iced::Renderer> for WheelBoost<'a> {
         tree: &mut Tree,
         renderer: &iced::Renderer,
         limits: &layout::Limits,
-    ) -> layout::Node {
-        self.content.as_widget_mut().layout(tree, renderer, limits)
+    ) {
+        self.content.layout(tree, renderer, limits)
     }
 
     fn draw(
@@ -470,35 +469,35 @@ impl<'a> Widget<Message, iced::Theme, iced::Renderer> for WheelBoost<'a> {
         renderer: &mut iced::Renderer,
         theme: &iced::Theme,
         style: &renderer::Style,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
         self.content
-            .as_widget()
+            
             .draw(tree, renderer, theme, style, layout, cursor, viewport);
     }
 
     fn operate(
         &mut self,
         tree: &mut Tree,
-        layout: Layout<'_>,
+        layout: Layout,
+        viewport: &Rectangle,
         renderer: &iced::Renderer,
         operation: &mut dyn Operation,
     ) {
         self.content
-            .as_widget_mut()
-            .operate(tree, layout, renderer, operation);
+            
+            .operate(tree, layout, viewport, renderer, operation);
     }
 
     fn update(
         &mut self,
         tree: &mut Tree,
         event: &iced::Event,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         renderer: &iced::Renderer,
-        clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
@@ -528,35 +527,36 @@ impl<'a> Widget<Message, iced::Theme, iced::Renderer> for WheelBoost<'a> {
                 }
             }
         }
-        self.content.as_widget_mut().update(
-            tree, event, layout, cursor, renderer, clipboard, shell, viewport,
+        self.content.update(
+            tree, event, layout, cursor, renderer, shell, viewport,
         );
     }
 
     fn mouse_interaction(
         &self,
         tree: &Tree,
-        layout: Layout<'_>,
+        layout: Layout,
         cursor: mouse::Cursor,
         viewport: &Rectangle,
         renderer: &iced::Renderer,
     ) -> mouse::Interaction {
         self.content
-            .as_widget()
+            
             .mouse_interaction(tree, layout, cursor, viewport, renderer)
     }
 
     fn overlay<'b>(
         &'b mut self,
         tree: &'b mut Tree,
-        layout: Layout<'b>,
+        layout: Layout,
         renderer: &iced::Renderer,
         viewport: &Rectangle,
         translation: iced::Vector,
-    ) -> Option<iced::advanced::overlay::Element<'b, Message, iced::Theme, iced::Renderer>> {
+        window: iced::Size,
+    ) -> Vec<iced::advanced::overlay::Element<'b, Message, iced::Theme, iced::Renderer>> {
         self.content
-            .as_widget_mut()
-            .overlay(tree, layout, renderer, viewport, translation)
+            
+            .overlay(tree, layout, renderer, viewport, translation, window)
     }
 }
 

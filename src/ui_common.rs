@@ -1,6 +1,7 @@
 //! Shared UI plumbing: the skin (light/dark palettes — dark mode lives here),
 //! `--ui-debug` element outlines, and small element helpers used everywhere.
 
+use iced::Widget as _;
 use iced::widget::container;
 use iced::{Color, Element};
 
@@ -169,8 +170,9 @@ pub mod skin {
     };
 
     impl Skin {
-        pub fn palette(self) -> iced::theme::Palette {
-            iced::theme::Palette {
+        /// Theme seed for iced 0.15's generated palettes.
+        pub fn palette(self) -> iced::theme::palette::Seed {
+            iced::theme::palette::Seed {
                 background: self.window_bg,
                 text: self.text,
                 primary: self.accent,
@@ -216,8 +218,8 @@ pub(crate) fn debug_color(name: &str) -> Color {
 
 /// Wrap an element in a 1px outline (drawn inside — no layout shift).
 /// No-op unless `--ui-debug` was passed. Same name = same color.
-pub(crate) fn dbg<'a>(name: &'static str, e: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
-    let e = e.into();
+pub(crate) fn dbg<'a>(name: &'static str, e: Element<'a, Message>) -> Element<'a, Message> {
+    let e = e;
     if !ui_debug() {
         return e;
     }
@@ -231,7 +233,7 @@ pub(crate) fn dbg<'a>(name: &'static str, e: impl Into<Element<'a, Message>>) ->
             },
             ..Default::default()
         })
-        .into()
+        .boxed()
 }
 
 
