@@ -1023,6 +1023,9 @@ impl Explorer {
             let groups = crate::menu::groups_for(&self.menu_cfg, &files);
             crate::menu::build_selection(&self.menu_cfg, n, has_files, has_dirs, &groups)
         };
+        // the menu shields the view behind it: drop the live hover
+        self.hovered = None;
+        self.nav_hover = None;
         self.menu = Some(crate::menu::Open {
             entries,
             x,
@@ -1265,10 +1268,11 @@ impl Explorer {
         let task = self.handle(message);
         self.sync_pane();
         // every model change refreshes the ribbon (enablement, toggle
-        // values, contextual-tab availability)
+        // values, contextual-tab availability) — but only when the
+        // snapshot CHANGED: update() runs per input event, and a mouse
+        // move must not invalidate + re-query every command
         let snap = self.ribbon_snapshot();
-        self.ribbon.sync(snap);
-        if auto {
+        if self.ribbon.sync_changed(&snap) && auto {
             self.ribbon.auto_activate();
         }
         task
@@ -1555,6 +1559,8 @@ impl Explorer {
                 iced::Task::none()
             }
             Message::ContextBackground => {
+                self.hovered = None;
+                self.nav_hover = None;
                 let entries = if fs::archive::resolve(&self.cwd).is_some() {
                     crate::menu::build_archive(&self.menu_cfg, 0, false, false)
                 } else {
@@ -1570,6 +1576,8 @@ impl Explorer {
                 iced::Task::none()
             }
             Message::ContextNav(path) => {
+                self.hovered = None;
+                self.nav_hover = None;
                 self.menu = Some(crate::menu::Open {
                     entries: crate::menu::build_nav(&self.menu_cfg),
                     x: self.cursor.x,

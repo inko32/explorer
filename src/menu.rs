@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use iced::advanced::widget::{Operation, Tree, Widget, tree};
 use iced::advanced::{Clipboard, Layout, Shell, layout, overlay, renderer};
 use iced::widget::{Space, column, container, mouse_area, row, text};
-use iced::{Color, Element, Length, Rectangle, Size, Vector, mouse};
+use iced::{Color, Element, Length, Point, Rectangle, Size, Vector, mouse};
 use serde::Deserialize;
 
 use crate::model::Message;
@@ -104,6 +104,9 @@ pub struct LayoutCfg {
     pub pad_h: f32,
     pub font_size: f32,
     pub corner_radius: f32,
+    /// Render the menu as an independent overlay layer (experimental;
+    /// default false = in-window rendering with a modal shield).
+    pub popup: bool,
 }
 
 impl Default for LayoutCfg {
@@ -117,6 +120,7 @@ impl Default for LayoutCfg {
             pad_h: 6.0,
             font_size: 12.0,
             corner_radius: 0.0,
+            popup: false,
         }
     }
 }
@@ -893,10 +897,12 @@ mod tests {
     }
 }
 
-/// Menu layer for ui.rs: a click-away catcher under the floated menu.
-/// The anchor is the menu's left-up corner; when that would push the
-/// menu out of the window the anchor flips to the right-up (and/or
-/// right-down/left-down) corner.
+/// Menu layer for ui.rs (default in-window rendering): the floated menu
+/// over a modal shield that swallows every pointer event — iced stacks
+/// stop dispatching at the first captured event, and the LAST child is
+/// on top (gets events first), so the menu handles its own hover/clicks
+/// and the shield blocks everything behind it. A press outside the menu
+/// closes it.
 pub fn layer<'a>(open: &'a Open, cfg: &'a MenuCfg, skin: skin::Skin) -> Element<'a, Message> {
     let (x, y) = (open.x, open.y);
     let menu = iced::widget::float(view(open, cfg, skin)).translate(
@@ -914,11 +920,231 @@ pub fn layer<'a>(open: &'a Open, cfg: &'a MenuCfg, skin: skin::Skin) -> Element<
             Vector::new(tx.max(0.0) - bounds.x, ty.max(0.0) - bounds.y)
         },
     );
-    iced::widget::stack![
-        mouse_area(Space::new().width(Length::Fill).height(Length::Fill))
-            .on_press(Message::CloseMenu)
-            .on_right_press(Message::CloseMenu),
-        menu,
-    ]
-    .into()
+    iced::widget::stack![Element::new(Shield { on_press: Message::CloseMenu }), menu].into()
+}
+
+/// Modal shield under an open menu: captures all mouse/touch events so
+/// the UI behind the menu stays inert; a press closes the menu.
+struct Shield {
+    on_press: Message,
+}
+
+impl Widget<Message, iced::Theme, iced::Renderer> for Shield {
+    fn size(&self) -> Size<Length> {
+        Size::new(Length::Fill, Length::Fill)
+    }
+
+    fn layout(
+        &mut self,
+        _tree: &mut Tree,
+        _renderer: &iced::Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        layout::Node::new(limits.resolve(Length::Fill, Length::Fill, Size::ZERO))
+    }
+
+    fn draw(
+        &self,
+        _tree: &Tree,
+        _renderer: &mut iced::Renderer,
+        _theme: &iced::Theme,
+        _style: &renderer::Style,
+        _layout: Layout<'_>,
+        _cursor: mouse::Cursor,
+        _viewport: &Rectangle,
+    ) {
+    }
+
+    fn update(
+        &mut self,
+        _tree: &mut Tree,
+        event: &iced::Event,
+        _layout: Layout<'_>,
+        _cursor: mouse::Cursor,
+        _renderer: &iced::Renderer,
+        _clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        _viewport: &Rectangle,
+    ) {
+        match event {
+            iced::Event::Mouse(mouse::Event::ButtonPressed(_))
+            | iced::Event::Touch(iced::touch::Event::FingerPressed { .. }) => {
+                // the menu above runs first and captures its own presses
+                if !shell.is_event_captured() {
+                    shell.publish(self.on_press.clone());
+                }
+                shell.capture_event();
+            }
+            iced::Event::Mouse(_) | iced::Event::Touch(_) => {
+                shell.capture_event();
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Menu host for ui.rs: a zero-size widget at the view root whose
+/// `overlay()` floats the menu as an INDEPENDENT LAYER (menu.yaml
+/// `layout.popup: true` — experimental; the runtime may not re-query
+/// overlays right after the menu opens). Overlays get events before the
+/// whole base UI, so the menu is modal by construction.
+pub fn host<'a>(open: &'a Open, cfg: &'a MenuCfg, skin: skin::Skin) -> Element<'a, Message> {
+    Element::new(MenuHost { open, cfg, skin })
+}
+
+struct MenuHost<'a> {
+    open: &'a Open,
+    cfg: &'a MenuCfg,
+    skin: skin::Skin,
+}
+
+impl<'a> Widget<Message, iced::Theme, iced::Renderer> for MenuHost<'a> {
+    fn size(&self) -> Size<Length> {
+        Size::new(Length::Fixed(0.0), Length::Fixed(0.0))
+    }
+
+    fn layout(
+        &mut self,
+        _tree: &mut Tree,
+        _renderer: &iced::Renderer,
+        _limits: &layout::Limits,
+    ) -> layout::Node {
+        layout::Node::new(Size::ZERO)
+    }
+
+    fn draw(
+        &self,
+        _tree: &Tree,
+        _renderer: &mut iced::Renderer,
+        _theme: &iced::Theme,
+        _style: &renderer::Style,
+        _layout: Layout<'_>,
+        _cursor: mouse::Cursor,
+        _viewport: &Rectangle,
+    ) {
+    }
+
+    fn overlay<'b>(
+        &'b mut self,
+        _tree: &'b mut Tree,
+        _layout: Layout<'b>,
+        _renderer: &iced::Renderer,
+        _viewport: &Rectangle,
+        _translation: Vector,
+    ) -> Option<overlay::Element<'b, Message, iced::Theme, iced::Renderer>> {
+        Some(overlay::Element::new(Box::new(MenuOverlay {
+            content: view(self.open, self.cfg, self.skin),
+            tree: None,
+            x: self.open.x,
+            y: self.open.y,
+        })))
+    }
+}
+
+/// The menu overlay: hosts the menu widget tree at the anchor point and
+/// captures all pointer events (modal).
+struct MenuOverlay<'a> {
+    content: Element<'a, Message>,
+    tree: Option<Tree>,
+    x: f32,
+    y: f32,
+}
+
+impl<'a> overlay::Overlay<Message, iced::Theme, iced::Renderer> for MenuOverlay<'a> {
+    fn layout(&mut self, renderer: &iced::Renderer, bounds: Size) -> layout::Node {
+        let tree = self.tree.get_or_insert_with(|| Tree::new(&self.content));
+        self.content.as_widget().diff(tree);
+        let node = self.content.as_widget_mut().layout(
+            tree,
+            renderer,
+            &layout::Limits::new(Size::ZERO, bounds),
+        );
+        // anchor = left-top corner; flip to the right and/or bottom
+        // corner when the menu would leave the window
+        let size = node.size();
+        let tx = if self.x + size.width > bounds.width - 4.0 {
+            self.x - size.width
+        } else {
+            self.x
+        };
+        let ty = if self.y + size.height > bounds.height - 4.0 {
+            self.y - size.height
+        } else {
+            self.y
+        };
+        node.move_to(Point::new(tx.max(0.0), ty.max(0.0)))
+    }
+
+    fn draw(
+        &self,
+        renderer: &mut iced::Renderer,
+        theme: &iced::Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+    ) {
+        let viewport = layout.bounds();
+        self.content.as_widget().draw(
+            self.tree.as_ref().expect("layout ran"),
+            renderer,
+            theme,
+            style,
+            layout,
+            cursor,
+            &viewport,
+        );
+    }
+
+    fn update(
+        &mut self,
+        event: &iced::Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &iced::Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+    ) {
+        let viewport = layout.bounds();
+        self.content.as_widget_mut().update(
+            self.tree.as_mut().expect("layout ran"),
+            event,
+            layout,
+            cursor,
+            renderer,
+            clipboard,
+            shell,
+            &viewport,
+        );
+        // modal: no pointer event reaches the UI behind the menu
+        match event {
+            iced::Event::Mouse(mouse::Event::ButtonPressed(_))
+            | iced::Event::Touch(iced::touch::Event::FingerPressed { .. }) => {
+                if !shell.is_event_captured() {
+                    shell.publish(Message::CloseMenu);
+                }
+                shell.capture_event();
+            }
+            iced::Event::Mouse(_) | iced::Event::Touch(_) => {
+                shell.capture_event();
+            }
+            // keyboard passes through (Escape closes via handle_key)
+            _ => {}
+        }
+    }
+
+    fn mouse_interaction(
+        &self,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &iced::Renderer,
+    ) -> mouse::Interaction {
+        let viewport = layout.bounds();
+        self.content.as_widget().mouse_interaction(
+            self.tree.as_ref().expect("layout ran"),
+            layout,
+            cursor,
+            &viewport,
+            renderer,
+        )
+    }
 }
