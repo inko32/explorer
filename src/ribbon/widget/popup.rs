@@ -14,7 +14,7 @@ use crate::ribbon::prop::{FontToggle, PropertyKey, PropValue};
 use crate::ribbon::spec::{CommandRef, ControlSpec, MenuItemSpec};
 use crate::ribbon::theme::{self, Theme, STANDARD_COLORS, THEME_COLORS};
 
-use super::layout::{chevron, text, wrap_width, Ctx};
+use super::layout::{chevron, lw, text, wrap_width, Ctx};
 use super::scene::{Cmd, Fill, Node, Scene};
 use super::state::{close_all_popups, close_popup, Popup, PopupKind, State, SwatchSel, Target};
 use super::{activate, publish, RibbonEvent};
@@ -46,7 +46,7 @@ fn panel(scene: &mut Scene, size: Size, theme: &Theme) {
         scene,
         Rectangle::with_size(size),
         Fill::Color(theme.popup_bg),
-        Some((theme.popup_border, 1.0)),
+        Some((theme.popup_border, theme.border_scale)),
         2.0,
     );
 }
@@ -57,7 +57,7 @@ fn hover_row(ctx: &Ctx, scene: &mut Scene, rect: Rectangle, target: Target, enab
             scene,
             rect,
             Fill::Color(ctx.theme.hover_bg),
-            ctx.theme.hover_border.map(|c| (c, 1.0)),
+            ctx.theme.hover_border.map(|c| (c, lw(ctx, 1.0))),
             0.0,
         );
     }
@@ -72,7 +72,7 @@ pub fn popup_scene(ctx: &Ctx, popup: &Popup) -> Option<Scene> {
         PopupKind::Menu { cmd, path } => {
             let spec = ctx.spec();
             let items = find_menu_items(spec, *cmd)?;
-            Some(menu_scene(ctx, &items, path, *cmd))
+            Some(menu_scene(ctx, items, path, *cmd))
         }
         PopupKind::ContextMenu { cmd, path } => {
             let spec = ctx.spec();
@@ -92,10 +92,10 @@ pub fn popup_scene(ctx: &Ctx, popup: &Popup) -> Option<Scene> {
 }
 
 /// Find the menu items of a dropdown / split button command.
-fn find_menu_items<'a>(
-    spec: &'a crate::ribbon::spec::RibbonSpec,
+fn find_menu_items(
+    spec: &crate::ribbon::spec::RibbonSpec,
     cmd: u32,
-) -> Option<&'a [MenuItemSpec]> {
+) -> Option<&[MenuItemSpec]> {
     for tab in &spec.tabs {
         for group in &tab.groups {
             if let Some(items) = in_controls(&group.controls, cmd) {
@@ -106,10 +106,10 @@ fn find_menu_items<'a>(
     None
 }
 
-fn in_controls<'a>(
-    controls: &'a [ControlSpec],
+fn in_controls(
+    controls: &[ControlSpec],
     cmd: u32,
-) -> Option<&'a [MenuItemSpec]> {
+) -> Option<&[MenuItemSpec]> {
     for control in controls {
         match control {
             ControlSpec::SplitButton(s) | ControlSpec::DropDownButton(s) => {
@@ -131,7 +131,7 @@ fn in_controls<'a>(
     None
 }
 
-fn in_items<'a>(items: &'a [MenuItemSpec], cmd: u32) -> Option<&'a [MenuItemSpec]> {
+fn in_items(items: &[MenuItemSpec], cmd: u32) -> Option<&[MenuItemSpec]> {
     for item in items {
         if resolved(item.command.as_ref()) == Some(cmd) {
             return Some(&item.items);
@@ -192,7 +192,7 @@ pub fn menu_scene(ctx: &Ctx, items: &[MenuItemSpec], path: &[usize], base_cmd: u
             base_cmd,
         );
         level_items = &item.items;
-        origin = origin + Vector::new(sw, row_y);
+        origin += Vector::new(sw, row_y);
         let _ = origin;
     }
 
@@ -259,6 +259,9 @@ fn menu_row_y(ctx: &Ctx, items: &[MenuItemSpec], idx: usize) -> f32 {
     y
 }
 
+// menu drawing walks (ctx, scene, layout constants) together — the
+// arity mirrors the recursion state
+#[allow(clippy::too_many_arguments)]
 fn draw_menu_level(
     ctx: &Ctx,
     scene: &mut Scene,
@@ -272,6 +275,7 @@ fn draw_menu_level(
     draw_menu_level_offset(ctx, scene, items, origin, w, path, level, base_cmd)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_menu_level_offset(
     ctx: &Ctx,
     scene: &mut Scene,
@@ -288,7 +292,7 @@ fn draw_menu_level_offset(
         scene,
         Rectangle::new(
             Point::new(origin.x + 26.0, origin.y + 2.0),
-            Size::new(1.0, menu_height(ctx, items) - 4.0),
+            Size::new(lw(ctx, 1.0), menu_height(ctx, items) - 4.0),
         ),
         Fill::Color(ctx.theme.group_separator),
         None,
@@ -301,7 +305,7 @@ fn draw_menu_level_offset(
                 scene,
                 Rectangle::new(
                     Point::new(origin.x + 4.0, y),
-                    Size::new(w - 8.0, 1.0),
+                    Size::new(w - 8.0, lw(ctx, 1.0)),
                 ),
                 Fill::Color(ctx.theme.group_separator),
                 None,
@@ -327,13 +331,7 @@ fn draw_menu_level_offset(
         let image = item
             .image
             .as_ref()
-            .map(|i| {
-                if i.starts_with("file:") || i.trim_start().starts_with("<svg") {
-                    crate::ribbon::image::UiImage::Named(i.clone())
-                } else {
-                    crate::ribbon::image::UiImage::Named(i.clone())
-                }
-            })
+            .map(|i| crate::ribbon::image::UiImage::Named(i.clone()))
             .or_else(|| ctx.small_image(cmd))
             .unwrap_or_default();
         svg(
@@ -387,10 +385,10 @@ fn app_menu_scene(ctx: &Ctx) -> Scene {
 
     let left_h = menu_height(ctx, &menu.items);
     let mut right_h = 30.0f32;
-    if let Some(rc) = recent_cmd {
-        if let Ok(PropValue::Items(items)) = ctx.fw.get_ui_command_property(rc, PropertyKey::RecentItems) {
-            right_h += items.len() as f32 * 36.0 + 4.0;
-        }
+    if let Some(rc) = recent_cmd
+        && let Ok(PropValue::Items(items)) = ctx.fw.get_ui_command_property(rc, PropertyKey::RecentItems)
+    {
+        right_h += items.len() as f32 * 36.0 + 4.0;
     }
     let height = left_h.max(right_h) + 4.0;
 
@@ -414,7 +412,7 @@ fn app_menu_scene(ctx: &Ctx) -> Scene {
         let x = left_w + 4.0;
         quad(
             &mut scene,
-            Rectangle::new(Point::new(left_w, 2.0), Size::new(1.0, height - 4.0)),
+            Rectangle::new(Point::new(left_w, 2.0), Size::new(lw(ctx, 1.0), height - 4.0)),
             Fill::Color(ctx.theme.group_separator),
             None,
             0.0,
@@ -729,7 +727,7 @@ fn gallery_scene(ctx: &Ctx, cmd: u32, scroll: usize) -> Scene {
                         Size::new(cell_w - 4.0, cell_h - 4.0),
                     );
                     if idx == selected {
-                        quad(&mut scene, cell, Fill::Color(ctx.theme.checked_bg), ctx.theme.checked_border.map(|c| (c, 1.0)), 2.0);
+                        quad(&mut scene, cell, Fill::Color(ctx.theme.checked_bg), ctx.theme.checked_border.map(|c| (c, lw(ctx, 1.0))), 2.0);
                     }
                     hover_row(ctx, &mut scene, cell, Target::GalleryItem { cmd, index: idx, popup: true }, true);
                     scene.push(Node::new(cell, Cmd::Hit).target(Target::GalleryItem { cmd, index: idx, popup: true }).tip(cmd));
@@ -763,7 +761,7 @@ fn gallery_scene(ctx: &Ctx, cmd: u32, scroll: usize) -> Scene {
         for (z, delta, up_arrow) in [(up, -1i32, true), (down, 1, false)] {
             let can = if delta < 0 { scroll > 0 } else { scroll + visible_rows < rows.len() };
             if can {
-                quad(&mut scene, z, Fill::Color(ctx.theme.qat_bg.0), Some((ctx.theme.border, 1.0)), 2.0);
+                quad(&mut scene, z, Fill::Color(ctx.theme.qat_bg.0), Some((ctx.theme.border, lw(ctx, 1.0))), 2.0);
                 chevron(
                     &mut scene,
                     Rectangle::new(Point::new(z.x + 3.0, z.y + 3.5), Size::new(10.0, 7.0)),
@@ -977,7 +975,7 @@ fn font_scene(ctx: &Ctx, cmd: u32, scroll: usize) -> Scene {
     // divider
     quad(
         &mut scene,
-        Rectangle::new(Point::new(211.0, 3.0), Size::new(1.0, height - 32.0)),
+        Rectangle::new(Point::new(211.0, 3.0), Size::new(lw(ctx, 1.0), height - 32.0)),
         Fill::Color(ctx.theme.group_separator),
         None,
         0.0,
@@ -1032,8 +1030,8 @@ fn font_scene(ctx: &Ctx, cmd: u32, scroll: usize) -> Scene {
     // bottom row: grow/shrink
     let grow = Rectangle::new(Point::new(4.0, height - 26.0), Size::new(22.0, 22.0));
     let shrink = Rectangle::new(Point::new(28.0, height - 26.0), Size::new(22.0, 22.0));
-    quad(&mut scene, grow, Fill::Color(Color::TRANSPARENT), Some((ctx.theme.border, 1.0)), ctx.theme.button_radius);
-    quad(&mut scene, shrink, Fill::Color(Color::TRANSPARENT), Some((ctx.theme.border, 1.0)), ctx.theme.button_radius);
+    quad(&mut scene, grow, Fill::Color(Color::TRANSPARENT), Some((ctx.theme.border, lw(ctx, 1.0))), ctx.theme.button_radius);
+    quad(&mut scene, shrink, Fill::Color(Color::TRANSPARENT), Some((ctx.theme.border, lw(ctx, 1.0))), ctx.theme.button_radius);
     text(&mut scene, grow, "A↑", ctx.fonts.ribbon.menu, ctx.theme.text, Horizontal::Center, Vertical::Center);
     text(&mut scene, shrink, "A↓", ctx.fonts.ribbon.menu, ctx.theme.text, Horizontal::Center, Vertical::Center);
     scene.push(Node::new(grow, Cmd::Hit).target(Target::FontGrow(cmd)).tip(cmd));
@@ -1161,7 +1159,7 @@ fn qat_menu_scene(ctx: &Ctx) -> Scene {
         scene.push(Node::new(row, Cmd::Hit).target(t).tip(*cmd));
         // checkbox
         let cb = Rectangle::new(Point::new(10.0, y + 5.0), Size::new(12.0, 12.0));
-        quad(&mut scene, cb, Fill::Color(Color::WHITE), Some((ctx.theme.border, 1.0)), ctx.theme.field_radius);
+        quad(&mut scene, cb, Fill::Color(Color::WHITE), Some((ctx.theme.border, lw(ctx, 1.0))), ctx.theme.field_radius);
         if in_qat.contains(cmd) {
             text(&mut scene, cb, "✓", ctx.fonts.ribbon.menu, ctx.theme.selection, Horizontal::Center, Vertical::Center);
         }
@@ -1170,7 +1168,7 @@ fn qat_menu_scene(ctx: &Ctx) -> Scene {
     }
 
     // separator
-    quad(&mut scene, Rectangle::new(Point::new(6.0, y + 2.0), Size::new(width - 12.0, 1.0)), Fill::Color(ctx.theme.group_separator), None, 0.0);
+    quad(&mut scene, Rectangle::new(Point::new(6.0, y + 2.0), Size::new(width - 12.0, lw(ctx, 1.0))), Fill::Color(ctx.theme.group_separator), None, 0.0);
     y += 5.0;
 
     // dock toggle
@@ -1179,7 +1177,7 @@ fn qat_menu_scene(ctx: &Ctx) -> Scene {
     hover_row(ctx, &mut scene, row, t.clone(), true);
     scene.push(Node::new(row, Cmd::Hit).target(t));
     let cb = Rectangle::new(Point::new(10.0, y + 5.0), Size::new(12.0, 12.0));
-    quad(&mut scene, cb, Fill::Color(Color::WHITE), Some((ctx.theme.border, 1.0)), 1.0);
+    quad(&mut scene, cb, Fill::Color(Color::WHITE), Some((ctx.theme.border, lw(ctx, 1.0))), 1.0);
     if ctx.view().qat_dock() == crate::ribbon::enums::ControlDock::Bottom {
         text(&mut scene, cb, "✓", ctx.fonts.ribbon.menu, ctx.theme.selection, Horizontal::Center, Vertical::Center);
     }
@@ -1192,7 +1190,7 @@ fn qat_menu_scene(ctx: &Ctx) -> Scene {
     hover_row(ctx, &mut scene, row, t.clone(), true);
     scene.push(Node::new(row, Cmd::Hit).target(t));
     let cb = Rectangle::new(Point::new(10.0, y + 5.0), Size::new(12.0, 12.0));
-    quad(&mut scene, cb, Fill::Color(Color::WHITE), Some((ctx.theme.border, 1.0)), 1.0);
+    quad(&mut scene, cb, Fill::Color(Color::WHITE), Some((ctx.theme.border, lw(ctx, 1.0))), 1.0);
     if ctx.view().minimized() {
         text(&mut scene, cb, "✓", ctx.fonts.ribbon.menu, ctx.theme.selection, Horizontal::Center, Vertical::Center);
     }
@@ -1238,7 +1236,7 @@ pub fn tooltip_scene(ctx: &Ctx, cmd: u32) -> Scene {
         panel_rect,
         Cmd::Quad {
             fill: Fill::Color(ctx.theme.tooltip_bg),
-            border: Some((ctx.theme.tooltip_border, 1.0)),
+            border: Some((ctx.theme.tooltip_border, lw(ctx, 1.0))),
             radius: 2.0,
         },
     ));
@@ -1303,6 +1301,9 @@ pub struct RibbonOverlay<'a, Message, Th, Renderer> {
     /// window size (the new Overlay trait has no layout phase).
     pub layout: iced::advanced::Layout,
     pub window: Size,
+    /// Opacity multiplier (1.0 = opaque); the unfocused-window popup
+    /// fade-out animates this (SPEC/Unfocused_Window.md §3).
+    pub alpha: f32,
     pub mapper: Option<&'a dyn Fn(RibbonEvent) -> Message>,
     pub _phantom: std::marker::PhantomData<(Th, Renderer)>,
 }
@@ -1360,6 +1361,7 @@ where
             self.layout.position(),
             &self.layout.bounds(),
             self.theme,
+            self.alpha,
         );
     }
 
@@ -1371,7 +1373,8 @@ where
         shell: &mut Shell<'_, Message>,
     ) {
         let layout = self.layout;
-        if self.tooltip {
+        // no input while showing a tooltip or fading out on focus loss
+        if self.tooltip || self.state.popup_fade_start.is_some() {
             return;
         }
         if self.state.popup.is_none() {
@@ -1393,15 +1396,15 @@ where
                 }
                 // preview on gallery item hover
                 self.handle_preview(&target, shell);
-                if let Some(node) = self.scene.hit(local(position)) {
-                    if let Some(tip) = node.tip {
-                        if self.state.tooltip != Some(tip) {
-                            shell.request_redraw();
-                        }
-                        self.state.tooltip = Some(tip);
-                        self.state.tooltip_anchor =
-                            Some(super::translate_rect(node.rect, origin));
+                if let Some(node) = self.scene.hit(local(position))
+                    && let Some(tip) = node.tip
+                {
+                    if self.state.tooltip != Some(tip) {
+                        shell.request_redraw();
                     }
+                    self.state.tooltip = Some(tip);
+                    self.state.tooltip_anchor =
+                        Some(super::translate_rect(node.rect, origin));
                 }
                 shell.capture_event();
             }
@@ -1456,6 +1459,12 @@ where
                 }
                 shell.capture_event();
             }
+            // window events (focus loss, resize) are not the popup's:
+            // capturing them hides them from the app's event
+            // subscription — iced::event::listen forwards only Ignored
+            // events — and locks the unfocused fade
+            // (SPEC/Unfocused_Window.md §1)
+            iced::Event::Window(_) => {}
             _ => shell.capture_event(),
         }
     }
@@ -1524,10 +1533,10 @@ impl<'a, Message, Th, Renderer> RibbonOverlay<'a, Message, Th, Renderer> {
             return;
         }
         let local = Point::new(position.x - origin.x, position.y - origin.y);
-        if let Some(node) = self.scene.hit(local) {
-            if let Some(t) = node.target.clone() {
-                self.state.pressed = Some(t);
-            }
+        if let Some(node) = self.scene.hit(local)
+            && let Some(t) = node.target.clone()
+        {
+            self.state.pressed = Some(t);
         }
         shell.capture_event();
     }
@@ -1543,23 +1552,23 @@ impl<'a, Message, Th, Renderer> RibbonOverlay<'a, Message, Th, Renderer> {
         let local = Point::new(position.x - origin.x, position.y - origin.y);
         let hit = self.scene.hit(local).and_then(|n| n.target.clone());
         let pressed = self.state.pressed.take();
-        if let (Some(t), Some(p)) = (hit, pressed) {
-            if t == p {
-                let anchor = match self.scene.hit(local) {
-                    Some(n) => super::translate_rect(n.rect, origin),
-                    None => bounds,
-                };
-                activate(
-                    self.fw,
-                    self.theme,
-                    self.state,
-                    &t,
-                    anchor,
-                    origin,
-                    shell,
-                    self.mapper,
-                );
-            }
+        if let (Some(t), Some(p)) = (hit, pressed)
+            && t == p
+        {
+            let anchor = match self.scene.hit(local) {
+                Some(n) => super::translate_rect(n.rect, origin),
+                None => bounds,
+            };
+            activate(
+                self.fw,
+                self.theme,
+                self.state,
+                &t,
+                anchor,
+                origin,
+                shell,
+                self.mapper,
+            );
         }
         shell.capture_event();
     }

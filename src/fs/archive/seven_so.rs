@@ -207,10 +207,10 @@ impl<'lib> BStr<'lib> {
 
 impl Drop for BStr<'_> {
     fn drop(&mut self) {
-        if !self.ptr.is_null() {
-            if let Some(free) = self.free {
-                free(self.ptr);
-            }
+        if !self.ptr.is_null()
+            && let Some(free) = self.free
+        {
+            free(self.ptr);
             // else: SysFreeString unavailable — small leak, bounded by use
         }
     }
@@ -334,13 +334,13 @@ impl SevenLib {
             }
             let mut pv = PropVariant::empty();
             let mut exts = Vec::new();
-            if unsafe { (self.get_handler_property2)(i, 2, &mut pv) } == S_OK {
-                if let Some(s) = prop_bstr(&pv, self.sys_free_string.as_ref()) {
-                    exts = s
-                        .split_whitespace()
-                        .map(|e| e.trim_start_matches('.').to_lowercase())
-                        .collect();
-                }
+            if unsafe { (self.get_handler_property2)(i, 2, &mut pv) } == S_OK
+                && let Some(s) = prop_bstr(&pv, self.sys_free_string.as_ref())
+            {
+                exts = s
+                    .split_whitespace()
+                    .map(|e| e.trim_start_matches('.').to_lowercase())
+                    .collect();
             }
             if let Some(g) = clsid_s.as_deref().and_then(parse_guid) {
                 out.push(FormatHandler { clsid: g, extensions: exts });
@@ -377,7 +377,7 @@ fn parse_guid(s: &str) -> Option<Guid> {
     let d2 = u16::from_str_radix(parts[1], 16).ok()?;
     let d3 = u16::from_str_radix(parts[2], 16).ok()?;
     let d4hi = h(parts[3])? as u16;
-    let d4lo = h(parts[4])? as u64;
+    let d4lo = h(parts[4])?;
     Some(Guid {
         d1,
         d2,
@@ -415,7 +415,7 @@ impl ArchiveBackend for SevenZipSo {
         };
         let mut last_err = FsError(format!("no handler for .{ext}"));
         for h in l.handlers()? {
-            if !h.extensions.iter().any(|e| *e == ext) {
+            if !h.extensions.contains(&ext) {
                 continue;
             }
             match list_with_handler(l, h, archive) {
@@ -526,10 +526,10 @@ fn list_with_handler(
                 };
             }
             let mut pv = PropVariant::empty();
-            if (vt.get_property)(obj, i, ids.mtime, &mut pv) == S_OK {
-                if pv.vt == VT_FILETIME {
-                    modified = prop_u64(&pv).and_then(filetime_to_epoch);
-                }
+            if (vt.get_property)(obj, i, ids.mtime, &mut pv) == S_OK
+                && pv.vt == VT_FILETIME
+            {
+                modified = prop_u64(&pv).and_then(filetime_to_epoch);
             }
             let Some(path) = path else { continue };
             out.push(ArchiveItem {

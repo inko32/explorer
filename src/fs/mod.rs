@@ -130,6 +130,8 @@ pub enum Job {
     Rename(PathBuf, PathBuf),
     Trash(Vec<PathBuf>),
     Copy { sources: Vec<PathBuf>, dest_dir: PathBuf, cut: bool },
+    /// Create symlinks to `sources` inside `dest_dir`.
+    Link { sources: Vec<PathBuf>, dest_dir: PathBuf },
 }
 
 #[derive(Debug, Clone)]
@@ -139,6 +141,8 @@ pub enum FsEvent {
     DirCreated { parent: PathBuf, result: Result<String, String> },
     Renamed { result: Result<(), String> },
     Trashed { result: Result<(), String> },
+    /// Symlink creation finished; Ok carries the created count.
+    Linked { result: Result<usize, String> },
     /// Progress of the active file operation.
     OpProgress { done_bytes: u64, total_bytes: u64, current: PathBuf },
     OpDone { result: Result<(), String> },
@@ -207,8 +211,38 @@ fn worker(backend: impl Backend, jobs: std::sync::mpsc::Receiver<Job>, tx: Event
                 let result = copy_tree(&backend, &sources, &dest_dir, cut, &tx);
                 let _ = tx.unbounded_send(FsEvent::OpDone { result });
             }
+            Job::Link { sources, dest_dir } => {
+                let mut ok = 0usize;
+                let mut first_err = None;
+                for src in &sources {
+                    let Some(name) = src.file_name() else { continue };
+                    let dst = auto_rename(&dest_dir.join(name));
+                    let r = link_one(src, &dst);
+                    match r {
+                        Ok(()) => ok += 1,
+                        Err(e) => {
+                            first_err = Some(format!("{}: {e}", src.display()));
+                            break;
+                        }
+                    }
+                }
+                let result = first_err.map_or(Ok(ok), Err);
+                let _ = tx.unbounded_send(FsEvent::Linked { result });
+            }
         }
     }
+}
+
+/// Create one symlink (POSIX); Windows needs a privilege we don't
+/// require, so it reports unsupported there for now.
+#[cfg(unix)]
+fn link_one(src: &Path, dst: &Path) -> Result<(), String> {
+    std::os::unix::fs::symlink(src, dst).map_err(|e| e.to_string())
+}
+
+#[cfg(not(unix))]
+fn link_one(_src: &Path, _dst: &Path) -> Result<(), String> {
+    Err("links are not supported on this platform".into())
 }
 
 /// Pick "New folder", "New folder (2)", ... and create it.
@@ -241,17 +275,25 @@ fn copy_tree(
     }
     let mut done = 0u64;
     for (src, dst, bytes) in &plan {
-        if let Some(parent) = dst.parent() {
-            if !backend.is_dir(parent) {
-                // create intermediate dirs (best effort, errors surface at copy)
-                let _ = std::fs::create_dir_all(parent);
-            }
+        if let Some(parent) = dst.parent()
+            && !backend.is_dir(parent)
+        {
+            // create intermediate dirs (best effort, errors surface at copy)
+            let _ = std::fs::create_dir_all(parent);
         }
-        let dst = if backend.is_dir(&dst) || dst.exists() {
-            auto_rename(&dst)
+        let dst = if backend.is_dir(dst) || dst.exists() {
+            auto_rename(dst)
         } else {
             dst.clone()
         };
+        // directory entries are created, not copied: g_file_copy cannot
+        // copy directories ("Can't recursively copy directory")
+        if backend.is_dir(src) {
+            if let Err(e) = std::fs::create_dir_all(&dst) {
+                return Err(format!("{}: {e}", dst.display()));
+            }
+            continue;
+        }
         let mut last_report = std::time::Instant::now();
         let mut current_file_done = 0u64;
         let result = backend.copy_file(src, &dst, &mut |d, _t| {

@@ -66,10 +66,28 @@ use crate::ribbon::prop::{PropertyKey, PropValue};
 type CommandList = Vec<(u32, CommandType, Vec<(PropertyKey, PropValue)>)>;
 type SeenMap = std::collections::HashMap<u32, CommandType>;
 
+/// How unavailable (disabled) buttons look.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DisabledStyle {
+    /// Dimmed by opacity only (the classic look).
+    #[default]
+    Faded,
+    /// Desaturated (grayscale icon) plus the opacity dim.
+    GrayScaledFaded,
+}
+
 /// Full ribbon declaration.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct RibbonSpec {
+    /// How unavailable (disabled) buttons are rendered.
+    pub disabled_style: DisabledStyle,
+    /// Explorer extension: when the window is unfocused the ribbon
+    /// ignores all input and shows no hover feedback (CPU saving,
+    /// SPEC/Unfocused_Window.md).
+    #[serde(default = "default_true")]
+    pub ignore_input_when_unfocused: bool,
     /// Window-size sacrifices (explorer extension): below
     /// `ribbon_below` content width the ribbon is hidden entirely,
     /// below `nav_below` the navigation pane is hidden.
@@ -93,6 +111,10 @@ pub struct RibbonSpec {
     /// plus ordered fallback sizes tried as the window narrows.
     pub scaling: Vec<ScalingSpec>,
     pub tabs: Vec<TabSpec>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// UI metrics (explorer extension of the markup).
@@ -287,20 +309,11 @@ pub struct MenuItemSpec {
     pub items: Vec<MenuItemSpec>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct QatSpec {
     pub commands: Vec<CommandRef>,
     pub dock: QatDock,
-}
-
-impl Default for QatSpec {
-    fn default() -> Self {
-        Self {
-            commands: Vec::new(),
-            dock: QatDock::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
@@ -725,6 +738,9 @@ fn parse_image(image: &str) -> UiImage {
     }
 }
 
+// spec-to-command-list walker: every parameter is a distinct input,
+// a bag struct would just be unpacking noise here
+#[allow(clippy::too_many_arguments)]
 fn resolve_ref(
     commands: &std::collections::BTreeMap<String, u32>,
     cmd_slot: &mut Option<CommandRef>,

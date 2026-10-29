@@ -79,6 +79,7 @@ pub(crate) fn resize_zone(
 ///  - Win8: 3px accent border at the window edge; content is inset 3px
 ///    (internal calculation follows the exposed outer border).
 ///  - Win10: single 1px dark border; content inset 1px.
+///
 /// Frame thickness (top, right, bottom, left). Win8: thin top, THICK
 /// sides+bottom (the classic sizing border); Win10: 1px all around.
 /// The internal content is inset by exactly these amounts - the "virtual
@@ -88,20 +89,20 @@ pub fn frame_insets_pub(self_border: bool, style: crate::model::FrameStyle) -> (
     if !self_border {
         return (0.0, 0.0, 0.0, 0.0);
     }
+    // the frame border keeps a constant physical width (see
+    // SPEC/Border_DPI.md): scale the insets like any 1px border
+    let w = crate::theme::border_w;
     match style {
-        crate::model::FrameStyle::Win8 => (1.0, 6.0, 6.0, 6.0),
-        crate::model::FrameStyle::Win10 => (1.0, 1.0, 1.0, 1.0),
+        // Win8: the top stays a 1px hairline, but the thick sizing
+        // border on the sides and bottom is ordinary UI geometry and
+        // follows the DPI
+        crate::model::FrameStyle::Win8 => (w(1.0), 6.0, 6.0, 6.0),
+        crate::model::FrameStyle::Win10 => (w(1.0), w(1.0), w(1.0), w(1.0)),
     }
 }
 
 pub(crate) fn frame_insets(state: &Explorer) -> (f32, f32, f32, f32) {
-    if !state.self_border {
-        return (0.0, 0.0, 0.0, 0.0);
-    }
-    match state.frame_style {
-        crate::model::FrameStyle::Win8 => (1.0, 6.0, 6.0, 6.0),
-        crate::model::FrameStyle::Win10 => (1.0, 1.0, 1.0, 1.0),
-    }
+    frame_insets_pub(state.self_border, state.frame_style)
 }
 
 pub(crate) fn frame_color(state: &Explorer, skin: skin::Skin) -> Color {
@@ -185,7 +186,7 @@ pub(crate) fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'st
         .on_press(msg)
         .boxed()
     };
-    let ghost = Color::from_rgba(1.0, 1.0, 1.0, 0.18);
+    let ghost = skin.glass_ghost;
     container(
         row![
             one(names.0, mw, Message::Minimize, ghost, false),
@@ -294,11 +295,12 @@ fn contextual_blocks(state: &Explorer) -> Element<'static, Message> {
 /// window icon, framed by thin separators; the chevron docks the QAT
 /// back below the command pane.
 fn titlebar_qat(state: &Explorer, skin: skin::Skin) -> Element<'static, Message> {
+    let sheen = skin.glass_sheen;
     let vline = || {
         container(
-            container(Space::new().width(Length::Fixed(1.0)).height(Length::Fixed(15.0)))
-                .style(|_| container::Style {
-                    background: Some(Color::from_rgba(1.0, 1.0, 1.0, 0.35).into()),
+            container(Space::new().width(Length::Fixed(crate::theme::border_w(1.0))).height(Length::Fixed(15.0)))
+                .style(move |_| container::Style {
+                    background: Some(sheen.into()),
                     ..Default::default()
                 }),
         )

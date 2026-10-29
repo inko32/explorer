@@ -3,6 +3,14 @@
 use std::path::{Path, PathBuf};
 use crate::fs::{self, FsEvent, Job};
 
+/// Click-focus between the two selection panes
+/// (SPEC/Unfocused_Window.md §1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pane {
+    Folder,
+    Nav,
+}
+
 #[derive(Debug, Clone)]
 pub enum Message {
     WindowOpened(iced::window::Id),
@@ -23,6 +31,9 @@ pub enum Message {
     /// Hover state of the address/search splitter (drives tint + cursor).
     SplitterHover(bool),
     Navigate(PathBuf),
+    /// Nav-pane row clicked: marks the nav pane as the active pane,
+    /// then navigates (SPEC/Unfocused_Window.md §1).
+    NavPress(PathBuf),
     Back,
     Forward,
     Up,
@@ -43,6 +54,7 @@ pub enum Message {
     Hover(Option<usize>),
     Open(usize),
     ToggleDark,
+    ToggleGrayDisabled,
     TitlebarPress,
     TitlebarDoubleClick,
     Minimize,
@@ -139,8 +151,18 @@ pub enum Message {
     StartResize(crate::border::ResizeDir),
     /// Switch between the Win8 (double) and Win10 (1px) window borders.
     ToggleFrameStyle,
+    /// TEMP: paint the folder-view backdrop rectangle with a rainbow
+    /// gradient (View-tab ribbon toggle).
+    ToggleRainbow,
     /// Toggle the QAT between the title bar ("above") and below the ribbon.
     ToggleQatDock,
+    // ---- drag & drop (SPEC/DRAGGING.md) ----
+    /// The pointer entered a registered drop target while dragging.
+    DragTargetEnter(crate::dnd::DropTarget),
+    /// The pointer left a registered drop target.
+    DragTargetLeave(crate::dnd::DropTarget),
+    /// Cancel the active drag (Escape / window focus loss).
+    DragCancel,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -184,6 +206,9 @@ pub struct NavTree {
     /// Scroll offset + viewport height of the tree scrollable.
     pub scroll_y: f32,
     pub viewport_h: f32,
+    /// Sub-row wheel remainder: the tree scrolls whole lines, so small
+    /// (touchpad) deltas accumulate here until they fill a row.
+    pub scroll_rem: f32,
 }
 
 impl NavTree {
@@ -195,6 +220,7 @@ impl NavTree {
             children: Default::default(),
             scroll_y: 0.0,
             viewport_h: 0.0,
+            scroll_rem: 0.0,
         }
     }
 
@@ -230,6 +256,17 @@ struct ColDrag {
     start_w: f32,
 }
 
+/// A file-view press that may still become a drag (SPEC/DRAGGING.md §5):
+/// the row, the cursor at press, and whether the release must collapse
+/// a multi-selection down to that row (press-without-drag on a selected
+/// row of a multi-selection).
+#[derive(Clone, Copy)]
+struct PressArm {
+    i: usize,
+    at: iced::Point,
+    collapse: bool,
+}
+
 /// Rubber-band selection rectangle (file-view content coordinates).
 pub struct Marquee {
     pub x0: f32,
@@ -251,8 +288,19 @@ pub struct Explorer {
     back: Vec<PathBuf>,
     forward: Vec<PathBuf>,
     pub dark: bool,
+    /// Disabled ribbon buttons/icons use the gray-scaled-faded style
+    /// (see `disabled_style` in ribbon.yaml).
+    pub disabled_gray: bool,
     /// `--ui-debug`: outline every element (colored 1px borders).
     pub ui_debug: bool,
+    /// TEMP: rainbow gradient on the folder-view backdrop rectangle.
+    pub rainbow: bool,
+    /// Window has keyboard focus; when false, selections fade to gray
+    /// and the ribbon goes inert (SPEC/Unfocused_Window.md).
+    pub focused: bool,
+    /// Pane that last received a click: its selection keeps the live
+    /// colors, the other pane's fades (SPEC/Unfocused_Window.md §4).
+    pub active_pane: Pane,
     /// `--dpi=N`: absolute UI scale factor (percent of 96 dpi, or direct).
     /// None = follow the system scale.
     pub dpi_target: Option<f32>,
@@ -349,6 +397,12 @@ pub struct Explorer {
     request_reveal: bool,
     sched: fs::Scheduler,
     pending_rename: Option<String>,
+    /// Left-press on a file-view row that may become a drag.
+    press: Option<PressArm>,
+    /// The active drag session manager (SPEC/DRAGGING.md).
+    pub dnd: crate::dnd::Session,
+    /// Alt held (Alt-drop = create a link).
+    alt_held: bool,
 }
 
 /// Recursive copy (files + dirs); true on success.
@@ -409,7 +463,13 @@ impl Explorer {
             back: Vec::new(),
             forward: Vec::new(),
             dark: false,
+            // the ribbon.yaml `disabled_style` setting is read once the
+            // ribbon framework exists (just below the Self literal)
+            disabled_gray: false,
             ui_debug: std::env::var_os("EXPLORER_UI_DEBUG").is_some(),
+            rainbow: false,
+            focused: true,
+            active_pane: Pane::Folder,
             dpi_target: std::env::var("EXPLORER_DPI")
                 .ok()
                 .and_then(|v| v.parse().ok())
@@ -463,7 +523,17 @@ impl Explorer {
             request_reveal: false,
             sched,
             pending_rename: None,
+            press: None,
+            dnd: crate::dnd::Session::new(),
+            alt_held: false,
         };
+        // initial value comes from the `disabled_style` markup setting
+        s.disabled_gray = matches!(
+            s.ribbon.framework().spec(),
+            Ok(spec)
+                if spec.disabled_style
+                    == crate::ribbon::spec::DisabledStyle::GrayScaledFaded
+        );
         s.request_listing();
         s.sched.send(Job::Volumes);
         // Startup runs before volumes/listings arrive, so the reveal defers
@@ -482,6 +552,22 @@ impl Explorer {
         match (self.dpi_target, self.system_scale) {
             (Some(target), s) if s > 0.0 => target / s,
             _ => 1.0,
+        }
+    }
+
+    /// The absolute UI scale: how many device pixels one app unit
+    /// occupies. With `--dpi` it is the target factor; without it the
+    /// full system scale applies (iced total = system x multiplier and
+    /// `dpi_multiplier()` is 1.0 then). Returns 1.0 before the system
+    /// scale is learned. This is `scale_dpi` for the border-width
+    /// factor (SPEC/Border_DPI.md).
+    pub fn scale_dpi(&self) -> f32 {
+        if let Some(t) = self.dpi_target.filter(|t| *t > 0.0) {
+            t
+        } else if self.system_scale > 0.0 {
+            self.system_scale
+        } else {
+            1.0
         }
     }
 
@@ -522,9 +608,9 @@ impl Explorer {
 
     pub fn theme(&self) -> iced::Theme {
         if self.dark {
-            iced::Theme::custom("win8-dark", crate::ui_common::skin::DARK.palette())
+            iced::Theme::custom("win8-dark", crate::ui_common::skin::dark().palette())
         } else {
-            iced::Theme::custom("win8-light", crate::ui_common::skin::LIGHT.palette())
+            iced::Theme::custom("win8-light", crate::ui_common::skin::light().palette())
         }
     }
 
@@ -542,6 +628,8 @@ impl Explorer {
         self.cwd = path;
         self.selected.clear();
         self.renaming = None;
+        self.press = None;
+        self.dnd.take(); // a navigation cancels any active drag
         self.restore_folder_view();
         self.request_listing();
         self.nav_reveal_cwd()
@@ -600,12 +688,15 @@ impl Explorer {
             crate::border::frame_insets_pub(self.self_border, self.frame_style);
         let content_w = self.win_w - fl - fr;
         let (nav_w, side_w) = self.layout_widths();
-        // the nav_gap spacer is part of the folder view (always shown);
-        // the splitters (4px) and the pane separator (1px) only with
-        // their panes
-        let chrome = self.ribbon.nav_gap()
-            + if nav_w > 0.0 { 4.0 } else { 0.0 }
-            + if side_w > 0.0 { 4.0 + 1.0 } else { 0.0 };
+        // nav visible: the 4px boundary strip (2px colorless, 1px
+        // separator, 1px colorless) doubles as the splitter; nav
+        // hidden: the standalone gap spacer; the pane splitter/separator
+        // only with the side pane
+        let chrome = if nav_w > 0.0 {
+            4.0 * crate::theme::border_w(1.0)
+        } else {
+            self.ribbon.nav_gap()
+        } + if side_w > 0.0 { 4.0 + 1.0 } else { 0.0 };
         let pane_w = content_w - nav_w - side_w - chrome;
         // the scrollbar strip collapses to 0px when the content fits
         // (same rule as folder::file_view), widening the pane
@@ -807,6 +898,9 @@ impl Explorer {
         } else {
             return iced::Task::none(); // already visible
         };
+        // whole-line scrolling: keep the top row complete (a clipped
+        // row at the bottom edge is fine)
+        let target = (target / item_h).round() * item_h;
         let y = (target.clamp(0.0, max_scroll) / max_scroll.max(f32::EPSILON)).clamp(0.0, 1.0);
         iced::widget::operation::scrollable::snap_to(
             crate::nav_pane::nav_scrollable_id(),
@@ -834,6 +928,149 @@ impl Explorer {
 
     pub(crate) fn selected_paths(&self) -> Vec<PathBuf> {
         self.selected.iter().filter_map(|&i| self.entries.get(i)).map(|e| e.path.clone()).collect()
+    }
+
+    /// Plain (no-modifier) selection of one row: collapse the selection
+    /// and run the double-click emulation (two presses on the same row
+    /// within 400ms navigate into a folder/archive). Called at press
+    /// time for unselected rows and at release time for the collapse of
+    /// a multi-selection press.
+    fn select_single(&mut self, i: usize) -> iced::Task<Message> {
+        self.selected.clear();
+        self.selected.insert(i);
+        self.sel_anchor = Some(i);
+        let now = std::time::Instant::now();
+        if let Some((last_i, t)) = self.last_click
+            && last_i == i
+            && now.duration_since(t).as_millis() < 400
+        {
+            self.last_click = None;
+            if let Some(e) = self.entries.get(i)
+                && (e.kind == fs::EntryKind::Dir || fs::archive::is_archive_path(&e.path))
+            {
+                let p = e.path.clone();
+                return self.navigate(p);
+            }
+            return iced::Task::none();
+        }
+        self.last_click = Some((i, now));
+        iced::Task::none()
+    }
+
+    /// §5.1 drop-target feedback: `path` is the innermost target under
+    /// the pointer while a drag is active.
+    pub(crate) fn drop_targeted(&self, path: &Path) -> bool {
+        self.dnd.active() && self.dnd.current().and_then(|t| t.path()) == Some(path)
+    }
+
+    /// §5 drag start: the press moved past the threshold on a file-view
+    /// row. Drags the whole selection when the row is part of it,
+    /// otherwise the row alone (which becomes the selection).
+    fn begin_drag(&mut self, i: usize) {
+        if i >= self.entries.len() {
+            return;
+        }
+        let paths = if self.selected.contains(&i) {
+            self.selected_paths()
+        } else {
+            self.selected.clear();
+            self.selected.insert(i);
+            vec![self.entries[i].path.clone()]
+        };
+        if paths.is_empty() {
+            return;
+        }
+        let items = paths
+            .iter()
+            .map(|p| {
+                let e = self.entries.iter().find(|e| &e.path == p);
+                let kind = match e {
+                    Some(e) if e.is_symlink => crate::dnd::ItemKind::Symlink,
+                    Some(e) if e.is_dir() => crate::dnd::ItemKind::Directory,
+                    Some(_) => crate::dnd::ItemKind::File,
+                    None => crate::dnd::ItemKind::Other,
+                };
+                crate::dnd::DraggedItem {
+                    uri: crate::dnd::file_uri(p),
+                    kind,
+                }
+            })
+            .collect();
+        let n = paths.len();
+        self.dnd.start(crate::dnd::DragSession {
+            payload: crate::dnd::DragPayload::Files(items),
+            source: crate::dnd::DragSource::FileView,
+        });
+        // The cursor was already inside the file view when the drag
+        // began, so the empty area's zone fired its enter before the
+        // session existed and the event was dropped: seed it (dropping
+        // back onto empty space targets the current folder).
+        let seed = crate::dnd::DropTarget::EmptyDirectory(self.cwd.clone());
+        self.dnd.apply(crate::dnd::DragEvent::Enter { target: seed });
+        self.dnd
+            .set_modifiers(self.ctrl_held, self.shift_held, self.alt_held);
+        self.status = format!("Dragging {n} item{}", if n == 1 { "" } else { "s" });
+    }
+
+    /// §5.4 drop: revalidate the target and dispatch the file operation
+    /// to the fs worker (§10 — the UI never copies files itself).
+    fn commit_drag(&mut self) -> iced::Task<Message> {
+        let target = self.dnd.current().cloned();
+        let Some(session) = self.dnd.take() else {
+            return iced::Task::none();
+        };
+        let Some(target) = target else {
+            // released over no target: nothing happens (§5.5 semantics)
+            self.status = "Drop cancelled".into();
+            return iced::Task::none();
+        };
+        let sources: Vec<PathBuf> = match &session.payload {
+            crate::dnd::DragPayload::Files(items) => items
+                .iter()
+                .filter_map(|i| crate::dnd::uri_to_path(&i.uri))
+                .collect(),
+            _ => {
+                self.status = "this data cannot be dropped here".into();
+                return iced::Task::none();
+            }
+        };
+        if sources.is_empty() {
+            self.status = "only local files can be dropped here".into();
+            return iced::Task::none();
+        }
+        let permitted = crate::dnd::permitted_actions(&session.payload, &target);
+        let action = crate::dnd::resolve_action(
+            self.ctrl_held,
+            self.shift_held,
+            self.alt_held,
+            &permitted,
+        );
+        if let Err(reason) = crate::dnd::validate_commit(&sources, &target, action) {
+            self.status = reason;
+            return iced::Task::none();
+        }
+        let Some(dest) = target.path().map(Path::to_path_buf) else {
+            self.status = "this target cannot accept the drop".into();
+            return iced::Task::none();
+        };
+        match action {
+            crate::dnd::DropAction::Copy => {
+                self.sched.send(Job::Copy { sources, dest_dir: dest, cut: false });
+                self.status = "Copying…".into();
+            }
+            crate::dnd::DropAction::Move => {
+                self.sched.send(Job::Copy { sources, dest_dir: dest, cut: true });
+                self.status = "Moving…".into();
+            }
+            crate::dnd::DropAction::Link => {
+                self.sched.send(Job::Link { sources, dest_dir: dest });
+                self.status = "Creating links…".into();
+            }
+            other => {
+                self.status = format!("{other:?} drops are not implemented");
+            }
+        }
+        iced::Task::none()
     }
 
     fn copy_or_cut(&mut self, mode: ClipMode) {
@@ -870,22 +1107,24 @@ impl Explorer {
     }
 
     pub fn start_rename(&mut self) {
-        if let Some(&i) = self.selected.iter().next() {
-            if i < self.entries.len() {
-                let name = self.entries[i].name.clone();
-                self.renaming = Some((i, name));
-            }
+        if let Some(&i) = self.selected.iter().next()
+            && i < self.entries.len()
+        {
+            let name = self.entries[i].name.clone();
+            self.renaming = Some((i, name));
         }
     }
 
     fn commit_rename(&mut self, new_name: String) {
         let name = new_name.trim().to_string();
-        if let Some((i, _)) = self.renaming.take() {
-            if !name.is_empty() && i < self.entries.len() && name != self.entries[i].name {
-                let from = self.entries[i].path.clone();
-                let to = from.with_file_name(&name);
-                self.sched.send(Job::Rename(from, to));
-            }
+        if let Some((i, _)) = self.renaming.take()
+            && !name.is_empty()
+            && i < self.entries.len()
+            && name != self.entries[i].name
+        {
+            let from = self.entries[i].path.clone();
+            let to = from.with_file_name(&name);
+            self.sched.send(Job::Rename(from, to));
         }
     }
 
@@ -914,11 +1153,11 @@ impl Explorer {
                                     }
                                 }
                             }
-                            if let Some(name) = self.pending_rename.take() {
-                                if let Some(i) = self.entries.iter().position(|e| e.name == name) {
-                                    self.selected.insert(i);
-                                    self.renaming = Some((i, name));
-                                }
+                            if let Some(name) = self.pending_rename.take()
+                                && let Some(i) = self.entries.iter().position(|e| e.name == name)
+                            {
+                                self.selected.insert(i);
+                                self.renaming = Some((i, name));
                             }
                         }
                         Err(e) => {
@@ -949,8 +1188,15 @@ impl Explorer {
                 }
                 self.request_listing();
             }
+            FsEvent::Linked { result } => {
+                match result {
+                    Ok(n) => self.status = format!("Created {n} link{}", if n == 1 { "" } else { "s" }),
+                    Err(e) => self.status = format!("Link failed: {e}"),
+                }
+                self.request_listing();
+            }
             FsEvent::OpProgress { done_bytes, total_bytes, current } => {
-                let pct = if total_bytes > 0 { done_bytes * 100 / total_bytes } else { 0 };
+                let pct = (done_bytes * 100).checked_div(total_bytes).unwrap_or(0);
                 self.status = format!(
                     "Copying {} — {}%",
                     current.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
@@ -1319,11 +1565,11 @@ impl Explorer {
                 // --dpi=100 on a 150% system: win_w still 1152 while the
                 // logical width becomes 1728) and the splitter math stops
                 // tracking the cursor. Re-query the size under the new scale.
-                if self.dpi_target.is_some() {
-                    if let Some(id) = self.window {
-                        return iced::window::size(id)
-                            .map(|sz| Message::WindowResized(sz.width, sz.height));
-                    }
+                if self.dpi_target.is_some()
+                    && let Some(id) = self.window
+                {
+                    return iced::window::size(id)
+                        .map(|sz| Message::WindowResized(sz.width, sz.height));
                 }
                 iced::Task::none()
             }
@@ -1382,6 +1628,7 @@ impl Explorer {
                 iced::Task::none()
             }
             Message::Select(i) => {
+                self.active_pane = Pane::Folder;
                 if i >= self.entries.len() {
                     return iced::Task::none();
                 }
@@ -1392,6 +1639,7 @@ impl Explorer {
                     }
                     self.sel_anchor = Some(i);
                     self.last_click = None;
+                    self.press = None; // selection gesture, not a drag
                     return iced::Task::none();
                 }
                 if self.shift_held {
@@ -1399,27 +1647,18 @@ impl Explorer {
                     let anchor = self.sel_anchor.unwrap_or(i);
                     self.selected = (anchor.min(i)..=anchor.max(i)).collect();
                     self.last_click = None;
+                    self.press = None; // selection gesture, not a drag
                     return iced::Task::none();
                 }
-                self.selected.clear();
-                self.selected.insert(i);
-                self.sel_anchor = Some(i);
-                // double-click emulation: two presses on the same row within 400ms
-                let now = std::time::Instant::now();
-                if let Some((last_i, t)) = self.last_click {
-                    if last_i == i && now.duration_since(t).as_millis() < 400 {
-                        self.last_click = None;
-                        if let Some(e) = self.entries.get(i) {
-                            if e.kind == fs::EntryKind::Dir || fs::archive::is_archive_path(&e.path) {
-                                let p = e.path.clone();
-                                return self.navigate(p);
-                            }
-                        }
-                        return iced::Task::none();
-                    }
+                // Pressing a row that is part of a multi-selection must
+                // NOT collapse the selection yet: a drag takes all of it,
+                // a plain release collapses it (see `collapse`).
+                if self.selected.contains(&i) && self.selected.len() > 1 {
+                    self.press = Some(PressArm { i, at: self.cursor, collapse: true });
+                    return iced::Task::none();
                 }
-                self.last_click = Some((i, now));
-                iced::Task::none()
+                self.press = Some(PressArm { i, at: self.cursor, collapse: false });
+                self.select_single(i)
             }
             Message::MarqueeBegin { x, y } => {
                 self.marquee = Some(Marquee {
@@ -1480,7 +1719,7 @@ impl Explorer {
                     if fs::archive::resolve(&self.cwd).is_some() {
                         self.status = "opening inside archives is not supported yet".into();
                     } else if let Err(err) =
-                        crate::menu::open_files(&self.menu_cfg, &[e.path.clone()])
+                        crate::menu::open_files(&self.menu_cfg, std::slice::from_ref(&e.path))
                     {
                         self.status = format!("Open: {err}");
                     }
@@ -1489,6 +1728,10 @@ impl Explorer {
             }
             Message::ToggleDark => {
                 self.dark = !self.dark;
+                iced::Task::none()
+            }
+            Message::ToggleGrayDisabled => {
+                self.disabled_gray = !self.disabled_gray;
                 iced::Task::none()
             }
             Message::TitlebarPress => {
@@ -1581,8 +1824,13 @@ impl Explorer {
             Message::SetView(index) => self.set_view_index(index),
             Message::WheelZoom(delta) => self.wheel_zoom(delta),
             Message::ContextSelect(i) => {
+                self.active_pane = Pane::Folder;
                 self.context_select(i);
                 iced::Task::none()
+            }
+            Message::NavPress(p) => {
+                self.active_pane = Pane::Nav;
+                self.navigate(p)
             }
             Message::ContextBackground => {
                 self.hovered = None;
@@ -1654,7 +1902,15 @@ impl Explorer {
         )
             }
             Message::NavScrollTo(target) => {
-                self.nav.scroll_y = target.max(0.0);
+                // the tree scrolls line by line: snap to whole row
+                // heights so the top row is always complete (a clipped
+                // row at the bottom edge is fine). Sub-row deltas
+                // accumulate so slow touchpad streams still move.
+                let line = self.ribbon.metrics().1.max(1.0);
+                let raw = target + self.nav.scroll_rem;
+                let snapped = (raw / line).round() * line;
+                self.nav.scroll_rem = raw - snapped;
+                self.nav.scroll_y = snapped.max(0.0);
                 iced::widget::operation::scrollable::scroll_to(
                     crate::nav_pane::nav_scrollable_id(),
                     iced::widget::operation::scrollable::AbsoluteOffset {
@@ -1802,6 +2058,28 @@ impl Explorer {
                 }
                 iced::Task::none()
             }
+            Message::DragTargetEnter(t) => {
+                if self.dnd.active() {
+                    self.status = self.dnd.apply(crate::dnd::DragEvent::Enter { target: t });
+                }
+                iced::Task::none()
+            }
+            Message::DragTargetLeave(t) => {
+                if self.dnd.active() {
+                    self.status = self.dnd.apply(crate::dnd::DragEvent::Leave { target: t });
+                }
+                iced::Task::none()
+            }
+            Message::DragCancel => {
+                if self.dnd.active() {
+                    // §5.5: release all drag state, commit nothing
+                    self.dnd.apply(crate::dnd::DragEvent::Cancel);
+                    self.dnd.take();
+                    self.press = None;
+                    self.status = "Drop cancelled".into();
+                }
+                iced::Task::none()
+            }
             Message::ToggleQatDock => {
                 let view = self.ribbon.framework().view();
                 use crate::ribbon::enums::ControlDock;
@@ -1817,6 +2095,10 @@ impl Explorer {
                     FrameStyle::Win8 => FrameStyle::Win10,
                     FrameStyle::Win10 => FrameStyle::Win8,
                 };
+                iced::Task::none()
+            }
+            Message::ToggleRainbow => {
+                self.rainbow = !self.rainbow;
                 iced::Task::none()
             }
             Message::Scrolled { x, y, height } => {
@@ -1857,6 +2139,87 @@ impl Explorer {
                 // was not caused by this layer; re-evaluate with a profile)
                 if let iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) = &e {
                     self.cursor = *position;
+                }
+                // ---- drag & drop lifecycle (SPEC/DRAGGING.md §5) ----
+                use iced::keyboard::{key::Named, Event as KeyEvent, Key};
+                match &e {
+                    iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
+                        // a press travelling past the threshold becomes a drag
+                        if let Some(arm) = self.press {
+                            let d = ((position.x - arm.at.x).powi(2)
+                                + (position.y - arm.at.y).powi(2))
+                            .sqrt();
+                            if d >= crate::dnd::DRAG_THRESHOLD * self.dpi_multiplier() {
+                                self.press = None;
+                                self.begin_drag(arm.i);
+                            }
+                        }
+                    }
+                    iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                        iced::mouse::Button::Left,
+                    )) => {
+                        // a release without a drag collapses a pending
+                        // multi-selection press (the drag case consumed
+                        // the press when it passed the threshold)
+                        if let Some(arm) = self.press.take()
+                            && arm.collapse
+                        {
+                            return self.select_single(arm.i);
+                        }
+                        if self.dnd.active() {
+                            return self.commit_drag();
+                        }
+                    }
+                    iced::Event::Keyboard(KeyEvent::KeyPressed {
+                        key: Key::Named(Named::Escape),
+                        ..
+                    }) if self.dnd.active() => {
+                        return self.update(Message::DragCancel);
+                    }
+                    // the compositor owns the pointer: focus loss means the
+                    // button state is lost, so the drag cannot complete
+                    iced::Event::Window(iced::window::Event::Focused) => {
+                        self.focused = true;
+                    }
+                    iced::Event::Window(iced::window::Event::Unfocused) => {
+                        self.focused = false;
+                        if self.dnd.active() {
+                            return self.update(Message::DragCancel);
+                        }
+                    }
+                    // external drag-in (§9): only delivered where winit
+                    // supports file drops (see dnd::capabilities)
+                    iced::Event::Window(iced::window::Event::FileHovered(p)) => {
+                        if crate::dnd::capabilities().drag_in {
+                            self.status =
+                                format!("Release to copy {} into {}", p.display(), self.cwd.display());
+                        }
+                    }
+                    iced::Event::Window(iced::window::Event::FileDropped(p)) => {
+                        if crate::dnd::capabilities().drag_in {
+                            self.dnd.take();
+                            if let Err(reason) = crate::dnd::validate_commit(
+                                std::slice::from_ref(p),
+                                &crate::dnd::DropTarget::EmptyDirectory(self.cwd.clone()),
+                                crate::dnd::DropAction::Copy,
+                            ) {
+                                self.status = reason;
+                            } else {
+                                self.sched.send(Job::Copy {
+                                    sources: vec![p.clone()],
+                                    dest_dir: self.cwd.clone(),
+                                    cut: false,
+                                });
+                                self.status = "Copying…".into();
+                            }
+                        }
+                    }
+                    iced::Event::Window(iced::window::Event::FilesHoveredLeft)
+                        if !self.dnd.active() =>
+                    {
+                        self.status.clear();
+                    }
+                    _ => {}
                 }
                 // splitter drag: track the cursor, end on left release
                 if self.bar_split {
@@ -1920,12 +2283,18 @@ impl Explorer {
                 {
                     let ctrl = m.control();
                     self.shift_held = m.shift();
+                    self.alt_held = m.alt();
                     if !ctrl && self.ctrl_held {
                         // §7: Ctrl released — reset the delta accumulator
                         self.zoom_acc = 0.0;
                         self.zoom_step_at = None;
                     }
                     self.ctrl_held = ctrl;
+                    if self.dnd.active() {
+                        // modifier-driven action switch (Copy/Move/Link)
+                        self.dnd.set_modifiers(ctrl, self.shift_held, self.alt_held);
+                        self.status = self.dnd.feedback();
+                    }
                     return iced::Task::none();
                 }
                 if let Some(m) = crate::handle_key(e, self.renaming.is_some(), self.menu.is_some()) {
@@ -1975,8 +2344,27 @@ impl Explorer {
                 iced::Task::none()
             }
             Message::NavScrolled { y, height } => {
-                self.nav.scroll_y = y;
                 self.nav.viewport_h = height;
+                // correct any offset that is not a whole row multiple
+                // (e.g. the scrollable clamping after the tree shrank);
+                // the correction never exceeds max_scroll, so it cannot
+                // re-trigger a clamp
+                let line = self.ribbon.metrics().1.max(1.0);
+                let max_scroll = (crate::nav_pane::content_height(self) - height).max(0.0);
+                let snapped = ((y / line).round() * line)
+                    .clamp(0.0, (max_scroll / line).floor() * line);
+                if (snapped - y).abs() > 0.5 {
+                    self.nav.scroll_y = snapped;
+                    return iced::widget::operation::scrollable::scroll_to(
+                        crate::nav_pane::nav_scrollable_id(),
+                        iced::widget::operation::scrollable::AbsoluteOffset {
+                            x: None,
+                            y: Some(snapped),
+                        },
+                        iced::widget::operation::Animation::Instant,
+                    );
+                }
+                self.nav.scroll_y = y;
                 iced::Task::none()
             }
             Message::FileAreaResized(_w, h) => {
@@ -2089,5 +2477,170 @@ pub fn type_label(e: &fs::Entry) -> &'static str {
         "mp4" | "mkv" | "mov" => "Video File",
         _ if fs::archive::is_archive_path(&e.path) => "Archive File",
         _ => "File",
+    }
+}
+
+#[cfg(test)]
+mod dnd_tests {
+    //! End-to-end drag & drop through the MVU loop (SPEC/DRAGGING.md):
+    //! multi-selection + folder drags with the default Move action, and
+    //! the Ctrl override to Copy.
+    use super::*;
+    use std::path::PathBuf;
+    use std::time::{Duration, Instant};
+
+    fn entry(name: &str, path: PathBuf, dir: bool) -> fs::Entry {
+        fs::Entry {
+            name: name.into(),
+            path,
+            kind: if dir { fs::EntryKind::Dir } else { fs::EntryKind::File },
+            size: 3,
+            modified: None,
+            is_hidden: false,
+            is_symlink: false,
+            symlink_target: None,
+        }
+    }
+
+    fn cursor(x: f32, y: f32) -> Message {
+        Message::Event(iced::Event::Mouse(iced::mouse::Event::CursorMoved {
+            position: iced::Point::new(x, y),
+        }))
+    }
+
+    fn release() -> Message {
+        Message::Event(iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+            iced::mouse::Button::Left,
+        )))
+    }
+
+    fn wait_for(cond: impl Fn() -> bool) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            if cond() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        cond()
+    }
+
+    fn fixture(root: &Path) {
+        let _ = std::fs::remove_dir_all(root);
+        std::fs::create_dir_all(root.join("a_dir")).unwrap();
+        std::fs::write(root.join("b_file"), b"xyz").unwrap();
+        std::fs::create_dir_all(root.join("z_dest")).unwrap();
+    }
+
+    /// Drive a real Explorer: select a folder + a file (multi), press the
+    /// folder, drag past the threshold, drop onto z_dest. The default
+    /// action must be Move: both items land in z_dest and vanish from
+    /// the root. Then repeat with Ctrl held: Copy, originals stay.
+    #[test]
+    fn dnd_multi_and_folder_default_move() {
+        let root = std::env::temp_dir().join("explorer_dnd_mv_test");
+        fixture(&root);
+
+        let mut ex = Explorer::new();
+        ex.cwd = root.clone();
+        let list = |entries: Vec<fs::Entry>| Message::FsEvent(FsEvent::Listed {
+            path: root.clone(),
+            result: Ok(entries),
+        });
+        ex.update(list(vec![
+            entry("b_file", root.join("b_file"), false),
+            entry("a_dir", root.join("a_dir"), true),
+            entry("z_dest", root.join("z_dest"), true),
+        ]));
+        // sorted dirs-first: [a_dir, z_dest, b_file]
+        assert_eq!(ex.entries[0].name, "a_dir");
+        assert_eq!(ex.entries[1].name, "z_dest");
+        assert_eq!(ex.entries[2].name, "b_file");
+
+        // --- multi-selection drag of folder + file, default action ---
+        ex.update(cursor(10.0, 10.0));
+        ex.update(Message::Select(0)); // a_dir
+        ex.ctrl_held = true;
+        ex.update(Message::Select(2)); // + b_file
+        ex.ctrl_held = false;
+        assert_eq!(ex.selected.len(), 2);
+        // press the already-selected folder: selection must survive
+        ex.update(cursor(10.0, 10.0));
+        ex.update(Message::Select(0));
+        assert_eq!(ex.selected.len(), 2, "press must not collapse the selection");
+        // drag past the threshold
+        ex.update(cursor(60.0, 60.0));
+        let payload = ex.dnd.payload().expect("drag active").clone();
+        assert_eq!(payload.len(), 2, "both selected items drag");
+        // drop onto z_dest
+        ex.update(Message::DragTargetEnter(crate::dnd::DropTarget::Directory(
+            root.join("z_dest"),
+        )));
+        ex.update(release());
+        assert_eq!(ex.status, "Moving…", "default action is Move");
+        assert!(wait_for(|| {
+            root.join("z_dest/a_dir").is_dir() && root.join("z_dest/b_file").is_file()
+        }));
+        assert!(!root.join("a_dir").exists());
+        assert!(!root.join("b_file").exists());
+
+        // --- Ctrl override: Copy ---
+        ex.update(list(vec![
+            entry("b_file", root.join("b_file"), false),
+            entry("c_file", root.join("c_file"), false),
+            entry("z_dest", root.join("z_dest"), true),
+        ]));
+        std::fs::write(root.join("b_file"), b"xyz").unwrap();
+        std::fs::write(root.join("c_file"), b"xyz").unwrap();
+        // sorted: dirs first -> [z_dest, b_file, c_file]
+        ex.update(cursor(10.0, 10.0));
+        ex.update(Message::Select(1)); // b_file
+        ex.ctrl_held = true;
+        ex.update(Message::Select(2)); // + c_file
+        ex.ctrl_held = false;
+        ex.update(cursor(10.0, 10.0));
+        ex.update(Message::Select(1)); // press selected row of the multi
+        assert_eq!(ex.selected.len(), 2);
+        ex.update(cursor(60.0, 60.0));
+        ex.update(Message::DragTargetEnter(crate::dnd::DropTarget::Directory(
+            root.join("z_dest"),
+        )));
+        ex.ctrl_held = true; // Ctrl at release = Copy
+        ex.update(release());
+        assert_eq!(ex.status, "Copying…", "Ctrl overrides the action to Copy");
+        assert!(wait_for(|| root.join("z_dest/b_file").is_file()));
+        assert!(root.join("b_file").is_file(), "copy keeps the original");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A plain release on a selected row of a multi-selection collapses
+    /// the selection to that row (no drag, no modifier).
+    #[test]
+    fn dnd_press_without_drag_collapses() {
+        let root = std::env::temp_dir().join("explorer_dnd_collapse_test");
+        fixture(&root);
+        let mut ex = Explorer::new();
+        ex.cwd = root.clone();
+        ex.update(Message::FsEvent(FsEvent::Listed {
+            path: root.clone(),
+            result: Ok(vec![
+                entry("a_dir", root.join("a_dir"), true),
+                entry("z_dest", root.join("z_dest"), true),
+                entry("b_file", root.join("b_file"), false),
+            ]),
+        }));
+        ex.update(cursor(5.0, 5.0));
+        ex.update(Message::Select(0));
+        ex.ctrl_held = true;
+        ex.update(Message::Select(2));
+        ex.ctrl_held = false;
+        assert_eq!(ex.selected.len(), 2);
+        ex.update(cursor(5.0, 5.0));
+        ex.update(Message::Select(0)); // press, no move
+        ex.update(release()); // plain release: collapse
+        assert_eq!(ex.selected.iter().copied().collect::<Vec<_>>(), vec![0]);
+        assert!(!ex.dnd.active());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

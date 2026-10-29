@@ -51,12 +51,11 @@ fn load() -> Icons {
     if let Some(p) = std::env::var_os("HOME")
         .map(std::path::PathBuf::from)
         .map(|h| h.join(".config/explorer/icons.yaml"))
+        && let Ok(text) = std::fs::read_to_string(&p)
     {
-        if let Ok(text) = std::fs::read_to_string(&p) {
-            match serde_yaml::from_str::<IconsFile>(&text) {
-                Ok(user) => defs.extend(user.icons),
-                Err(e) => eprintln!("icons.yaml parse error ({}): {e}", p.display()),
-            }
+        match serde_yaml::from_str::<IconsFile>(&text) {
+            Ok(user) => defs.extend(user.icons),
+            Err(e) => eprintln!("icons.yaml parse error ({}): {e}", p.display()),
         }
     }
 

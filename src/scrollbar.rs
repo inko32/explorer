@@ -344,14 +344,9 @@ impl Widget<Message, iced::Theme, iced::Renderer> for WinScrollbar {
             snap: true,
         };
 
-        // strip background + 1px separator on the inner edge
+        // strip background (no inner-edge separator: the pane boundary
+        // strips already frame the scroller)
         renderer.fill_quad(quad(bounds), skin.col_header_bg);
-        let edge = if vertical {
-            Rectangle { x: bounds.x, width: 1.0, ..bounds }
-        } else {
-            Rectangle { y: bounds.y, height: 1.0, ..bounds }
-        };
-        renderer.fill_quad(quad(edge), skin.sep);
 
         // arrow buttons at both ends
         let (_, thumb_start, thumb_len) = self.geometry(bounds);
@@ -577,13 +572,13 @@ fn draw_arrow(
                 x: center.x - w / 2.0,
                 y: center.y + off,
                 width: w,
-                height: 1.0,
+                height: crate::theme::border_w(1.0),
             },
             // transposed for left/right: 4 wide, 7 tall
             Axis::Horizontal => Rectangle {
                 x: center.x + off,
                 y: center.y - w / 2.0,
-                width: 1.0,
+                width: crate::theme::border_w(1.0),
                 height: w,
             },
         };

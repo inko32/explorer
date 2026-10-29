@@ -15,6 +15,9 @@ use crate::ribbon::prop::{PropertyKey, PropertySet, PropValue};
 use crate::ribbon::spec::{self, RibbonSpec};
 use crate::ribbon::Result;
 
+/// `IUIEventingManager` logger callback.
+pub(crate) type EventLogger = Rc<RefCell<dyn FnMut(EventType, EventLocation, u32)>>;
+
 /// `HRESULT`-ish error, mirroring the failure codes of the COM API.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RibbonError {
@@ -133,6 +136,13 @@ pub enum RibbonEvent {
     QatChanged {
         commands: Vec<u32>,
     },
+    /// Explorer extension: a ribbon popup opened or closed. Published
+    /// so app views rebuild (open popups gray the folder/nav panes,
+    /// SPEC/Unfocused_Window.md); the flag itself lives on
+    /// [`RibbonView::popup_open`].
+    PopupVisibility {
+        open: bool,
+    },
 }
 
 /// `IUIContextualUI` — show a context popup menu at a position.
@@ -161,6 +171,10 @@ pub struct ViewState {
     pub(crate) modes: i32,
     /// `IUIContextualUI` request, consumed by the widget.
     pub(crate) pending_popup: Option<(u32, f32, f32)>,
+    /// A ribbon popup is currently open, published by the widget (read
+    /// by app views: open popups gray the folder/nav panes,
+    /// SPEC/Unfocused_Window.md).
+    pub(crate) popup_open: bool,
     /// Last laid-out tab rectangles (spec tab index, x, width), written
     /// by the widget on every layout — the window chrome (title bar)
     /// aligns its contextual blocks with these.
@@ -168,7 +182,7 @@ pub struct ViewState {
     /// yaml `metrics.footer_shift`: the group titles sit this many px
     /// lower and the ribbon body grows with it (set by `load_ui`).
     pub(crate) footer_shift: f32,
-    pub(crate) event_logger: Option<Rc<RefCell<dyn FnMut(EventType, EventLocation, u32)>>>,
+    pub(crate) event_logger: Option<EventLogger>,
 }
 
 impl Default for ViewState {
@@ -180,6 +194,7 @@ impl Default for ViewState {
             qat_dock: ControlDock::Top,
             modes: 1,
             pending_popup: None,
+            popup_open: false,
             tab_rects: Vec::new(),
             footer_shift: 0.0,
             event_logger: None,
@@ -224,6 +239,16 @@ impl RibbonView {
             h += QAT_ROW_HEIGHT;
         }
         h as u32
+    }
+
+    /// Whether a ribbon popup is currently open (widget-published;
+    /// SPEC/Unfocused_Window.md).
+    pub fn popup_open(&self) -> bool {
+        self.inner.borrow().popup_open
+    }
+
+    pub(crate) fn set_popup_open(&self, open: bool) {
+        self.inner.borrow_mut().popup_open = open;
     }
 
     pub fn minimized(&self) -> bool {
@@ -561,10 +586,10 @@ impl RibbonFramework {
                             PropertyKey::ItemsSource,
                         ]);
                     }
-                    if flags.contains(Invalidations::PROPERTY) {
-                        if let Some(k) = key {
-                            keys.push(k);
-                        }
+                    if flags.contains(Invalidations::PROPERTY)
+                        && let Some(k) = key
+                    {
+                        keys.push(k);
                     }
                     keys
                 };
@@ -599,10 +624,7 @@ impl RibbonFramework {
     }
 
     /// `IUIEventingManager::SetEventLogger`.
-    pub fn set_event_logger(
-        &mut self,
-        logger: Rc<RefCell<dyn FnMut(EventType, EventLocation, u32)>>,
-    ) {
+    pub fn set_event_logger(&mut self, logger: EventLogger) {
         self.view.inner.borrow_mut().event_logger = Some(logger);
     }
 

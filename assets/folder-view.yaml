@@ -119,6 +119,6 @@ icon_top:
 
 # §8.4 common styling
 style:
-  corner_radius: 4.0        # hover/selection rounded rectangle
+  corner_radius: 0.0        # hover/selection rounded rectangle
   font_size: 12.0           # system UI font, 9 pt; all item labels
   prop_size: 12.0           # property lines (Content/Tiles) + Details header

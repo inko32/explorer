@@ -21,16 +21,22 @@ pub(crate) fn statusbar(state: &Explorer, skin: skin::Skin) -> Element<'_, Messa
         left += &format!("    {}", state.status);
     }
 
-    let view_btn = |icon_name: &'static str, active: bool, msg: Message| {
+    let focused = state.focused;
+    let view_btn = move |icon_name: &'static str, active: bool, msg: Message| {
         // icon = button / bar_button_multiplier; tight padding (nav_circle)
         let icon_sz = (CHROME_BTN / state.ribbon.bar_button_multiplier()).round().max(8.0);
         button(crate::icon::view(icon_name, icon_sz, &skin))
             .width(Length::Fixed(CHROME_BTN))
             .height(Length::Fixed(CHROME_BTN))
             .padding(((CHROME_BTN - icon_sz) / 2.0).max(0.0))
-            .style(move |_t, status| button::Style {
+            .style(move |_t, status| {
+                // unfocused window: the active button fades to gray;
+                // hovering restores the live colors
+                // (SPEC/Unfocused_Window.md §4)
+                let live = focused || matches!(status, button::Status::Hovered);
+                button::Style {
                 background: if active {
-                    Some(skin.pressed.into())
+                    Some(if live { skin.pressed } else { skin.sel_inactive }.into())
                 } else {
                     match status {
                         button::Status::Hovered => Some(skin.hover.into()),
@@ -39,12 +45,17 @@ pub(crate) fn statusbar(state: &Explorer, skin: skin::Skin) -> Element<'_, Messa
                 },
                 text_color: skin.text,
                 border: iced::Border {
-                    color: if active { skin.accent } else { Color::TRANSPARENT },
-                    width: 1.0,
+                    color: if active {
+                        if live { skin.accent } else { skin.sel_inactive_border }
+                    } else {
+                        Color::TRANSPARENT
+                    },
+                    width: crate::theme::border_w(1.0),
                     radius: 2.0.into(),
                 },
                 shadow: Default::default(),
                 snap: true,
+                }
             })
             .on_press(msg)
     };

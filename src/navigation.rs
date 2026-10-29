@@ -34,7 +34,7 @@ fn nav_circle(icon_name: &'static str, enabled: bool, msg: Message, skin: skin::
                     (true, _) => skin.accent,
                     _ => skin.sep,
                 },
-                width: 1.0,
+                width: crate::theme::border_w(1.0),
                 radius: (inner / 2.0).into(),
             },
             shadow: Default::default(),
@@ -86,33 +86,41 @@ pub(crate) fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Mes
     };
     for (i, seg) in segs.iter().enumerate() {
         let is_last = i == segs.len() - 1;
+        let prefix = prefix_of(&state.cwd, i);
+        // §5.1 drag & drop feedback: this crumb is the current target
+        let targeted = state.drop_targeted(&prefix);
         let seg_text = text(seg.clone()).size(text_sz).color(skin.text);
         let cell: Element<Message> = container(seg_text)
             .padding([0.0, 4.0])
             .style(move |_t: &iced::Theme| container::Style {
-                background: None,
+                background: targeted.then_some(skin.sel.into()),
                 ..Default::default()
             })
             .boxed();
         let cell_el: Element<Message> = if is_last {
             cell
         } else {
-            let target = prefix_of(&state.cwd, i);
             button(cell)
                 .style(move |_t, status| button::Style {
-                    background: match status {
-                        button::Status::Hovered => Some(skin.hover.into()),
-                        button::Status::Pressed => Some(skin.pressed.into()),
-                        _ => None,
+                    background: if targeted {
+                        Some(skin.sel.into())
+                    } else {
+                        match status {
+                            button::Status::Hovered => Some(skin.hover.into()),
+                            button::Status::Pressed => Some(skin.pressed.into()),
+                            _ => None,
+                        }
                     },
                     text_color: skin.text,
                     border: Default::default(),
                     shadow: Default::default(),
                     snap: true,
                 })
-                .on_press(Message::Navigate(target))
+                .on_press(Message::Navigate(prefix.clone()))
                 .boxed()
         };
+        // every crumb segment is a drop target (§4.2)
+        let cell_el = crate::dnd::drop_zone(cell_el, crate::dnd::DropTarget::Breadcrumb(prefix));
         crumbs = crumbs.push(cell_el);
         if !is_last {
             crumbs = crumbs.push(icon("chevron_right", (inner * 0.5).round().max(5.0), skin));
@@ -130,7 +138,7 @@ pub(crate) fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Mes
         background: Some(skin.window_bg.into()),
         border: iced::Border {
             color: skin.nav_border,
-            width: 1.0,
+            width: crate::theme::border_w(1.0),
             radius: 0.0.into(),
         },
         ..Default::default()
@@ -147,7 +155,7 @@ pub(crate) fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Mes
             background: Some(skin.search_btn_bg.into()),
             border: iced::Border {
                 color: skin.search_btn_border,
-                width: 1.0,
+                width: crate::theme::border_w(1.0),
                 radius: 0.0.into(),
             },
             ..Default::default()
@@ -169,7 +177,7 @@ pub(crate) fn address_bar(state: &Explorer, skin: skin::Skin) -> Element<'_, Mes
         background: Some(skin.window_bg.into()),
         border: iced::Border {
             color: skin.nav_border,
-            width: 1.0,
+            width: crate::theme::border_w(1.0),
             radius: 0.0.into(),
         },
         ..Default::default()

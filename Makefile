@@ -87,6 +87,15 @@ run: build
 test: setup-env
 	cargo +$(TOOLCHAIN) test --target $(TARGET) $(if $(FEATURES),--features $(FEATURES),)
 
+clippy: setup-env
+	cargo +$(TOOLCHAIN) clippy --target $(TARGET) $(if $(FEATURES),--features $(FEATURES),)
+
+# machine-readable clippy (one JSON diagnostic per line) — for tooling
+# that sorts/filters the warning list.
+clippy-json: setup-env
+	cargo +$(TOOLCHAIN) clippy --target $(TARGET) --message-format=json $(if $(FEATURES),--features $(FEATURES),) 2>/dev/null | grep '"reason":"compiler-message"' > /tmp/clippy.jsonl
+	@echo "wrote /tmp/clippy.jsonl"
+
 dist: build
 	@mkdir -p $(DIST)
 	-strip --strip-all $(CARGO_TARGET_DIR)/$(TARGET)/release/$(BIN) 2>/dev/null || true
