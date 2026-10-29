@@ -6,6 +6,7 @@
 //!      native COM `IInArchive` interface. Primary; no per-call process spawn.
 //!   2. `tar`      — `tar` CLI for .tar.gz / .tar.xz (and friends).
 //!   3. `cli`      — the original `7z` executable backend (reserved fallback).
+//!
 //! Reserved for later: a RARLab (closed-source) backend for rar-exclusive
 //! volumes — implement `ArchiveBackend` and insert into `registry()`.
 //!

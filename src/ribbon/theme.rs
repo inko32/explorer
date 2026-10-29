@@ -133,6 +133,13 @@ pub struct Theme {
     pub tab_text: Color,
     pub text: Color,
     pub text_disabled: Color,
+    /// Disabled buttons/icons are desaturated (gray-scaled) before the
+    /// opacity dim, not only dimmed.
+    pub grayscale_disabled: bool,
+    /// Border/1px-line width factor: `1.0` when borders follow the DPI,
+    /// else `1 / scale` so borders keep a constant physical width
+    /// (SPEC/Border_DPI.md).
+    pub border_scale: f32,
     pub group_label: Color,
     pub border: Color,
     pub group_separator: Color,
@@ -189,6 +196,8 @@ impl Theme {
             tab_text: rgb(0x444444),
             text: rgb(0x333333),
             text_disabled: rgb(0xA6A6A6),
+            grayscale_disabled: false,
+            border_scale: 1.0,
             group_label: rgb(0x666666),
             border: rgb(0xCCCCCC),
             group_separator: rgb(0xE1E1E1),
@@ -233,6 +242,8 @@ impl Theme {
             tab_text: rgb(0x444444),
             text: rgb(0x333333),
             text_disabled: rgb(0xA6A6A6),
+            grayscale_disabled: false,
+            border_scale: 1.0,
             group_label: rgb(0x666666),
             border: rgb(0xCCCCCC),
             group_separator: rgb(0xE1E1E1),
@@ -271,6 +282,8 @@ impl Theme {
             tab_text: rgb(0x3A3A3A),
             text: rgb(0x262626),
             text_disabled: rgb(0xA8A8A8),
+            grayscale_disabled: false,
+            border_scale: 1.0,
             group_label: rgb(0x595959),
             border: rgb(0x9B9B9B),
             group_separator: rgb(0xC4C4C4),

@@ -51,28 +51,117 @@ fn nav_metrics(state: &Explorer) -> NavMetrics {
     }
 }
 
+/// Estimated content width of one row: the label is measured per
+/// character (the pane has no renderer-bound text measurer; the trailing
+/// slack keeps the fill from falling short on wide glyphs).
+fn row_content_w(label_chars: usize, indent: usize, m: NavMetrics) -> f32 {
+    const CHAR_W: f32 = 0.62; // average glyph advance as a fraction of size
+    indent as f32 * m.indent
+        + m.indent
+        + m.icon
+        + 3.0 * 6.0 // row spacing (4 elements)
+        + label_chars as f32 * m.font * CHAR_W
+        + 8.0 // container padding
+        + 4.0 // slack
+}
+
+/// Width of the widest visible row (same traversal as the view).
+fn content_width(state: &Explorer, m: NavMetrics) -> f32 {
+    let mut w = row_content_w("Favorites".len(), 0, m);
+    if state.nav.favorites_open {
+        for (label, _, _) in favorites() {
+            w = w.max(row_content_w(label.chars().count(), 1, m));
+        }
+    }
+    w = w.max(row_content_w("Computer".len(), 0, m));
+    if state.nav.expanded.contains(Path::new("/")) {
+        for v in &state.volumes {
+            if v.mount == Path::new("/") {
+                continue;
+            }
+            let label = if v.name.is_empty() {
+                v.mount.display().to_string()
+            } else {
+                v.name.clone()
+            };
+            w = w.max(row_content_w(label.chars().count(), 1, m));
+            w = subtree_content_w(w, state, &v.mount, 2, m);
+        }
+        if let Some(kids) = state.nav.children.get(Path::new("/")) {
+            for k in kids {
+                w = w.max(row_content_w(k.name.chars().count(), 1, m));
+                w = subtree_content_w(w, state, &k.path, 2, m);
+            }
+        }
+    }
+    w = w.max(row_content_w("Network".len(), 0, m));
+    if state.nav.network_open {
+        w = w.max(row_content_w("Network".len(), 1, m));
+    }
+    w
+}
+
+fn subtree_content_w(
+    mut w: f32,
+    state: &Explorer,
+    path: &Path,
+    indent: usize,
+    m: NavMetrics,
+) -> f32 {
+    if !state.nav.expanded.contains(path) {
+        return w;
+    }
+    if let Some(kids) = state.nav.children.get(path) {
+        for k in kids {
+            w = w.max(row_content_w(k.name.chars().count(), indent, m));
+            w = subtree_content_w(w, state, &k.path, indent + 1, m);
+        }
+    }
+    w
+}
+
 /// One tree row: optional expand arrow, icon, label; selected = tinted
-/// row, hovered = hover fill. Rows shrink to their content width (the
-/// pane scrolls horizontally).
+/// row, hovered = hover fill. `row_w` spans the full pane width — or the
+/// widest row when the tree scrolls horizontally, so the fill always
+/// covers the line.
+// row widgets are built from many independent chrome bits; a params
+// struct would not pay for itself
+#[allow(clippy::too_many_arguments)]
 fn tree_item(
+    row_w: f32,
     label: String,
     icon_name: &'static str,
     indent: usize,
     arrow: Option<bool>, // Some(expanded) -> clickable arrow; None -> spacer
     selected: bool,
     hovered: bool,
+    targeted: bool, // drag & drop: the row is the current drop target
+    state: &Explorer, // activity model: focus, active pane, popup
     navigate: Option<PathBuf>,
     m: NavMetrics,
     skin: skin::Skin,
 ) -> Element<'static, Message> {
-    let bgc = if selected {
-        skin.sel
+    // selection fades to gray while the nav pane is inactive (window
+    // unfocused, folder pane active, or a ribbon popup open);
+    // hovering a grayed row (or an active drop target) restores the
+    // live colors (SPEC/Unfocused_Window.md §4)
+    let popup_open = state.ribbon.framework().view().popup_open();
+    let pane_live = state.focused
+        && !popup_open
+        && state.active_pane == crate::model::Pane::Nav;
+    let live = pane_live || targeted || (hovered && !popup_open);
+    let bgc = if selected || targeted {
+        if live { skin.sel } else { skin.sel_inactive }
     } else if hovered {
         skin.hover
     } else {
         Color::TRANSPARENT
     };
-    let border_color = if selected { skin.sel_border } else { Color::TRANSPARENT };
+    let border_color = if selected || targeted {
+        if live { skin.sel_border } else { skin.sel_inactive_border }
+    } else {
+        Color::TRANSPARENT
+    };
 
     let arrow_el: Element<Message> = match arrow {
         Some(expanded) => {
@@ -106,25 +195,29 @@ fn tree_item(
         .height(Length::Fixed(m.height)),
     )
     .padding([0.0, 4.0])
-    .width(Length::Shrink)
+    .width(Length::Fixed(row_w))
     .style(move |_t: &iced::Theme| container::Style {
         background: Some(bgc.into()),
         border: iced::Border {
             color: border_color,
-            width: 1.0,
+            width: crate::theme::border_w(1.0),
             radius: 0.0.into(),
         },
         ..Default::default()
     })
     .boxed();
     match navigate {
-        Some(p) => mouse_area(item)
-            .on_press(Message::Navigate(p.clone()))
-            .on_right_press(Message::ContextNav(p.clone()))
-            .on_enter(Message::NavHover(Some(p.clone())))
-            .on_exit(Message::NavHoverExit(p))
-            .interaction(iced::mouse::Interaction::Pointer)
-            .boxed(),
+        Some(p) => {
+            // a drag & drop target (SPEC/DRAGGING.md §4.2)
+            let item = crate::dnd::drop_zone(item, crate::dnd::DropTarget::NavigationDirectory(p.clone()));
+            mouse_area(item)
+                .on_press(Message::NavPress(p.clone()))
+                .on_right_press(Message::ContextNav(p.clone()))
+                .on_enter(Message::NavHover(Some(p.clone())))
+                .on_exit(Message::NavHoverExit(p))
+                .interaction(iced::mouse::Interaction::Pointer)
+                .boxed()
+        }
         None => item,
     }
 }
@@ -132,6 +225,7 @@ fn tree_item(
 /// Section header row without a backing location ("Network") — clicking
 /// anywhere on it folds the section.
 fn section_header(
+    row_w: f32,
     label: &str,
     icon_name: &'static str,
     open: bool,
@@ -158,7 +252,7 @@ fn section_header(
             .height(Length::Fixed(m.height)),
         )
         .padding([0.0, 4.0])
-        .width(Length::Shrink),
+        .width(Length::Fixed(row_w)),
     )
     .on_press(Message::NavSectionToggle(section))
     .interaction(iced::mouse::Interaction::Pointer)
@@ -166,6 +260,7 @@ fn section_header(
 }
 
 /// One folder/archive node with its (cached) children when expanded.
+#[allow(clippy::too_many_arguments)]
 fn push_tree_node<'a>(
     list: iced::widget::Column<iced::Element<'a, Message>>,
     state: &Explorer,
@@ -173,6 +268,7 @@ fn push_tree_node<'a>(
     label: String,
     icon_name: &'static str,
     indent: usize,
+    row_w: f32,
     m: NavMetrics,
     skin: skin::Skin,
 ) -> iced::widget::Column<iced::Element<'a, Message>> {
@@ -181,23 +277,27 @@ fn push_tree_node<'a>(
     let has_children = kids.map(|k| !k.is_empty()).unwrap_or(false);
     let selected = state.cwd == path;
     let hovered = state.nav_hover.as_deref() == Some(path);
+    let targeted = state.drop_targeted(path);
     let mut list = list.push(tree_item(
+        row_w,
         label,
         icon_name,
         indent,
         has_children.then_some(expanded),
         selected,
         hovered,
+        targeted,
+        state,
         Some(path.to_path_buf()),
         m,
         skin,
     ));
-    if expanded {
-        if let Some(kids) = kids {
-            for k in kids {
-                let kicon: &'static str = if k.is_dir() { "folder" } else { "archive" };
-                list = push_tree_node(list, state, &k.path, k.name.clone(), kicon, indent + 1, m, skin);
-            }
+    if expanded
+        && let Some(kids) = kids
+    {
+        for k in kids {
+            let kicon: &'static str = if k.is_dir() { "folder" } else { "archive" };
+            list = push_tree_node(list, state, &k.path, k.name.clone(), kicon, indent + 1, row_w, m, skin);
         }
     }
     list
@@ -331,39 +431,49 @@ pub(crate) fn tree_row_count(state: &Explorer) -> usize {
 }
 
 /// Total tree content height (drives the scrollbar strip geometry).
-fn content_height(state: &Explorer) -> f32 {
+pub(crate) fn content_height(state: &Explorer) -> f32 {
     let (_, item_h, ..) = state.ribbon.metrics();
     let favs = if state.nav.favorites_open { favorites_len() } else { 0 };
     let net = 1 + usize::from(state.nav.network_open);
-    // 1 favorites header + favorites + the Computer tree + Network rows;
-    // 8 = the column's top+bottom padding
-    8.0 + (1 + favs + tree_row_count(state) + net) as f32 * item_h
+    // 1 favorites header + favorites + the Computer tree + Network rows
+    // + the empty trailing line; 8 = the column's top+bottom padding
+    8.0 + (2 + favs + tree_row_count(state) + net) as f32 * item_h
 }
 
 pub(crate) fn nav_pane(state: &Explorer, skin: skin::Skin, width: f32) -> Element<'_, Message> {
     let m = nav_metrics(state);
+    let need_strip = content_height(state) > state.nav.viewport_h;
+    // rows span the scrollable's viewport; when the widest row exceeds
+    // it, every row takes the content width so the fill continues
+    // during horizontal scrolling
+    let strip_w = if need_strip { crate::scrollbar::THICKNESS } else { 1.0 };
+    let row_w = (width - strip_w).max(0.0).max(content_width(state, m));
     let mut list = column![].spacing(0).padding(4);
 
     // ---- Favorites (foldable section; entries are shortcuts only) ----
-    list = list.push(section_header("Favorites", "star", state.nav.favorites_open, NavSection::Favorites, m, skin));
+    list = list.push(section_header(row_w, "Favorites", "star", state.nav.favorites_open, NavSection::Favorites, m, skin));
     if state.nav.favorites_open {
         for (label, icon_name, target) in favorites() {
             // shortcuts: never show the selected state (only the Computer
             // tree highlights the current folder)
             let hovered = target.is_some() && target == state.nav_hover;
-            list = list.push(tree_item(label, icon_name, 1, None, false, hovered, target, m, skin));
+            let targeted = target.as_ref().is_some_and(|t| state.drop_targeted(t));
+            list = list.push(tree_item(row_w, label, icon_name, 1, None, false, hovered, targeted, state, target, m, skin));
         }
     }
 
     // ---- Computer: the "/" root node itself (drives + folders below) ----
     let root_open = state.nav.expanded.contains(Path::new("/"));
     list = list.push(tree_item(
+        row_w,
         "Computer".to_string(),
         "computer",
         0,
         Some(root_open),
         state.cwd == Path::new("/"),
         state.nav_hover.as_deref() == Some(Path::new("/")),
+        state.drop_targeted(Path::new("/")),
+        state,
         Some(PathBuf::from("/")),
         m,
         skin,
@@ -375,34 +485,43 @@ pub(crate) fn nav_pane(state: &Explorer, skin: skin::Skin, width: f32) -> Elemen
                 continue;
             }
             let label = if v.name.is_empty() { v.mount.display().to_string() } else { v.name.clone() };
-            list = push_tree_node(list, state, &v.mount, label, "drive", 1, m, skin);
+            list = push_tree_node(list, state, &v.mount, label, "drive", 1, row_w, m, skin);
         }
         if let Some(kids) = state.nav.children.get(Path::new("/")) {
             for k in kids {
                 let kicon: &'static str = if k.is_dir() { "folder" } else { "archive" };
-                list = push_tree_node(list, state, &k.path, k.name.clone(), kicon, 1, m, skin);
+                list = push_tree_node(list, state, &k.path, k.name.clone(), kicon, 1, row_w, m, skin);
             }
         }
     }
 
     // ---- Network (no backend yet — header only, folded by default) ----
-    list = list.push(section_header("Network", "network", state.nav.network_open, NavSection::Network, m, skin));
+    list = list.push(section_header(row_w, "Network", "network", state.nav.network_open, NavSection::Network, m, skin));
     if state.nav.network_open {
         list = list.push(tree_item(
+            row_w,
             "Network".to_string(),
             "network",
             1,
             None,
             false,
             false,
+            false,
+            state,
             None,
             m,
             skin,
         ));
     }
 
+    // breathing room after the last row: an empty line with no function
+    list = list.push(Space::new().height(Length::Fixed(m.height)).boxed());
+
     let (_, item_h, ..) = state.ribbon.metrics();
-    let need_strip = content_height(state) > state.nav.viewport_h;
+    // one tree row per wheel tick: iced converts a tick to 60px, so the
+    // multiplier is the row height over 60 (the folder view keeps its
+    // own configured scroll_speed)
+    let row_per_tick = item_h / 60.0;
     // the scrollbar strip collapses to a 1px hairline at the right edge
     // when the tree fits the pane
     let bar: Element<Message> = if need_strip {
@@ -416,7 +535,7 @@ pub(crate) fn nav_pane(state: &Explorer, skin: skin::Skin, width: f32) -> Elemen
         )
     } else {
         container(Space::new())
-            .width(Length::Fixed(1.0))
+            .width(Length::Fixed(crate::theme::border_w(1.0)))
             .height(Length::Fill)
             .style(bg(skin.sep))
             .boxed()
@@ -449,7 +568,7 @@ pub(crate) fn nav_pane(state: &Explorer, skin: skin::Skin, width: f32) -> Elemen
             .boxed(),
             state.nav.scroll_y,
             (content_height(state) - state.nav.viewport_h).max(0.0),
-            state.view_cfg.input.scroll_speed,
+            row_per_tick,
             crate::scrollbar::Axis::Vertical,
             Message::NavScrollTo,
         ),

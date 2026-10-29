@@ -642,6 +642,8 @@ impl ViewCfg {
 
     /// §9 scroll anchor: the item at the viewport's leading edge in the
     /// given layout (`offset` is the scroll y, or x for List).
+    // metric inputs are independent; the caller (folder view) owns them
+    #[allow(clippy::too_many_arguments)]
     pub fn first_visible(
         &self,
         index: u8,

@@ -2,6 +2,13 @@
 
 mod border;
 mod commands;
+// SPEC/DRAGGING.md core. The UriList/Text/Custom payloads, the native
+// adapter DragSources, the bounds-based registry API and the
+// Open/Import/Run actions are the Phase 1/3 surface — consumed by the
+// future platform adapter (external DnD) and targets (tabs,
+// executables, favorites), not yet wired in the UI.
+#[allow(dead_code)]
+mod dnd;
 mod folder;
 mod fonts;
 mod fs;
@@ -21,6 +28,7 @@ mod pane;
 mod ribbon;
 mod scrollbar;
 mod status;
+mod theme;
 mod ui;
 mod ui_common;
 mod view_step;
@@ -58,7 +66,7 @@ fn main() -> iced::Result {
         match arg.as_str() {
             "--render" => {}
             "--ui-debug" => unsafe {std::env::set_var("EXPLORER_UI_DEBUG", "1")},
-            v if v == "--dpi" => want_dpi = true,
+            "--dpi" => want_dpi = true,
             v if v.starts_with("--dpi=") => set_dpi(&v["--dpi=".len()..]),
             v if v.starts_with("--size=") => set_size(&v["--size=".len()..]),
             "--help" | "-h" => {
@@ -67,7 +75,7 @@ fn main() -> iced::Result {
             }
             v if v.starts_with("--render=") => set_renderer(&v["--render=".len()..]),
             v if v.starts_with("--render") && v.len() > "--render".len() => {
-                set_renderer(&v["--render".len()..].trim_start_matches('='))
+                set_renderer(v["--render".len()..].trim_start_matches('='))
             }
             _ => {}
         }
@@ -180,13 +188,12 @@ pub const BASE_LOGICAL: (f32, f32) = (1152.0, 720.0);
 
 /// Initial window size: `--size=WxH` if given, else the base.
 fn window_size() -> iced::Size {
-    if let Ok(v) = std::env::var("EXPLORER_SIZE") {
-        if let Some((w, h)) = v
+    if let Ok(v) = std::env::var("EXPLORER_SIZE")
+        && let Some((w, h)) = v
             .split_once('x')
             .and_then(|(w, h)| Some((w.parse::<f32>().ok()?, h.parse::<f32>().ok()?)))
-        {
-            return iced::Size::new(w, h);
-        }
+    {
+        return iced::Size::new(w, h);
     }
     iced::Size::new(BASE_LOGICAL.0, BASE_LOGICAL.1)
 }

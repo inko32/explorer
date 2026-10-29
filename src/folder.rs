@@ -241,16 +241,17 @@ impl<'a> Widget<Message, iced::Theme, iced::Renderer> for MarqueeZone<'a> {
                     shell,
                     viewport,
                 );
-                if !shell.is_event_captured() && cursor.is_over(layout.bounds()) {
-                    if let Some(p) = cursor.position() {
-                        zone.dragging = true;
-                        let o = layout.bounds().position();
-                        shell.publish(Message::MarqueeBegin {
-                            x: p.x - o.x + self.scroll_x,
-                            y: p.y - o.y + self.scroll_y,
-                        });
-                        shell.capture_event();
-                    }
+                if !shell.is_event_captured()
+                    && cursor.is_over(layout.bounds())
+                    && let Some(p) = cursor.position()
+                {
+                    zone.dragging = true;
+                    let o = layout.bounds().position();
+                    shell.publish(Message::MarqueeBegin {
+                        x: p.x - o.x + self.scroll_x,
+                        y: p.y - o.y + self.scroll_y,
+                    });
+                    shell.capture_event();
                 }
             }
             iced::Event::Mouse(mouse::Event::CursorMoved { position }) if zone.dragging => {
@@ -315,7 +316,7 @@ impl<'a> Widget<Message, iced::Theme, iced::Renderer> for MarqueeZone<'a> {
 
 /// The rubber-band rectangle (pane-local coordinates — plain
 /// spacer positioning, NOT float: float bounds are window-absolute).
-fn marquee_rect(x: f32, y: f32, w: f32, h: f32, skin: skin::Skin) -> Element<'static, Message> {
+fn marquee_rect(x: f32, y: f32, w: f32, h: f32, rainbow: bool, skin: skin::Skin) -> Element<'static, Message> {
     column![
         Space::new().height(Length::Fixed(y.max(0.0))),
         row![
@@ -324,8 +325,13 @@ fn marquee_rect(x: f32, y: f32, w: f32, h: f32, skin: skin::Skin) -> Element<'st
                 move |_t: &iced::Theme| container::Style {
                     background: Some(Color { a: 0.35, ..skin.sel }.into()),
                     border: iced::Border {
-                        color: skin.sel_border,
-                        width: 1.0,
+                        // TEMP(rainbow): let the backdrop pass through
+                        color: if rainbow {
+                            Color { a: 0.6, ..skin.sel_border }
+                        } else {
+                            skin.sel_border
+                        },
+                        width: crate::theme::border_w(1.0),
                         radius: 0.0.into(),
                     },
                     ..Default::default()
@@ -346,30 +352,73 @@ fn item_chrome<'a>(
 ) -> Element<'a, Message> {
     let selected = state.selected.contains(&i);
     let hovered = state.hovered == Some(i);
-    let bgc = if selected {
-        skin.sel
+    // §5.1: the item is the innermost drop target under the pointer
+    let targeted = state
+        .entries
+        .get(i)
+        .is_some_and(|e| state.drop_targeted(&e.path));
+    // selection fades to gray while the folder pane is inactive
+    // (window unfocused, nav pane active, or a ribbon popup open);
+    // hovering a grayed item (or an active drop target) restores the
+    // live colors (SPEC/Unfocused_Window.md §4)
+    let popup_open = state.ribbon.framework().view().popup_open();
+    let pane_live = state.focused
+        && !popup_open
+        && state.active_pane == crate::model::Pane::Folder;
+    let live = pane_live || targeted || (hovered && !popup_open);
+    let bgc = if selected || targeted {
+        if live { skin.sel } else { skin.sel_inactive }
     } else if hovered {
         skin.hover
     } else {
         Color::TRANSPARENT
     };
-    let border_color = if selected { skin.sel_border } else { Color::TRANSPARENT };
+    let border_color = if selected || targeted {
+        if live { skin.sel_border } else { skin.sel_inactive_border }
+    } else {
+        Color::TRANSPARENT
+    };
+    // TEMP(rainbow): solid chrome would hide the rainbow backdrop
+    // rectangle; tint it translucent (same 0.35 convention as the
+    // marquee) so the rainbow passes through. Toggle off = solid
+    // palette colors, identical to the other panes.
+    let (bgc, border_color) = if state.rainbow {
+        (
+            Color { a: bgc.a * 0.35, ..bgc },
+            Color { a: border_color.a * 0.6, ..border_color },
+        )
+    } else {
+        (bgc, border_color)
+    };
     let styled = container(content).style(move |_t: &iced::Theme| container::Style {
         background: Some(bgc.into()),
         border: iced::Border {
             color: border_color,
-            width: if selected { 1.0 } else { 0.0 },
+            width: if selected || targeted { crate::theme::border_w(1.0) } else { 0.0 },
             radius: state.view_cfg.style.corner_radius.into(),
         },
         ..Default::default()
     });
-    mouse_area(styled)
+    // drop target: directories/archives accept, plain files reject per
+    // policy (the status bar says "Cannot drop here")
+    let zone_target = state.entries.get(i).map(|e| {
+        if e.is_dir() || fs::archive::is_archive_path(&e.path) {
+            crate::dnd::DropTarget::Directory(e.path.clone())
+        } else {
+            crate::dnd::DropTarget::File(e.path.clone())
+        }
+    });
+    let el: Element<Message> = mouse_area(styled)
         .on_press(Message::Select(i))
         .on_double_click(Message::Open(i))
         .on_right_press(Message::ContextSelect(i))
         .on_enter(Message::Hover(Some(i)))
         .on_exit(Message::HoverExit(i))
-        .boxed()
+        .boxed();
+    match zone_target {
+        Some(t) => crate::dnd::drop_zone(el, t),
+        None => el,
+    }
 }
 
 /// Vertical spacer reserving scroll height for virtualized rows.
@@ -532,7 +581,7 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
         let (y0, y1) = (m.y0.min(m.y1), m.y0.max(m.y1));
         stack![
             body,
-            marquee_rect(x0 - state.scroll_x, y0 - state.scroll_y, x1 - x0, y1 - y0, skin),
+            marquee_rect(x0 - state.scroll_x, y0 - state.scroll_y, x1 - x0, y1 - y0, state.rainbow, skin),
         ]
         .boxed()
     } else {
@@ -542,11 +591,13 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
     // The Sensor reports the exact scrollable viewport size (iced's
     // on_scroll stays silent when the content fits, and window resize
     // events carry the WINDOW size — both wrong for the collapse rule).
+    // TEMP: the pane background is 100% transparent; the solid color
+    // now comes from the backdrop rectangle stacked UNDER the pane
+    // (see `pane_backdrop` below)
     let area: Element<Message> = iced::widget::Sensor::new(
         container(body)
             .width(Length::Fill)
-            .height(Length::Fill)
-            .style(bg(skin.window_bg)),
+            .height(Length::Fill),
     )
     .on_show(|size| Message::FileAreaResized(size.width, size.height))
     .on_resize(|size| Message::FileAreaResized(size.width, size.height))
@@ -560,6 +611,13 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
         scroll_x: state.scroll_x,
         scroll_y: state.scroll_y,
     }.boxed();
+    // the empty area of the current directory is a drop target
+    // (SPEC/DRAGGING.md §4.2; the item zones above outrank it by §6
+    // nesting)
+    let area = crate::dnd::drop_zone(
+        area,
+        crate::dnd::DropTarget::EmptyDirectory(state.cwd.clone()),
+    );
     // Windows-style scrollbar strip (arrow buttons at both ends); 0px
     // when the content fits, keeping the pane edge right-aligned
     let pane: Element<Message> = if family == vs::Family::List && !state.loading {
@@ -596,13 +654,39 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
     ))
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(bg(skin.window_bg))
         .boxed();
+    // the solid rectangle UNDER the transparent pane
+    let view: Element<Message> = stack![pane_backdrop(state.rainbow, skin), view].boxed();
     CtrlZoom {
         content: view,
         ctrl: state.ctrl_held,
         notch_delta: cfg.input.notch_delta,
     }.boxed()
+}
+
+/// TEMP: the solid rectangle drawn UNDER the folder view pane (the
+/// pane background itself is fully transparent, so this shows
+/// through). Normally it is the plain window color; the View-tab
+/// "Rainbow" ribbon button paints it with a rainbow gradient instead.
+fn pane_backdrop(rainbow: bool, skin: skin::Skin) -> Element<'static, Message> {
+    container(Space::new().width(Length::Fill).height(Length::Fill))
+        .style(move |_t: &iced::Theme| container::Style {
+            background: Some(if rainbow {
+                iced::Background::Gradient(iced::Gradient::Linear(
+                    iced::gradient::Linear::new(std::f32::consts::FRAC_PI_4)
+                        .add_stop(0.0, Color::from_rgb(0.95, 0.15, 0.15))
+                        .add_stop(0.2, Color::from_rgb(0.95, 0.55, 0.05))
+                        .add_stop(0.4, Color::from_rgb(0.90, 0.85, 0.05))
+                        .add_stop(0.6, Color::from_rgb(0.10, 0.70, 0.25))
+                        .add_stop(0.8, Color::from_rgb(0.10, 0.45, 0.95))
+                        .add_stop(1.0, Color::from_rgb(0.60, 0.20, 0.90)),
+                ))
+            } else {
+                skin.window_bg.into()
+            }),
+            ..Default::default()
+        })
+        .boxed()
 }
 
 /// Details column header (Name / Date modified / Type / Size). The
@@ -626,7 +710,7 @@ fn details_header(state: &Explorer, skin: skin::Skin) -> Element<'static, Messag
                 .style(move |_t: &iced::Theme| container::Style {
                     border: iced::Border {
                         color: skin.group_sep,
-                        width: 1.0,
+                        width: crate::theme::border_w(1.0),
                         radius: 0.0.into(),
                     },
                     ..Default::default()
@@ -724,7 +808,7 @@ fn content_row<'a>(
         container(content)
             .width(Length::Fill)
             .height(Length::Fixed(c.row_h - 1.0)),
-        container(Space::new().width(Length::Fill).height(Length::Fixed(1.0)))
+        container(Space::new().width(Length::Fill).height(Length::Fixed(crate::theme::border_w(1.0))))
             .width(Length::Fill)
             .style(bg(skin.sep)),
     ];

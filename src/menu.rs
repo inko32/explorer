@@ -61,7 +61,7 @@ impl Default for SettingsCfg {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct OpenCfg {
     pub kde: KdeCfg,
@@ -84,14 +84,6 @@ impl Default for KdeCfg {
     }
 }
 
-impl Default for OpenCfg {
-    fn default() -> Self {
-        Self {
-            kde: KdeCfg::default(),
-            handlers: Default::default(),
-        }
-    }
-}
 
 /// Windows-style menu metrics.
 #[derive(Clone, Copy, Debug, Deserialize)]
@@ -301,10 +293,10 @@ pub fn groups_for(cfg: &MenuCfg, paths: &[PathBuf]) -> Vec<String> {
         };
         // §3.4: a group is not duplicated because several selected
         // files belong to it
-        if let Some(g) = group {
-            if !out.contains(&g) {
-                out.push(g);
-            }
+        if let Some(g) = group
+            && !out.contains(&g)
+        {
+            out.push(g);
         }
     }
     out
@@ -435,10 +427,10 @@ pub fn build_background(cfg: &MenuCfg, can_paste: bool) -> Vec<Entry> {
     let mut entries: Vec<Entry> =
         cfg.menus.background.iter().map(|s| resolve(cfg, s)).collect();
     for e in &mut entries {
-        if let Entry::Item(i) = e {
-            if i.id == "paste" {
-                i.enabled = can_paste;
-            }
+        if let Entry::Item(i) = e
+            && i.id == "paste"
+        {
+            i.enabled = can_paste;
         }
     }
     cleanup(&mut entries);
@@ -567,7 +559,7 @@ pub fn view<'a>(open: &'a Open, cfg: &'a MenuCfg, skin: skin::Skin) -> Element<'
                     container(
                         row![
                             Space::new().width(Length::Fixed(l.gutter)),
-                            container(Space::new().width(Length::Fill).height(Length::Fixed(1.0)))
+                            container(Space::new().width(Length::Fill).height(Length::Fixed(crate::theme::border_w(1.0))))
                                 .width(Length::Fill)
                                 .style(move |_t: &iced::Theme| container::Style {
                                     background: Some(skin.menu_section_border.into()),
@@ -591,7 +583,7 @@ pub fn view<'a>(open: &'a Open, cfg: &'a MenuCfg, skin: skin::Skin) -> Element<'
             background: Some(skin.menu_bg.into()),
             border: iced::Border {
                 color: skin.menu_border,
-                width: 1.0,
+                width: crate::theme::border_w(1.0),
                 radius: l.corner_radius.into(),
             },
             shadow: iced::Shadow {
@@ -639,7 +631,7 @@ fn item_row<'a>(
             background: Some(skin.hover.into()),
             border: iced::Border {
                 color: skin.nav_hover_border,
-                width: 1.0,
+                width: crate::theme::border_w(1.0),
                 radius: 0.0.into(),
             },
             ..Default::default()

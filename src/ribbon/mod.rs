@@ -81,7 +81,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use iced::Widget as _;
-use iced::Element;
+use iced::{Color, Element};
 
 use crate::model::{Explorer, Message, SortBy};
 use crate::ribbon::widget::Ribbon as RibbonWidget;
@@ -147,6 +147,9 @@ pub mod cmd {
     pub const TOGGLE_DARK: u32 = 74;
     pub const TOGGLE_BORDER: u32 = 75;
     pub const TOGGLE_FRAME: u32 = 76;
+    pub const TOGGLE_GRAY_DISABLED: u32 = 307;
+    /// TEMP: rainbow gradient on the folder-view backdrop rectangle.
+    pub const TOGGLE_RAINBOW: u32 = 79;
     pub const FOLDER_OPTIONS: u32 = 77;
 
     pub const CTX_MENU: u32 = 140;
@@ -465,6 +468,10 @@ pub struct Snapshot {
     pub dark: bool,
     pub self_border: bool,
     pub win8_frame: bool,
+    /// TEMP: rainbow backdrop toggle state.
+    pub rainbow: bool,
+    /// Disabled buttons/icons get the gray-scaled-faded style.
+    pub disabled_gray: bool,
     pub cwd: PathBuf,
     pub selected_paths: Vec<PathBuf>,
     pub first_selected: Option<usize>,
@@ -487,6 +494,8 @@ impl Explorer {
             dark: self.dark,
             self_border: self.self_border,
             win8_frame: self.frame_style == crate::model::FrameStyle::Win8,
+            rainbow: self.rainbow,
+            disabled_gray: self.disabled_gray,
             cwd: self.cwd.clone(),
             selected_paths: self.selected_paths(),
             first_selected: self.selected.iter().next().copied(),
@@ -595,6 +604,8 @@ impl CommandHandler for ExplorerHandler {
             cmd::TOGGLE_DARK => out.push(Message::ToggleDark),
             cmd::TOGGLE_BORDER => out.push(Message::ToggleSelfBorder),
             cmd::TOGGLE_FRAME => out.push(Message::ToggleFrameStyle),
+            cmd::TOGGLE_GRAY_DISABLED => out.push(Message::ToggleGrayDisabled),
+            cmd::TOGGLE_RAINBOW => out.push(Message::ToggleRainbow),
             cmd::CTX_MENU => out.push(Message::Status("Context menu".into())),
             cmd::HELP => out.push(Message::Status("Help is not implemented yet".into())),
             other => out.push(Message::Status(format!(
@@ -651,6 +662,8 @@ impl CommandHandler for ExplorerHandler {
                     cmd::TOGGLE_DARK => snap.dark,
                     cmd::TOGGLE_BORDER => snap.self_border,
                     cmd::TOGGLE_FRAME => snap.win8_frame,
+                    cmd::TOGGLE_GRAY_DISABLED => snap.disabled_gray,
+                    cmd::TOGGLE_RAINBOW => snap.rainbow,
                     _ => false,
                 };
                 Some(PropValue::Bool(on))
@@ -728,6 +741,8 @@ fn command_name(command: u32) -> String {
         cmd::TOGGLE_DARK => "Dark mode",
         cmd::TOGGLE_BORDER => "Custom window border",
         cmd::TOGGLE_FRAME => "Windows 8 frame style",
+        cmd::TOGGLE_GRAY_DISABLED => "Gray out unavailable buttons",
+        cmd::TOGGLE_RAINBOW => "Rainbow pane backdrop",
         cmd::HELP => "Help",
         _ => return format!("Command #{command}"),
     };
@@ -889,12 +904,11 @@ impl Ribbon {
         let selected = view.selected_tab();
         // never jump to a contextual tab on selection changes; only fall
         // back to Home when the active tab's context disappears
-        if let Some(kind) = self.tabs.get(selected).map(|t| t.ctx) {
-            if !visible(kind) {
-                if let Some(home) = self.tabs.iter().position(|t| t.id == "home") {
-                    view.select_tab(home);
-                }
-            }
+        if let Some(kind) = self.tabs.get(selected).map(|t| t.ctx)
+            && !visible(kind)
+            && let Some(home) = self.tabs.iter().position(|t| t.id == "home")
+        {
+            view.select_tab(home);
         }
     }
 }
@@ -938,12 +952,13 @@ impl Ribbon {
                 })
                 .unwrap_or(ContextualColor::Blue)
                 .accent();
-            if let Some(last) = out.last_mut() {
-                if last.label == *name && last.last_tab + 1 == i {
-                    last.w = x + w - last.x;
-                    last.last_tab = i;
-                    continue;
-                }
+            if let Some(last) = out.last_mut()
+                && last.label == *name
+                && last.last_tab + 1 == i
+            {
+                last.w = x + w - last.x;
+                last.last_tab = i;
+                continue;
             }
             out.push(ContextualBlock {
                 label: name.clone(),
@@ -1061,10 +1076,10 @@ fn load_yaml() -> String {
     let user_path = std::env::var_os("HOME")
         .map(std::path::PathBuf::from)
         .map(|h| h.join(".config/explorer/ribbon.yaml"));
-    if let Some(p) = user_path {
-        if let Ok(text) = std::fs::read_to_string(&p) {
-            return text;
-        }
+    if let Some(p) = user_path
+        && let Ok(text) = std::fs::read_to_string(&p)
+    {
+        return text;
     }
     include_str!("../../assets/ribbon.yaml").to_string()
 }
@@ -1073,36 +1088,74 @@ fn load_yaml() -> String {
 // theme + view
 
 /// rs-ribbon theme matching the app skin (light: Windows 8 ribbon look;
-/// dark: recolored chrome).
-pub fn theme(dark: bool) -> Theme {
+/// dark: recolored chrome). Every color comes from the theme file
+/// (`crate::theme`): ribbon-specific tokens from the `ribbon` group,
+/// everything else derived from the shared palette tokens.
+/// `focused = false` (window in background, SPEC/Unfocused_Window.md):
+/// no hover feedback at all and checked/pressed marks fade to the
+/// inactive gray.
+pub fn theme(dark: bool, gray_disabled: bool, scale_dpi: f32, focused: bool) -> Theme {
+    use crate::ribbon::theme::tint;
+    let p = if dark { crate::theme::dark() } else { crate::theme::light() };
+    let r = &p.ribbon;
+    // geometry + tab style come from the Windows 8 base; colors below
     let mut t = Theme::windows8();
-    if dark {
-        use crate::ribbon::theme::rgb;
-        t.tab_strip = (rgb(0x2D2D2D), rgb(0x2D2D2D));
-        t.ribbon = (rgb(0x2D2D2D), rgb(0x2D2D2D));
-        t.tab_active = rgb(0x2D2D2D);
-        t.tab_hover = rgb(0x3A4046);
-        t.qat_bg = (rgb(0x2D2D2D), rgb(0x2D2D2D));
-        t.text = rgb(0xE8E8E8);
-        t.tab_text = rgb(0xC8C8C8);
-        t.group_label = rgb(0xA0A0A0);
-        t.text_disabled = rgb(0x6E6E6E);
-        t.border = rgb(0x555555);
-        t.group_separator = rgb(0x505050);
-        t.tab_line = rgb(0x505050);
-        t.hover_bg = rgb(0x3A4046);
-        t.hover_border = Some(rgb(0x4A90D9));
-        t.pressed_bg = rgb(0x4A525A);
-        t.pressed_border = Some(rgb(0x5A89C0));
-        t.checked_bg = rgb(0x3D5A78);
-        t.checked_border = Some(rgb(0x5A89C0));
-        t.popup_bg = rgb(0x383838);
-        t.popup_border = rgb(0x505050);
-        t.tooltip_bg = rgb(0x383838);
-        t.tooltip_border = rgb(0x505050);
-        t.accent = rgb(0x4A90D9);
-        t.selection = rgb(0x4A90D9);
-        t.orb = (rgb(0x4A90D9), rgb(0x2C5F9E));
+    t.grayscale_disabled = gray_disabled;
+    // borders keep a constant physical width unless the theme says they
+    // follow the DPI (not_follow_dpi = 1 / scale)
+    t.border_scale = if crate::theme::get().border_follow_dpi || scale_dpi <= 0.0 {
+        1.0
+    } else {
+        1.0 / scale_dpi
+    };
+    t.accent = r.accent;
+    t.orb = (r.accent, r.accent_dark);
+    t.text = r.text;
+    t.tab_text = r.tab_text;
+    // hover is the folder-view hover color everywhere in the ribbon
+    // (tabs, buttons, popup menu rows); buttons additionally get the
+    // bluer hover border, in both themes
+    t.tab_hover = p.hover;
+    t.hover_bg = p.hover;
+    t.hover_border = Some(p.hover_btn_border);
+    // pressed = the folder-view pressed blue (light theme included)
+    t.pressed_bg = p.pressed;
+    t.border = r.border;
+    t.tab_line = r.tab_line;
+    t.group_label = r.group_label;
+    t.text_disabled = r.text_disabled;
+    t.keytip_bg = r.keytip_bg;
+    t.keytip_text = r.keytip_text;
+    t.selection = r.accent;
+    // structural pairs + dark chrome, derived from shared tokens
+    let strip = if dark { p.ribbon_bg } else { p.window_bg };
+    t.tab_strip = (strip, strip);
+    t.qat_bg = (strip, strip);
+    t.ribbon = (p.ribbon_bg, p.ribbon_bg);
+    t.tab_active = p.ribbon_bg;
+    t.group_separator = p.group_sep;
+    let panel = if dark { p.menu_bg } else { p.window_bg };
+    t.popup_bg = panel;
+    t.tooltip_bg = panel;
+    t.popup_border = if dark { p.menu_border } else { r.border };
+    t.tooltip_border = if dark { p.menu_border } else { r.tooltip_border };
+    // pressed reuses the hover border (light theme included); dark
+    // chrome reuses the shared selection tokens for checked.
+    t.pressed_border = dark.then_some(p.sel_btn_border);
+    t.checked_border = dark.then_some(p.sel_btn_border);
+    t.checked_bg = if dark { p.sel_btn } else { tint(r.accent, 0.80) };
+    if !focused {
+        // unfocused window: hover fills are baked into the scene at
+        // layout time, so transparent hover colors guarantee no hover
+        // paint even if stale hover state survives
+        t.tab_hover = Color::TRANSPARENT;
+        t.hover_bg = Color::TRANSPARENT;
+        t.hover_border = None;
+        t.pressed_bg = p.sel_inactive;
+        t.pressed_border = Some(p.sel_inactive_border);
+        t.checked_bg = p.sel_inactive;
+        t.checked_border = Some(p.sel_inactive_border);
+        t.selection = p.sel_inactive;
     }
     t
 }
@@ -1110,9 +1163,21 @@ pub fn theme(dark: bool) -> Theme {
 /// The ribbon element (iced widget bound to our framework).
 pub fn view(state: &Explorer) -> Element<'_, Message> {
     crate::ribbon::image::set_dark(state.dark);
+    let ignore_when_unfocused = state
+        .ribbon
+        .framework()
+        .spec()
+        .map(|s| s.ignore_input_when_unfocused)
+        .unwrap_or(true);
     RibbonWidget::new(state.ribbon.framework())
-        .theme(theme(state.dark))
+        .theme(theme(
+            state.dark,
+            state.disabled_gray,
+            state.scale_dpi(),
+            state.focused,
+        ))
         .fonts(state.fonts.clone())
+        .responsive(state.focused || !ignore_when_unfocused)
         .on_event(Message::Ribbon)
         .boxed()
 }

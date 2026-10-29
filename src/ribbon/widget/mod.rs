@@ -51,6 +51,9 @@ pub struct Ribbon<'a, Message, Th = IcedTheme, Renderer = iced::Renderer> {
     /// Font sizes (assets/fonts.yaml); defaults are all 12px.
     fonts: crate::fonts::FontSizes,
     on_event: Option<Box<dyn Fn(RibbonEvent) -> Message + 'a>>,
+    /// When false the ribbon is inert: no input, no hover feedback, no
+    /// overlays (unfocused window, SPEC/Unfocused_Window.md).
+    responsive: bool,
     _phantom: std::marker::PhantomData<(Th, Renderer)>,
 }
 
@@ -62,8 +65,16 @@ impl<'a, Message, Th, Renderer> Ribbon<'a, Message, Th, Renderer> {
             theme: Theme::windows10(),
             fonts: crate::fonts::FontSizes::load(),
             on_event: None,
+            responsive: true,
             _phantom: std::marker::PhantomData,
         }
+    }
+
+    /// Whether the ribbon processes input (false while the window is
+    /// unfocused and ribbon.yaml `ignore_input_when_unfocused` holds).
+    pub fn responsive(mut self, responsive: bool) -> Self {
+        self.responsive = responsive;
+        self
     }
 
     /// Use a custom [`Theme`] instead of the Windows 10 default.
@@ -165,6 +176,7 @@ where
                 layout.position(),
                 viewport,
                 &self.theme,
+                1.0,
             );
         }
     }
@@ -191,6 +203,50 @@ where
         let state = tree.state.downcast_mut::<State>();
         let origin = layout.position();
         let bounds = layout.bounds();
+
+        // publish popup-visibility transitions to the framework handle:
+        // app views gray the folder/nav panes while a popup is open
+        // (SPEC/Unfocused_Window.md §4); the message forces a view
+        // rebuild. Checked here so every open/close path is covered.
+        let popup_open = state.popup.is_some();
+        if popup_open != self.fw.view().popup_open() {
+            self.fw.view().set_popup_open(popup_open);
+            if let Some(f) = self.on_event.as_deref() {
+                shell.publish(f(RibbonEvent::PopupVisibility { open: popup_open }));
+            }
+        }
+
+        // Unfocused window (ribbon.yaml `ignore_input_when_unfocused`):
+        // the ribbon is fully inert — no input, no hover work, no
+        // tooltip arming (CPU saving, SPEC/Unfocused_Window.md).
+        if !self.responsive {
+            // stale transient state is dropped on the first event
+            if state.hover.is_some()
+                || state.pressed.is_some()
+                || state.tooltip.is_some()
+            {
+                state.hover = None;
+                state.hover_since = None;
+                state.pressed = None;
+                state.tooltip = None;
+                state.tooltip_anchor = None;
+                shell.request_redraw();
+            }
+            // an open popup fades out (theme.yaml `fade_ms`, 0 =
+            // instant), then closes; overlay() renders the fade
+            if state.popup.is_some() {
+                let fade = Duration::from_millis(u64::from(crate::theme::fade_ms()));
+                let start = state.popup_fade_start.get_or_insert_with(Instant::now);
+                if start.elapsed() >= fade {
+                    close_all_popups(state);
+                    state.popup_fade_start = None;
+                }
+                // drive the animation frames; stops once closed above
+                shell.request_redraw();
+            }
+            return;
+        }
+        state.popup_fade_start = None;
 
         // consume IUIContextualUI requests
         if let Some((cmd, x, y)) = self.fw.view().take_pending_popup() {
@@ -234,25 +290,23 @@ where
                 shell.request_redraw();
             }
             // tooltip
-            if let Some(node) = &hit {
-                if let (Some(tip), Some(since)) = (node.tip, state.hover_since) {
-                    if since.elapsed() > TOOLTIP_DELAY
-                        && state.tooltip.is_none()
-                    {
-                        state.tooltip = Some(tip);
-                        state.tooltip_anchor = Some(translate_rect(node.rect, origin));
-                        shell.request_redraw();
-                        fw.view_log(
-                            EventType::TooltipShown,
-                            if matches!(new_hover, Some(Qat(_))) {
-                                EventLocation::Qat
-                            } else {
-                                EventLocation::Ribbon
-                            },
-                            tip,
-                        );
-                    }
-                }
+            if let Some(node) = &hit
+                && let (Some(tip), Some(since)) = (node.tip, state.hover_since)
+                && since.elapsed() > TOOLTIP_DELAY
+                && state.tooltip.is_none()
+            {
+                state.tooltip = Some(tip);
+                state.tooltip_anchor = Some(translate_rect(node.rect, origin));
+                shell.request_redraw();
+                fw.view_log(
+                    EventType::TooltipShown,
+                    if matches!(new_hover, Some(Qat(_))) {
+                        EventLocation::Qat
+                    } else {
+                        EventLocation::Ribbon
+                    },
+                    tip,
+                );
             }
             // gallery preview from the in-ribbon strip
             handle_strip_preview(fw, state, &new_hover, shell, on_event);
@@ -313,21 +367,21 @@ where
             let local = Point::new(position.x - origin.x, position.y - origin.y);
             let hit = state.scene.as_ref().and_then(|s| s.hit(local).cloned());
             let pressed = state.pressed.take();
-            if let (Some(node), Some(t)) = (&hit, &pressed) {
-                if node.target.as_ref() == Some(t) {
-                    let anchor = translate_rect(node.rect, origin);
-                    activate(
-                        fw,
-                        theme,
-                        state,
-                        t,
-                        anchor,
-                        origin,
-                        shell,
-                        on_event.as_deref(),
-                    );
-                    shell.capture_event();
-                }
+            if let (Some(node), Some(t)) = (&hit, &pressed)
+                && node.target.as_ref() == Some(t)
+            {
+                let anchor = translate_rect(node.rect, origin);
+                activate(
+                    fw,
+                    theme,
+                    state,
+                    t,
+                    anchor,
+                    origin,
+                    shell,
+                    on_event.as_deref(),
+                );
+                shell.capture_event();
             }
         };
 
@@ -335,32 +389,26 @@ where
             iced::Event::Mouse(mouse::Event::CursorMoved { position })
             | iced::Event::Touch(iced::touch::Event::FingerMoved { position, .. }) => {
                 move_to(state, position, shell);
-                return;
             }
             iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 if let Some(position) = cursor.position() {
                     press_at(state, position, shell);
                 }
-                return;
             }
             iced::Event::Touch(iced::touch::Event::FingerPressed { position, .. }) => {
                 press_at(state, position, shell);
-                return;
             }
             iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
                 match cursor.position() {
                     Some(position) => release_at(state, position, shell),
                     None => state.pressed = None,
                 }
-                return;
             }
             iced::Event::Touch(iced::touch::Event::FingerLifted { position, .. }) => {
                 release_at(state, position, shell);
-                return;
             }
             iced::Event::Touch(iced::touch::Event::FingerLost { .. }) => {
                 state.pressed = None;
-                return;
             }
             iced::Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
                 let Some(position) = cursor.position() else {
@@ -368,21 +416,20 @@ where
                 };
                 let local = Point::new(position.x - origin.x, position.y - origin.y);
                 let hit = state.scene.as_ref().and_then(|s| s.hit(local));
-                if let Some(node) = hit {
-                    if let Some(GalleryItem { cmd, .. }) = &node.target {
-                        let dy = match delta {
-                            mouse::ScrollDelta::Lines { y, .. } => y,
-                            mouse::ScrollDelta::Pixels { y, .. } => y / 40.0,
-                        };
-                        if dy.abs() > 0.01 {
-                            let entry = state.gallery_scroll.entry(*cmd).or_insert(0);
-                            let new = (*entry as i32 - dy.signum() as i32).max(0) as usize;
-                            *entry = new;
-                            shell.capture_event(); return;
-                        }
+                if let Some(node) = hit
+                    && let Some(GalleryItem { cmd, .. }) = &node.target
+                {
+                    let dy = match delta {
+                        mouse::ScrollDelta::Lines { y, .. } => y,
+                        mouse::ScrollDelta::Pixels { y, .. } => y / 40.0,
+                    };
+                    if dy.abs() > 0.01 {
+                        let entry = state.gallery_scroll.entry(*cmd).or_insert(0);
+                        let new = (*entry as i32 - dy.signum() as i32).max(0) as usize;
+                        *entry = new;
+                        shell.capture_event();
                     }
                 }
-                return;
             }
             iced::Event::Keyboard(keyboard::Event::KeyPressed {
                 key,
@@ -422,22 +469,21 @@ where
                 );
                 if let Some(node) =
                     state.scene.as_ref().and_then(|s| s.hit(local).cloned())
+                    && let Some(tip) = node.tip
                 {
-                    if let Some(tip) = node.tip {
-                        state.tooltip = Some(tip);
-                        state.tooltip_anchor =
-                            Some(translate_rect(node.rect, origin));
-                        shell.request_redraw();
-                        self.fw.view_log(
-                            EventType::TooltipShown,
-                            if matches!(state.hover, Some(Qat(_))) {
-                                EventLocation::Qat
-                            } else {
-                                EventLocation::Ribbon
-                            },
-                            tip,
-                        );
-                    }
+                    state.tooltip = Some(tip);
+                    state.tooltip_anchor =
+                        Some(translate_rect(node.rect, origin));
+                    shell.request_redraw();
+                    self.fw.view_log(
+                        EventType::TooltipShown,
+                        if matches!(state.hover, Some(Qat(_))) {
+                            EventLocation::Qat
+                        } else {
+                            EventLocation::Ribbon
+                        },
+                        tip,
+                    );
                 }
             }
             _ => {},
@@ -472,6 +518,22 @@ where
         window: Size,
     ) -> Vec<overlay::Element<'b, Message, Th, Renderer>> {
         let state = tree.state.downcast_mut::<State>();
+        // Inert ribbon (unfocused window): no tooltips, no new popups;
+        // an open popup keeps rendering while it fades out
+        // (theme.yaml `fade_ms`), update() closes it at the end.
+        let mut alpha = 1.0_f32;
+        if !self.responsive {
+            let fade = Duration::from_millis(u64::from(crate::theme::fade_ms()));
+            alpha = match (state.popup_fade_start, state.popup.is_some()) {
+                (Some(start), true) if fade.as_millis() > 0 => {
+                    1.0 - (start.elapsed().as_secs_f32() / fade.as_secs_f32()).min(1.0)
+                }
+                _ => 0.0,
+            };
+            if alpha <= 0.0 {
+                return Vec::new();
+            }
+        }
 
         // context popup requested via IUIContextualUI
         if let Some((cmd, x, y)) = self.fw.view().take_pending_popup() {
@@ -564,6 +626,7 @@ where
                     width_hint,
                     layout: Layout::new(Size::ZERO),
                     window,
+                    alpha,
                     mapper: self.on_event.as_deref(),
                     _phantom: std::marker::PhantomData,
                 };
@@ -572,59 +635,59 @@ where
         }
 
         // tooltip overlay
-        if let Some(tip) = state.tooltip {
-            if state.popup.is_none() {
-                let cache = &state.measure_cache;
-                let renderer_ref = &_renderer;
-                let measure = &|s: &str, size: f32| {
-                    let key = (s.to_string(), (size * 4.0).round() as u32);
-                    if let Some(w) = cache.borrow().get(&key) {
-                        return *w;
-                    }
-                    let w = text_measure(*renderer_ref, s, size);
-                    cache.borrow_mut().insert(key, w);
-                    w
+        if let Some(tip) = state.tooltip
+            && state.popup.is_none()
+        {
+            let cache = &state.measure_cache;
+            let renderer_ref = &_renderer;
+            let measure = &|s: &str, size: f32| {
+                let key = (s.to_string(), (size * 4.0).round() as u32);
+                if let Some(w) = cache.borrow().get(&key) {
+                    return *w;
+                }
+                let w = text_measure(*renderer_ref, s, size);
+                cache.borrow_mut().insert(key, w);
+                w
+            };
+            let scene = {
+                let ctx = Ctx {
+                    fw: self.fw,
+                    theme: &self.theme,
+                    state,
+                    fonts: &self.fonts,
+                    measure,
                 };
-                let scene = {
-                    let ctx = Ctx {
-                        fw: self.fw,
-                        theme: &self.theme,
-                        state,
-                        fonts: &self.fonts,
-                        measure,
-                    };
-                    popup::tooltip_scene(&ctx, tip)
+                popup::tooltip_scene(&ctx, tip)
+            };
+            // top = bottom of the command pane, left = the related
+            // button's left side
+            let ribbon_bottom =
+                layout.position().y + crate::ribbon::widget::layout::ribbon_height(&self.fw.view());
+            let tooltip_origin = Point::new(
+                state
+                    .tooltip_anchor
+                    .map(|r| r.x)
+                    .unwrap_or(state.hover_pos.x),
+                ribbon_bottom + 1.0,
+            );
+            let mut overlay =
+                popup::RibbonOverlay::<Message, Th, Renderer> {
+                    fw: self.fw,
+                    theme: &self.theme,
+                    state,
+                    scene,
+                    tooltip: true,
+                    origin: tooltip_origin,
+                    width_hint: 0.0,
+                    layout: Layout::new(Size::ZERO),
+                    window,
+                    alpha: 1.0,
+                    mapper: self.on_event.as_deref(),
+                    _phantom: std::marker::PhantomData,
                 };
-                // top = bottom of the command pane, left = the related
-                // button's left side
-                let ribbon_bottom =
-                    layout.position().y + crate::ribbon::widget::layout::ribbon_height(&self.fw.view());
-                let tooltip_origin = Point::new(
-                    state
-                        .tooltip_anchor
-                        .map(|r| r.x)
-                        .unwrap_or(state.hover_pos.x),
-                    ribbon_bottom + 1.0,
-                );
-                let mut overlay =
-                    popup::RibbonOverlay::<Message, Th, Renderer> {
-                        fw: self.fw,
-                        theme: &self.theme,
-                        state,
-                        scene,
-                        tooltip: true,
-                        origin: tooltip_origin,
-                        width_hint: 0.0,
-                        layout: Layout::new(Size::ZERO),
-                        window,
-                        mapper: self.on_event.as_deref(),
-                        _phantom: std::marker::PhantomData,
-                    };
-                overlay.position();
-                return vec![overlay::Element::new(Box::new(overlay))];
-            }
+            overlay.position();
+            return vec![overlay::Element::new(Box::new(overlay))];
         }
-
         let _ = (layout, translation);
         Vec::new()
     }
@@ -757,11 +820,11 @@ fn handle_keyboard<Message>(
             state.keytips = !state.keytips;
             state.keytips_strip = true;
             state.keytip_buffer.clear();
-            shell.capture_event(); return;
+            shell.capture_event();
         }
         Key::Named(Named::Escape) => {
             if state.edit.take().is_some() {
-                shell.capture_event(); return;
+                shell.capture_event();
             } else if state.keytips {
                 if state.keytips_strip {
                     state.keytips = false;
@@ -769,9 +832,7 @@ fn handle_keyboard<Message>(
                     state.keytips_strip = true;
                 }
                 state.keytip_buffer.clear();
-                shell.capture_event(); return;
-            } else {
-                return;
+                shell.capture_event();
             }
         }
         _ => {
@@ -797,7 +858,7 @@ fn handle_keyboard<Message>(
                     EventLocation::Ribbon,
                     0,
                 );
-                shell.capture_event(); return;
+                shell.capture_event();
             }
 
             // inline editing
@@ -840,13 +901,12 @@ fn handle_keyboard<Message>(
                     _ => {
                         if let Some(t) = key_text {
                             for ch in t.chars() {
-                                if !edit.numeric
+                                if (!edit.numeric
                                     || ch.is_ascii_digit()
-                                    || (ch == '.' || ch == '-') && !edit.text.contains(ch)
+                                    || (ch == '.' || ch == '-') && !edit.text.contains(ch))
+                                    && let Some(e) = state.edit.as_mut()
                                 {
-                                    if let Some(e) = state.edit.as_mut() {
-                                        e.text.push(ch);
-                                    }
+                                    e.text.push(ch);
                                 }
                             }
                         }
@@ -857,8 +917,9 @@ fn handle_keyboard<Message>(
             }
 
             // keytips
-            if state.keytips {
-                if let Some(t) = key_text {
+            if state.keytips
+                && let Some(t) = key_text
+            {
                     for ch in t.chars().filter(|c| !c.is_control()) {
                         state.keytip_buffer.push(ch.to_ascii_uppercase());
                     }
@@ -867,21 +928,20 @@ fn handle_keyboard<Message>(
                         let buf = state.keytip_buffer.clone();
                         if let Some((_, target)) =
                             candidates.iter().find(|(k, _)| *k == buf)
-                        {
-                            if let Some(node) = scene
+                            && let Some(node) = scene
                                 .nodes
                                 .iter()
                                 .find(|n| n.target.as_ref() == Some(target))
-                            {
-                                let anchor = translate_rect(node.rect, origin);
-                                let target = target.clone();
-                                state.keytip_buffer.clear();
-                                activate(
-                                    fw, theme, state, &target, anchor, origin,
-                                    shell, mapper,
-                                );
-                            }
-                            shell.capture_event(); return;
+                        {
+                            let anchor = translate_rect(node.rect, origin);
+                            let target = target.clone();
+                            state.keytip_buffer.clear();
+                            activate(
+                                fw, theme, state, &target, anchor, origin,
+                                shell, mapper,
+                            );
+                            shell.capture_event();
+                            return;
                         }
                         let any_prefix = candidates
                             .iter()
@@ -892,29 +952,25 @@ fn handle_keyboard<Message>(
                             state.keytip_buffer = last.clone();
                             if let Some((_, target)) =
                                 candidates.iter().find(|(k, _)| **k == last)
-                            {
-                                if let Some(node) = scene
+                                && let Some(node) = scene
                                     .nodes
                                     .iter()
                                     .find(|n| n.target.as_ref() == Some(target))
-                                {
-                                    let anchor = translate_rect(node.rect, origin);
-                                    let target = target.clone();
-                                    state.keytip_buffer.clear();
-                                    activate(
-                                        fw, theme, state, &target, anchor,
-                                        origin, shell, mapper,
-                                    );
-                                }
+                            {
+                                let anchor = translate_rect(node.rect, origin);
+                                let target = target.clone();
+                                state.keytip_buffer.clear();
+                                activate(
+                                    fw, theme, state, &target, anchor,
+                                    origin, shell, mapper,
+                                );
                             }
                         } else if !any_prefix {
                             state.keytip_buffer.clear();
                         }
                     }
-                    shell.capture_event(); return;
+                    shell.capture_event();
                 }
-            }
-            return;
         }
     }
 }
@@ -1012,6 +1068,9 @@ fn drop_kind(fw: &RibbonFramework, cmd: u32) -> DropKind {
 ///
 /// `anchor` is the target node's rectangle in window coordinates,
 /// `origin` the ribbon widget's top-left in window coordinates.
+// activation needs the framework, theme, widget state, hit target and
+// the shell/mapper sinks — a context struct would be re-borrowed fields
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn activate<Message>(
     fw: &RibbonFramework,
     theme: &Theme,
@@ -1024,16 +1083,17 @@ pub(crate) fn activate<Message>(
 ) {
     let view = fw.view();
     let below = Point::new(anchor.x, anchor.y + anchor.height + 1.0);
-    // disabled commands never execute (their buttons still hover and
-    // show tooltips)
+    // disabled commands never execute and their dropdowns never open
+    // (their buttons still show tooltips)
     let gated = match target {
-        Qat(c) | Exec(c) | SplitMain(c) | Help(c) | Toggle(c) | MenuItem(c) => Some(*c),
+        Qat(c) | Exec(c) | SplitMain(c) | Help(c) | Toggle(c) | MenuItem(c)
+        | SplitDrop(c) | DropDown(c) => Some(*c),
         _ => None,
     };
-    if let Some(c) = gated {
-        if !fw.command_enabled(c) {
-            return;
-        }
+    if let Some(c) = gated
+        && !fw.command_enabled(c)
+    {
+        return;
     }
     match target {
         AppMenu => {
@@ -1534,6 +1594,7 @@ pub fn draw_scene<Renderer>(
     origin: Point,
     viewport: &Rectangle,
     theme: &Theme,
+    alpha: f32,
 ) where
     Renderer: iced::advanced::Renderer
         + text::Renderer
@@ -1554,14 +1615,14 @@ pub fn draw_scene<Renderer>(
                     radius,
                 } => {
                     let background: Background = match fill {
-                        Fill::Color(c) => Background::Color(*c),
+                        Fill::Color(c) => Background::Color(c.scale_alpha(alpha)),
                         Fill::Gradient(top, bottom) => {
                             Background::Gradient(iced::Gradient::Linear(
                                 iced::gradient::Linear::new(
                                     std::f32::consts::FRAC_PI_2,
                                 )
-                                .add_stop(0.0, *top)
-                                .add_stop(1.0, *bottom),
+                                .add_stop(0.0, top.scale_alpha(alpha))
+                                .add_stop(1.0, bottom.scale_alpha(alpha)),
                             ))
                         }
                     };
@@ -1569,8 +1630,10 @@ pub fn draw_scene<Renderer>(
                         renderer::Quad {
                             bounds: rect,
                             border: iced::Border {
-                                color: border.map(|(c, _)| c).unwrap_or(Color::TRANSPARENT),
-                                width: border.map(|(_, w)| w).unwrap_or(0.0).into(),
+                                color: border
+                                    .map(|(c, _)| c.scale_alpha(alpha))
+                                    .unwrap_or(Color::TRANSPARENT),
+                                width: border.map(|(_, w)| w).unwrap_or(0.0),
                                 radius: (*radius).into(),
                             },
                             shadow: iced::Shadow::default(),
@@ -1634,7 +1697,7 @@ pub fn draw_scene<Renderer>(
                                 hint_factor: None,
                             },
                             Point::new(anchor.x + dx, anchor.y),
-                            *color,
+                            color.scale_alpha(alpha),
                             clip,
                         );
                     }
@@ -1645,14 +1708,27 @@ pub fn draw_scene<Renderer>(
                     opacity,
                 } => {
                     let clip = rect.intersection(viewport).unwrap_or(rect);
-                    match image.handle(rect.height as u32) {
+                    // icons drawn dimmed are disabled ones: in the
+                    // "gray_scaled_faded" style they are additionally
+                    // desaturated
+                    // disabled detection uses the original opacity (the
+                    // fade-out alpha must not gray every icon)
+                    let gray =
+                        *opacity < 1.0 && theme.grayscale_disabled;
+                    let opacity = *opacity * alpha;
+                    let handle = if gray {
+                        image.handle_gray(rect.height as u32)
+                    } else {
+                        image.handle(rect.height as u32)
+                    };
+                    match handle {
                         crate::ribbon::image::IconHandle::Svg(handle) => {
                             renderer.draw_svg(
                                 svg::Svg {
                                     handle,
                                     color: *tint,
                                     rotation: iced::Radians(0.0),
-                                    opacity: *opacity,
+                                    opacity,
                                 },
                                 rect,
                                 clip,
@@ -1661,7 +1737,7 @@ pub fn draw_scene<Renderer>(
                         crate::ribbon::image::IconHandle::Raster(handle) => {
                             // Image: pub fields now (no builder methods)
                             let mut image = iced::advanced::image::Image::new(handle);
-                            image.opacity = *opacity;
+                            image.opacity = opacity;
                             renderer.draw_image(
                                 image,
                                 rect,
@@ -1680,7 +1756,7 @@ pub fn draw_scene<Renderer>(
                             bounds: badge,
                             border: iced::Border {
                                 color: crate::ribbon::theme::shade(theme.keytip_bg, 0.7),
-                                width: 1.0_f32.into(),
+                                width: theme.border_scale,
                                 radius: theme.button_radius.into(),
                             },
                             shadow: iced::Shadow::default(),

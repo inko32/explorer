@@ -148,6 +148,10 @@ pub struct State {
     /// Rect of the element the tooltip belongs to (window coordinates).
     pub tooltip_anchor: Option<iced::Rectangle>,
     pub popup: Option<Popup>,
+    /// Fade-out clock for the popup while the ribbon is inert
+    /// (unfocused window; theme.yaml `fade_ms`,
+    /// SPEC/Unfocused_Window.md §3).
+    pub popup_fade_start: Option<Instant>,
     /// Actual on-screen bounds of the open popup overlay (window
     /// coordinates). Differs from `popup.origin/size` when a dropdown
     /// is shown together with its parent panel (collapsed group).
@@ -194,6 +198,7 @@ impl Default for State {
             tooltip: None,
             tooltip_anchor: None,
             popup: None,
+            popup_fade_start: None,
             popup_bounds: None,
             edit: None,
             gallery_scroll: HashMap::new(),

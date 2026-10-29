@@ -212,6 +212,22 @@ impl<'a> Ctx<'a> {
         self.state.pressed.as_ref() == Some(t)
     }
 
+    /// Is a dropdown popup currently open for `cmd`? A button whose
+    /// menu is showing stays in the pressed color until it closes.
+    pub fn popup_open_for(&self, cmd: u32) -> bool {
+        match self.state.popup.as_ref().map(|p| &p.kind) {
+            Some(
+                PopupKind::Menu { cmd: c, .. }
+                | PopupKind::Combo { cmd: c }
+                | PopupKind::Gallery { cmd: c }
+                | PopupKind::Color { cmd: c }
+                | PopupKind::Font { cmd: c }
+                | PopupKind::ContextMenu { cmd: c, .. },
+            ) => *c == cmd,
+            _ => false,
+        }
+    }
+
     pub fn keytips_visible(&self, strip: bool) -> bool {
         self.state.keytips && self.state.keytips_strip == strip
     }
@@ -345,19 +361,24 @@ fn push_button(
     radius: f32,
 ) -> bool {
     let enabled = ctx.enabled(cmd);
-    // disabled buttons still highlight and show their tooltip on hover
-    let hover = ctx.hovered(&target);
-    let pressed = enabled && ctx.pressed(&target);
+    // disabled buttons show their tooltip on hover but never highlight
+    let hover = enabled && ctx.hovered(&target);
+    // a dropdown button stays pressed while its menu is open (large
+    // dropdowns like "Copy to" / "Filters" are single-target buttons)
+    let open = enabled
+        && matches!(&target, Target::DropDown(_))
+        && ctx.popup_open_for(cmd);
+    let pressed = enabled && (ctx.pressed(&target) || open);
     let theme = ctx.theme;
     let (fill, border) = if pressed {
         (
             Fill::Color(theme.pressed_bg),
-            theme.pressed_border.or(theme.hover_border).map(|c| (c, 1.0)),
+            theme.pressed_border.or(theme.hover_border).map(|c| (c, lw(ctx, 1.0))),
         )
     } else if hover {
-        (Fill::Color(theme.hover_bg), theme.hover_border.map(|c| (c, 1.0)))
+        (Fill::Color(theme.hover_bg), theme.hover_border.map(|c| (c, lw(ctx, 1.0))))
     } else if checked {
-        (Fill::Color(theme.checked_bg), theme.checked_border.map(|c| (c, 1.0)))
+        (Fill::Color(theme.checked_bg), theme.checked_border.map(|c| (c, lw(ctx, 1.0))))
     } else {
         (Fill::Color(Color::TRANSPARENT), None)
     };
@@ -373,6 +394,25 @@ fn push_button(
     .tip(cmd);
     scene.push(node);
     enabled
+}
+
+/// Border/1px-line width in the ribbon's logical units, honoring the
+/// DPI-independent border scale: `lw(ctx, 1.0)` is always 1 physical
+/// pixel when borders don't follow the DPI (SPEC/Border_DPI.md).
+pub(super) fn lw(ctx: &Ctx, w: f32) -> f32 {
+    w * ctx.theme.border_scale
+}
+
+/// Fill for a peripheral zone (dropdown arrow, spinner button):
+/// mouse-down shows the pressed color, hover the hover color.
+fn arrow_fill(theme: &Theme, hover: bool, pressed: bool) -> Fill {
+    if pressed {
+        Fill::Color(theme.pressed_bg)
+    } else if hover {
+        Fill::Color(theme.hover_bg)
+    } else {
+        Fill::Color(Color::TRANSPARENT)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -612,16 +652,16 @@ fn tab_strip(
                 0.0,
             );
         }
-        if let Some(k) = &tab.keytip {
-            if ctx.keytips_visible(true) {
-                scene.push(Node::new(
-                    Rectangle::with_size(Size::new(18.0, 13.0)),
-                    Cmd::KeytipBadge {
-                        text: k.clone(),
-                        anchor: Point::new(x + w - 6.0, strip_y + 1.0),
-                    },
-                ));
-            }
+        if let Some(k) = &tab.keytip
+            && ctx.keytips_visible(true)
+        {
+            scene.push(Node::new(
+                Rectangle::with_size(Size::new(18.0, 13.0)),
+                Cmd::KeytipBadge {
+                    text: k.clone(),
+                    anchor: Point::new(x + w - 6.0, strip_y + 1.0),
+                },
+            ));
         }
 
         // contextual set tracking (underline themes draw the set bar +
@@ -687,14 +727,14 @@ fn tab_strip(
             );
         };
         // baseline, left of the active tab
-        line(0.0, line_y, tab_l.min(width), 1.0);
+        line(0.0, line_y, tab_l.min(width), lw(ctx, 1.0));
         if tab_l < width {
             // up, right, down around the active tab (open at the pane)
-            line(tab_l, strip_y, 1.0, STRIP_H);
-            line(tab_l, strip_y, tab_r - tab_l, 1.0);
-            line(tab_r - 1.0, strip_y, 1.0, STRIP_H);
+            line(tab_l, strip_y, lw(ctx, 1.0), STRIP_H);
+            line(tab_l, strip_y, tab_r - tab_l, lw(ctx, 1.0));
+            line(tab_r - 1.0, strip_y, lw(ctx, 1.0), STRIP_H);
             // baseline, right of the active tab
-            line(tab_r, line_y, width - tab_r, 1.0);
+            line(tab_r, line_y, width - tab_r, lw(ctx, 1.0));
         }
     }
 
@@ -756,7 +796,7 @@ fn tab_strip(
             } else {
                 Fill::Color(Color::TRANSPARENT)
             },
-            ctx.theme.hover_border.filter(|_| hover).map(|c| (c, 1.0)),
+            ctx.theme.hover_border.filter(|_| hover).map(|c| (c, lw(ctx, 1.0))),
             ctx.theme.round_radius,
         );
         text_bold(
@@ -788,7 +828,7 @@ fn tab_strip(
         } else {
             Fill::Color(Color::TRANSPARENT)
         },
-        ctx.theme.hover_border.filter(|_| hover).map(|c| (c, 1.0)),
+        ctx.theme.hover_border.filter(|_| hover).map(|c| (c, lw(ctx, 1.0))),
         ctx.theme.round_radius,
     );
     chevron(
@@ -871,7 +911,7 @@ fn qat_row(ctx: &Ctx, scene: &mut Scene, y: f32, width: f32) {
     );
     quad(
         scene,
-        Rectangle::new(Point::new(0.0, y + QAT_H - 1.0), Size::new(width, 1.0)),
+        Rectangle::new(Point::new(0.0, y + QAT_H - 1.0), Size::new(width, lw(ctx, 1.0))),
         Fill::Color(ctx.theme.group_separator),
         None,
         0.0,
@@ -909,7 +949,7 @@ fn qat_row(ctx: &Ctx, scene: &mut Scene, y: f32, width: f32) {
         } else {
             Fill::Color(Color::TRANSPARENT)
         },
-        ctx.theme.hover_border.filter(|_| hover).map(|c| (c, 1.0)),
+        ctx.theme.hover_border.filter(|_| hover).map(|c| (c, lw(ctx, 1.0))),
         ctx.theme.button_radius,
     );
     chevron(
@@ -1235,11 +1275,7 @@ pub fn plan_groups(
             // never grow back past the stage-1 floor
             let sc = match (&floor[gi], &sc) {
                 (Some(f), ControlScale::Declared) => f.clone(),
-                (Some(f), ControlScale::Cap(s))
-                    if matches!(s, CtrlSize::Large | CtrlSize::Medium) =>
-                {
-                    f.clone()
-                }
+                (Some(f), ControlScale::Cap(CtrlSize::Large | CtrlSize::Medium)) => f.clone(),
                 (Some(_), ControlScale::Rules(_)) => floor[gi].clone().unwrap(),
                 _ => sc,
             };
@@ -1350,7 +1386,7 @@ pub fn tab_content(
     // bottom separator line — it follows the shifted group titles
     quad(
         scene,
-        Rectangle::new(Point::new(0.0, y + bh - 1.0), Size::new(width, 1.0)),
+        Rectangle::new(Point::new(0.0, y + bh - 1.0), Size::new(width, lw(ctx, 1.0))),
         Fill::Color(ctx.theme.tab_line),
         None,
         0.0,
@@ -1396,7 +1432,7 @@ pub fn tab_content(
             scene,
             Rectangle::new(
                 Point::new(x - 4.0 * g, content_y),
-                Size::new(1.0, body_h(ctx) - 8.0),
+                Size::new(lw(ctx, 1.0), body_h(ctx) - 8.0),
             ),
             Fill::Color(ctx.theme.group_separator),
             None,
@@ -1426,7 +1462,7 @@ pub fn tab_content(
             } else {
                 Fill::Color(Color::TRANSPARENT)
             },
-            ctx.theme.hover_border.filter(|_| hover).map(|c| (c, 1.0)),
+            ctx.theme.hover_border.filter(|_| hover).map(|c| (c, lw(ctx, 1.0))),
             ctx.theme.button_radius,
         );
         text(
@@ -1789,7 +1825,7 @@ fn build_group(
             } else {
                 Fill::Color(Color::TRANSPARENT)
             },
-            ctx.theme.hover_border.filter(|_| hover).map(|c| (c, 1.0)),
+            ctx.theme.hover_border.filter(|_| hover).map(|c| (c, lw(ctx, 1.0))),
             ctx.theme.button_radius,
         );
         scene.push(Node::new(rect, Cmd::Hit).target(target));
@@ -1813,16 +1849,18 @@ fn build_group(
     let mut col_x = x + 4.0 * g;
     let mut used = 0usize;
     let mut col_width = 0.0f32;
-    let mut pending: Vec<(&ControlSpec, f32, f32, bool)> = Vec::new();
+    // each control keeps its own natural width; only the column
+    // advance uses the widest (small buttons are as narrow as their
+    // label needs, not as wide as the longest button in the column)
+    let mut pending: Vec<(&ControlSpec, f32, f32, f32, bool)> = Vec::new();
 
     let flush = |scene: &mut Scene,
                      col_x: f32,
-                     col_width: f32,
-                     pending: &mut Vec<(&ControlSpec, f32, f32, bool)>| {
-        for (control, rel_y, h, co) in pending.drain(..) {
+                     pending: &mut Vec<(&ControlSpec, f32, f32, f32, bool)>| {
+        for (control, rel_y, h, w, co) in pending.drain(..) {
             let rect = Rectangle::new(
                 Point::new(col_x, y + rel_y),
-                Size::new(col_width, h),
+                Size::new(w, h),
             );
             build_control_scaled(
                 ctx,
@@ -1843,7 +1881,7 @@ fn build_group(
     for (i, control) in group.controls.iter().enumerate() {
         let span = rows_of_scaled(control, scale);
         if used + span > per_col && used > 0 {
-            flush(scene, col_x, col_width, &mut pending);
+            flush(scene, col_x, &mut pending);
             col_x += col_width + 2.0 * g;
             col_width = 0.0;
             used = 0;
@@ -1852,10 +1890,10 @@ fn build_group(
         let co = caption_off(&cols, ncols, plan.caption_cols, i, control, scale);
         let w = width_of_c(ctx, control, scale, co);
         col_width = col_width.max(w);
-        pending.push((control, used as f32 * ROW_H, h, co));
+        pending.push((control, used as f32 * ROW_H, h, w, co));
         used += span;
     }
-    flush(scene, col_x, col_width, &mut pending);
+    flush(scene, col_x, &mut pending);
 
     // footer: caption + dialog launcher (footer_shift px lower — the
     // bottom separator line follows, see body())
@@ -1896,7 +1934,7 @@ fn build_group(
             } else {
                 Fill::Color(Color::TRANSPARENT)
             },
-            ctx.theme.hover_border.filter(|_| hover).map(|c| (c, 1.0)),
+            ctx.theme.hover_border.filter(|_| hover).map(|c| (c, lw(ctx, 1.0))),
             ctx.theme.button_radius,
         );
         text(
@@ -2178,11 +2216,25 @@ fn build_button_like(
     caption_off: bool,
 ) {
     let checked = toggle && ctx.bool_value(cmd);
-    let enabled = ctx.enabled(cmd);
     let target = if toggle { Target::Toggle(cmd) } else { Target::Exec(cmd) };
-    if !push_button(ctx, scene, rect, target.clone(), cmd, checked, ctx.theme.button_radius) {
-        // disabled: still draw contents dimmed
-    }
+    push_button(ctx, scene, rect, target, cmd, checked, ctx.theme.button_radius);
+    button_contents(ctx, scene, rect, cmd, size, compact, caption_off);
+    keytip_badge(ctx, scene, rect, cmd, false);
+}
+
+/// Icon + label of a button, without the chrome (split buttons draw
+/// their own chrome around both parts).
+#[allow(clippy::too_many_arguments)]
+fn button_contents(
+    ctx: &Ctx,
+    scene: &mut Scene,
+    rect: Rectangle,
+    cmd: u32,
+    size: CtrlSize,
+    compact: bool,
+    caption_off: bool,
+) {
+    let enabled = ctx.enabled(cmd);
     let opacity = if enabled { 1.0 } else { 0.35 };
     let label = ctx.label(cmd);
     let text_color = if enabled {
@@ -2235,7 +2287,6 @@ fn build_button_like(
             }
         }
     }
-    keytip_badge(ctx, scene, rect, cmd, false);
 }
 
 /// Large split button (Paste, Move to): the icon sits on top in the main
@@ -2254,10 +2305,13 @@ fn build_split_large(
     let enabled = ctx.enabled(cmd);
     let main_t = if has_main { Target::SplitMain(cmd) } else { Target::DropDown(cmd) };
     let drop_t = if has_main { Target::SplitDrop(cmd) } else { Target::DropDown(cmd) };
+    // while the menu is open the arrow part stays pressed; a pure
+    // dropdown button (no main action) presses the whole button
+    let open = enabled && ctx.popup_open_for(cmd);
     let main_hover = enabled && (ctx.hovered(&main_t) || ctx.pressed(&main_t));
     let drop_hover = enabled && (ctx.hovered(&drop_t) || ctx.pressed(&drop_t));
-    let main_pressed = enabled && ctx.pressed(&main_t);
-    let drop_pressed = enabled && ctx.pressed(&drop_t);
+    let main_pressed = enabled && (ctx.pressed(&main_t) || (open && !has_main));
+    let drop_pressed = enabled && (ctx.pressed(&drop_t) || open);
     let main_rect = Rectangle::new(
         rect.position(),
         Size::new(rect.width, rect.height - strip_h),
@@ -2289,7 +2343,7 @@ fn build_split_large(
             scene,
             rect,
             Fill::Color(Color::TRANSPARENT),
-            border_c.map(|c| (c, 1.0)),
+            border_c.map(|c| (c, lw(ctx, 1.0))),
             theme.button_radius,
         );
         if let Some(c) = border_c {
@@ -2297,7 +2351,7 @@ fn build_split_large(
                 scene,
                 Rectangle::new(
                     Point::new(rect.x, drop_rect.y),
-                    Size::new(rect.width, 1.0),
+                    Size::new(rect.width, lw(ctx, 1.0)),
                 ),
                 Fill::Color(c),
                 None,
@@ -2386,22 +2440,59 @@ fn build_split(
         Point::new(rect.x + main_rect.width, rect.y),
         Size::new(drop_w, rect.height),
     );
-    build_button_like(ctx, scene, main_rect, cmd, size, false, compact, caption_off);
-    // dropdown zone
-    let target = if has_main { Target::SplitDrop(cmd) } else { Target::DropDown(cmd) };
+    // Two buttons in one outline: the hovered/pressed part fills, the
+    // other part shows the shared border only (no inside color).
+    let main_t = if has_main { Target::SplitMain(cmd) } else { Target::DropDown(cmd) };
+    let drop_t = if has_main { Target::SplitDrop(cmd) } else { Target::DropDown(cmd) };
     let enabled = ctx.enabled(cmd);
-    let hover = enabled && ctx.hovered(&target);
-    quad(
-        scene,
-        drop_rect,
-        if hover {
-            Fill::Color(ctx.theme.hover_bg)
+    // while the menu is open the arrow part stays pressed; a pure
+    // dropdown button (no main action) presses the whole button
+    let open = enabled && ctx.popup_open_for(cmd);
+    let main_hover = enabled && (ctx.hovered(&main_t) || ctx.pressed(&main_t));
+    let drop_hover = enabled && (ctx.hovered(&drop_t) || ctx.pressed(&drop_t));
+    let main_pressed = enabled && (ctx.pressed(&main_t) || (open && !has_main));
+    let drop_pressed = enabled && (ctx.pressed(&drop_t) || open);
+    let theme = ctx.theme;
+    let part_fill = |hover: bool, pressed: bool| {
+        if pressed {
+            Fill::Color(theme.pressed_bg)
+        } else if hover {
+            Fill::Color(theme.hover_bg)
         } else {
             Fill::Color(Color::TRANSPARENT)
-        },
-        ctx.theme.hover_border.filter(|_| hover).map(|c| (c, 1.0)),
-        ctx.theme.button_radius,
-    );
+        }
+    };
+    quad(scene, main_rect, part_fill(main_hover, main_pressed), None, 0.0);
+    quad(scene, drop_rect, part_fill(drop_hover, drop_pressed), None, 0.0);
+    if main_hover || drop_hover {
+        let border_c = theme
+            .pressed_border
+            .filter(|_| main_pressed || drop_pressed)
+            .or(theme.hover_border);
+        quad(
+            scene,
+            rect,
+            Fill::Color(Color::TRANSPARENT),
+            border_c.map(|c| (c, lw(ctx, 1.0))),
+            theme.button_radius,
+        );
+        // divider between the parts (a pure dropdown button has none)
+        if has_main
+            && let Some(c) = border_c
+        {
+            quad(
+                scene,
+                Rectangle::new(
+                    Point::new(drop_rect.x, rect.y + 2.0),
+                    Size::new(lw(ctx, 1.0), rect.height - 4.0),
+                ),
+                Fill::Color(c),
+                None,
+                0.0,
+            );
+        }
+    }
+    button_contents(ctx, scene, main_rect, cmd, size, compact, caption_off);
     chevron(
         scene,
         Rectangle::new(
@@ -2409,9 +2500,11 @@ fn build_split(
             Size::new(10.0, 6.5),
         ),
         false,
-        if enabled { ctx.theme.text } else { ctx.theme.text_disabled },
+        if enabled { theme.text } else { theme.text_disabled },
     );
-    scene.push(Node::new(drop_rect, Cmd::Hit).target(target).tip(cmd));
+    scene.push(Node::new(main_rect, Cmd::Hit).target(main_t).tip(cmd));
+    scene.push(Node::new(drop_rect, Cmd::Hit).target(drop_t).tip(cmd));
+    keytip_badge(ctx, scene, rect, cmd, false);
 }
 
 fn build_combo(ctx: &Ctx, scene: &mut Scene, rect: Rectangle, cmd: u32) {
@@ -2421,9 +2514,9 @@ fn build_combo(ctx: &Ctx, scene: &mut Scene, rect: Rectangle, cmd: u32) {
     );
     let enabled = ctx.enabled(cmd);
     let border = if editing {
-        Some((ctx.theme.accent, 1.0))
+        Some((ctx.theme.accent, lw(ctx, 1.0)))
     } else {
-        Some((ctx.theme.border, 1.0))
+        Some((ctx.theme.border, lw(ctx, 1.0)))
     };
     quad(
         scene,
@@ -2472,7 +2565,7 @@ fn build_combo(ctx: &Ctx, scene: &mut Scene, rect: Rectangle, cmd: u32) {
             scene,
             Rectangle::new(
                 Point::new(caret_x, rect.y + 4.0),
-                Size::new(1.0, rect.height - 8.0),
+                Size::new(lw(ctx, 1.0), rect.height - 8.0),
             ),
             Fill::Color(ctx.theme.text),
             None,
@@ -2485,18 +2578,10 @@ fn build_combo(ctx: &Ctx, scene: &mut Scene, rect: Rectangle, cmd: u32) {
         Point::new(rect.x + rect.width - 16.0, rect.y),
         Size::new(16.0, rect.height),
     );
-    let hover = enabled && ctx.hovered(&Target::ComboDrop(cmd));
-    quad(
-        scene,
-        drop,
-        if hover {
-            Fill::Color(ctx.theme.hover_bg)
-        } else {
-            Fill::Color(Color::TRANSPARENT)
-        },
-        None,
-        0.0,
-    );
+    let pressed = enabled
+        && (ctx.pressed(&Target::ComboDrop(cmd)) || ctx.popup_open_for(cmd));
+    let hover = enabled && (ctx.hovered(&Target::ComboDrop(cmd)) || pressed);
+    quad(scene, drop, arrow_fill(ctx.theme, hover, pressed), None, 0.0);
     chevron(
         scene,
         Rectangle::new(
@@ -2517,9 +2602,9 @@ fn build_spinner(ctx: &Ctx, scene: &mut Scene, rect: Rectangle, cmd: u32) {
     );
     let enabled = ctx.enabled(cmd);
     let border = if editing {
-        Some((ctx.theme.accent, 1.0))
+        Some((ctx.theme.accent, lw(ctx, 1.0)))
     } else {
-        Some((ctx.theme.border, 1.0))
+        Some((ctx.theme.border, lw(ctx, 1.0)))
     };
     quad(
         scene,
@@ -2567,7 +2652,7 @@ fn build_spinner(ctx: &Ctx, scene: &mut Scene, rect: Rectangle, cmd: u32) {
             scene,
             Rectangle::new(
                 Point::new(caret_x, rect.y + 4.0),
-                Size::new(1.0, rect.height - 8.0),
+                Size::new(lw(ctx, 1.0), rect.height - 8.0),
             ),
             Fill::Color(ctx.theme.text),
             None,
@@ -2590,18 +2675,9 @@ fn build_spinner(ctx: &Ctx, scene: &mut Scene, rect: Rectangle, cmd: u32) {
             Point::new(bx, rect.y + i as f32 * half),
             Size::new(16.0, half),
         );
-        let hover = enabled && ctx.hovered(&target);
-        quad(
-            scene,
-            z,
-            if hover {
-                Fill::Color(ctx.theme.hover_bg)
-            } else {
-                Fill::Color(Color::TRANSPARENT)
-            },
-            None,
-            0.0,
-        );
+        let pressed = enabled && ctx.pressed(&target);
+        let hover = enabled && (ctx.hovered(&target) || pressed);
+        quad(scene, z, arrow_fill(ctx.theme, hover, pressed), None, 0.0);
         chevron(
             scene,
             Rectangle::new(
@@ -2625,11 +2701,13 @@ fn build_spinner(ctx: &Ctx, scene: &mut Scene, rect: Rectangle, cmd: u32) {
 
 fn build_font_control(ctx: &Ctx, scene: &mut Scene, rect: Rectangle, cmd: u32) {
     let enabled = ctx.enabled(cmd);
-    let hover = enabled && ctx.hovered(&Target::DropDown(cmd));
+    // stays pressed while its popup is open
+    let open = enabled && ctx.popup_open_for(cmd);
+    let hover = enabled && (ctx.hovered(&Target::DropDown(cmd)) || open);
     quad(
         scene,
         rect,
-        Fill::Color(Color::WHITE),
+        Fill::Color(if open { ctx.theme.pressed_bg } else { Color::WHITE }),
         Some((
             if hover {
                 ctx.theme.hover_border.unwrap_or(ctx.theme.border)
@@ -2710,7 +2788,7 @@ fn build_color_picker(
             .as_ref()
             .map(|i| crate::ribbon::image::UiImage::Named(i.clone()))
             .or_else(|| ctx.small_image(cmd))
-            .unwrap_or_else(|| crate::ribbon::image::UiImage::Icon("font_color"));
+            .unwrap_or(crate::ribbon::image::UiImage::Icon("font_color"));
         let icon_size = if c.size == CtrlSize::Large && rect.height > 40.0 {
             32.0
         } else {
@@ -2750,16 +2828,14 @@ fn build_color_picker(
         Size::new(14.0, rect.height),
     );
     let dtarget = Target::ColorDrop(cmd);
-    let dhover = enabled && ctx.hovered(&dtarget);
+    let dpressed =
+        enabled && (ctx.pressed(&dtarget) || ctx.popup_open_for(cmd));
+    let dhover = enabled && (ctx.hovered(&dtarget) || dpressed);
     quad(
         scene,
         drop,
-        if dhover {
-            Fill::Color(ctx.theme.hover_bg)
-        } else {
-            Fill::Color(Color::TRANSPARENT)
-        },
-        ctx.theme.hover_border.filter(|_| dhover).map(|c| (c, 1.0)),
+        arrow_fill(ctx.theme, dhover, dpressed),
+        ctx.theme.hover_border.filter(|_| dhover).map(|c| (c, lw(ctx, 1.0))),
         ctx.theme.button_radius,
     );
     chevron(
@@ -2802,7 +2878,7 @@ fn build_gallery(
         scene,
         rect,
         Fill::Color(Color::WHITE),
-        Some((ctx.theme.border, 1.0)),
+        Some((ctx.theme.border, lw(ctx, 1.0))),
         ctx.theme.field_radius,
     );
 
@@ -2838,7 +2914,7 @@ fn build_gallery(
                     scene,
                     cell,
                     Fill::Color(ctx.theme.checked_bg),
-                    Some((ctx.theme.checked_border.unwrap_or(ctx.theme.border), 1.0)),
+                    Some((ctx.theme.checked_border.unwrap_or(ctx.theme.border), lw(ctx, 1.0))),
                     2.0,
                 );
             }
@@ -2897,7 +2973,7 @@ fn build_gallery(
                 } else {
                     Fill::Color(Color::TRANSPARENT)
                 },
-                Some((ctx.theme.border, 1.0)),
+                Some((ctx.theme.border, lw(ctx, 1.0))),
                 ctx.theme.button_radius,
             );
             let chev_up = i == 0;
@@ -2933,7 +3009,7 @@ fn build_control_group(
         scene,
         rect,
         Fill::Color(Color::TRANSPARENT),
-        Some((ctx.theme.group_separator, 1.0)),
+        Some((ctx.theme.group_separator, lw(ctx, 1.0))),
         ctx.theme.field_radius,
     );
     let n = controls.len().max(1) as f32;

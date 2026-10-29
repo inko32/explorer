@@ -14,6 +14,19 @@
 # equivalent are kept on purpose: dark mode, custom border, Win8 frame,
 # open terminal, paste symbolic link, delete as sudo, filters, tree expander.
 
+# How unavailable (disabled) buttons look:
+#   faded             - dimmed by opacity only (the classic look)
+#   gray_scaled_faded - desaturated (grayscale icon) plus the dim
+# Toggleable at runtime from the View tab ("Gray disabled" button);
+# the button starts checked when this setting is gray_scaled_faded.
+disabled_style: faded
+
+# When the window is unfocused the ribbon goes inert: it ignores all
+# input and shows no hover visuals (CPU saving,
+# SPEC/Unfocused_Window.md). The gray fade of checked buttons is part
+# of the theme and always applies.
+ignore_input_when_unfocused: true
+
 commands:
   # ---- application menu / global ----
   cmdAppMenu: 1
@@ -162,6 +175,8 @@ commands:
   cmdToggleDark: 74
   cmdToggleBorder: 75
   cmdToggleFrame: 76
+  cmdToggleRainbow: 79
+  cmdToggleGrayDisabled: 307
 
   # ---- Drive Tools ----
   cmdCtxDrive: 100
@@ -692,6 +707,8 @@ tabs:
           - { type: toggle_button, command: cmdToggleDark, size: small, image: gear, label: Dark mode, keytip: "DK", tooltip: "Switch between light and dark mode" }
           - { type: toggle_button, command: cmdToggleBorder, size: small, image: gear, label: Custom border, tooltip: "Use the custom window border" }
           - { type: toggle_button, command: cmdToggleFrame, size: small, image: gear, label: Win8 frame, tooltip: "Switch between Win8 and Win10 frame styles" }
+          - { type: toggle_button, command: cmdToggleRainbow, size: small, image: gear, label: Rainbow, tooltip: "Paint the folder view backdrop with a rainbow gradient" }
+          - { type: toggle_button, command: cmdToggleGrayDisabled, size: small, image: gear, label: Gray disabled, tooltip: "Unavailable buttons are gray-scaled and faded instead of only faded" }
 
   # ============================================================ Contextual: Drive Tools
   - id: drive_tools

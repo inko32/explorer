@@ -16,6 +16,7 @@ pub type SharedPropertySet = Arc<Mutex<dyn PropertySet + Send>>;
 
 /// `IUICollection` of property sets (combo items, gallery items,
 /// categories, ...).
+#[derive(Default)]
 pub struct UiCollection {
     items: Vec<SharedPropertySet>,
     listeners: Vec<Arc<Mutex<dyn OnCollectionChanged + Send>>>,
@@ -26,15 +27,6 @@ impl std::fmt::Debug for UiCollection {
         f.debug_struct("UiCollection")
             .field("len", &self.items.len())
             .finish()
-    }
-}
-
-impl Default for UiCollection {
-    fn default() -> Self {
-        Self {
-            items: Vec::new(),
-            listeners: Vec::new(),
-        }
     }
 }
 
