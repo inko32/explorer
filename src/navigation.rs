@@ -9,7 +9,7 @@ use iced::{Element, Length};
 
 use crate::border::frame_insets;
 use crate::model::{Explorer, Message};
-use crate::ui_common::{bg, dbg, icon, skin, CHROME_BTN};
+use crate::ui_common::{bg, icon, skin};
 
 fn nav_circle(icon_name: &'static str, enabled: bool, msg: Message, skin: skin::Skin, inner: f32, mult: f32) -> Element<'static, Message> {
     // icon = button / bar_button_multiplier (ribbon.yaml); tight padding

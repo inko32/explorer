@@ -1376,7 +1376,7 @@ pub fn tab_content(
         )
     };
     let mut x = 4.0 * gap(ctx);
-    for (pos, plan) in placed.iter().enumerate() {
+    for plan in placed.iter() {
         build_group(
             ctx,
             scene,

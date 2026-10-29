@@ -33,7 +33,7 @@ use crate::ribbon::spec::ControlSpec;
 use crate::ribbon::theme::Theme;
 use crate::ribbon::RibbonEvent;
 
-pub use state::{close_all_popups, close_popup, EditState, Popup, PopupKind, State, SwatchSel, Target};
+pub use state::{close_all_popups, EditState, Popup, PopupKind, State, SwatchSel, Target};
 
 use layout::Ctx;
 use scene::{Cmd, Fill, Scene};

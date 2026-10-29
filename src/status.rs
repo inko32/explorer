@@ -5,7 +5,7 @@ use iced::widget::{button, container, row, text, Space};
 use iced::{Color, Element, Length};
 
 use crate::model::{self, Explorer, Message};
-use crate::ui_common::{bg, dbg, skin, CHROME_BTN};
+use crate::ui_common::{bg, skin, CHROME_BTN};
 
 pub(crate) fn statusbar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     let mut left = format!("{} items", state.entries.len());
