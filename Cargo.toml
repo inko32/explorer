@@ -18,7 +18,7 @@ glib = "0.22"  # gio companion
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"  # ribbon.yaml parsing (D12)
 libloading = "0.9"  # dlopen 7z.so for the native archive backend (D16)
-fontdb = "0.23"  # system font probing for the fonts.yaml fallback list (already in the tree via cosmic-text)
+fontdb = "0.24"  # system font probing for the fonts.yaml fallback list (already in the tree via cosmic-text)
 
 [profile.release]
 opt-level = 2

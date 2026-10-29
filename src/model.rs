@@ -466,7 +466,10 @@ impl Explorer {
         };
         s.request_listing();
         s.sched.send(Job::Volumes);
-        s.nav_reveal_cwd();
+        // Startup runs before volumes/listings arrive, so the reveal defers
+        // via request_reveal; the returned scroll Task has no tree to act on
+        // yet and is intentionally dropped.
+        let _ = s.nav_reveal_cwd();
         let snap = s.ribbon_snapshot();
         s.ribbon.sync(snap);
         s.ribbon.auto_activate();
