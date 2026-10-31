@@ -67,6 +67,9 @@ layouts:
     index: 2
     row_h: 32.0             # DetailsRowHeight…
     row_h_compact: 24.0     # …and compact (compact is the default)
+    row_gap: -1.0           # gap between rows, in border pixels (follows the
+                            # border DPI unscale): -1 overlaps rows so adjacent
+                            # item borders share one line; raise it for a looser list
     header_h: 24.0          # column header strip (overlays the scrollable top)
     icon: 16.0
     icon_cell_w: 26.0       # icon column slot

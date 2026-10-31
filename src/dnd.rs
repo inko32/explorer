@@ -116,6 +116,12 @@ pub enum DragSource {
 pub struct DragSession {
     pub payload: DragPayload,
     pub source: DragSource,
+    /// Right-button drag: the drop never commits directly — it opens
+    /// the action-choice menu (like Shift+drag).
+    pub right: bool,
+    /// URI of the item under the cursor when the drag began — the
+    /// "top" item of the drag-image icon stack; None when unknown.
+    pub top: Option<String>,
 }
 
 // ---------------- §3.4 actions ----------------
@@ -251,23 +257,60 @@ impl TargetRegistry {
     }
 }
 
+/// The floating caption shown beside the cursor while dragging (§5.1
+/// feedback rendered as a drag-image caption).
+#[derive(Debug, Clone, PartialEq)]
+pub enum DragCaption {
+    /// Red banned glyph: no action is possible here.
+    Banned,
+    /// Hovering the dragged items themselves (or their current folder):
+    /// nothing is shown — the drop would be a no-op, not a rejection.
+    Hidden,
+    /// "…": the action is undecided (Shift+drag / right-button drag) —
+    /// releasing opens a menu to pick the behavior.
+    Undecided,
+    /// A definite action; `label` is the full caption text
+    /// ("Move to …", "Copy to …", "Link here", "Run with …").
+    Action {
+        action: DropAction,
+        label: String,
+    },
+}
+
 // ---------------- §4.2 policy ----------------
+
+/// §5.4 source/target relationship (the path-only part of
+/// `validate_commit`): a drop into the item itself, into its own
+/// descendant, or back into its current parent folder can never
+/// complete — the hover caption shows the banned glyph for these.
+fn sources_fit(sources: &[PathBuf], dest: &Path) -> bool {
+    sources
+        .iter()
+        .all(|src| dest != src && !dest.starts_with(src) && src.parent() != Some(dest))
+}
 
 /// Permitted actions for a payload/target pair (§4.2 defaults —
 /// conservative: nothing destructive is ever inferred from proximity).
 pub fn permitted_actions(payload: &DragPayload, target: &DropTarget) -> Vec<DropAction> {
     match payload {
         DragPayload::Files(items) => {
+            let sources: Vec<PathBuf> = items
+                .iter()
+                .filter_map(|i| uri_to_path(&i.uri))
+                .collect();
             // only entirely-local drags can be file-operated; foreign
             // URIs would need an importer (§9) that does not exist yet
-            let local = !items.is_empty() && items.iter().all(|i| uri_to_path(&i.uri).is_some());
+            let local = !items.is_empty() && sources.len() == items.len();
             match target {
-                DropTarget::Directory(_)
-                | DropTarget::NavigationDirectory(_)
-                | DropTarget::Breadcrumb(_)
-                | DropTarget::EmptyDirectory(_)
-                | DropTarget::Tab(_) => {
-                    if local {
+                DropTarget::Directory(d)
+                | DropTarget::NavigationDirectory(d)
+                | DropTarget::Breadcrumb(d)
+                | DropTarget::EmptyDirectory(d)
+                | DropTarget::Tab(d) => {
+                    // drops commit would reject must not be advertised:
+                    // the self/parent relationship (pure) and a live
+                    // writability probe (read-only / permission denied)
+                    if local && sources_fit(&sources, d) && crate::fs::writable(d) {
                         vec![DropAction::Copy, DropAction::Move, DropAction::Link]
                     } else {
                         vec![]
@@ -288,7 +331,9 @@ pub fn permitted_actions(payload: &DragPayload, target: &DropTarget) -> Vec<Drop
 /// §3.4: map the held modifiers to the offered action. The default is
 /// Move — dragging within the manager relocates items (Windows Explorer
 /// semantics); Ctrl overrides to Copy, Shift forces Move, Ctrl+Shift/Alt
-/// creates a link.
+/// creates a link. (`Session` intercepts Shift earlier: a Shift+drag is
+/// action-ambiguous and its drop opens the choice menu, so the shift
+/// branch only serves callers without that convention.)
 pub fn resolve_action(
     ctrl: bool,
     shift: bool,
@@ -333,6 +378,14 @@ pub fn validate_commit(
         Copy | Move | Link => {
             if !dest.is_dir() {
                 return Err(format!("{} is not a folder", dest.display()));
+            }
+            // §4.2: the hover policy probes this too — re-checked here
+            // because the destination may have changed mid-drag
+            if !crate::fs::writable(dest) {
+                return Err(format!(
+                    "{} is read-only or permission was denied",
+                    dest.display()
+                ));
             }
         }
         Run => {
@@ -382,6 +435,9 @@ pub struct Session {
     ctrl: bool,
     shift: bool,
     alt: bool,
+    /// The caption last computed from (session, target, modifiers) —
+    /// rebuilt only on those inputs, so view() reads it for free.
+    caption: Option<DragCaption>,
 }
 
 impl Session {
@@ -392,6 +448,7 @@ impl Session {
     pub fn start(&mut self, session: DragSession) {
         self.registry.clear();
         self.session = Some(session);
+        self.refresh_caption();
     }
 
     pub fn active(&self) -> bool {
@@ -402,9 +459,16 @@ impl Session {
         self.session.as_ref().map(|s| &s.payload)
     }
 
+    /// The URI of the item grabbed by the cursor at drag start (the
+    /// top of the drag-image icon stack); None when not recorded.
+    pub fn top(&self) -> Option<&str> {
+        self.session.as_ref()?.top.as_deref()
+    }
+
     /// Take the session at drop/cancel time (clears all drag state).
     pub fn take(&mut self) -> Option<DragSession> {
         self.registry.clear();
+        self.caption = None;
         self.session.take()
     }
 
@@ -412,10 +476,28 @@ impl Session {
         self.registry.current()
     }
 
+    /// True while a right-button drag is active (its drop opens the
+    /// action-choice menu instead of committing).
+    pub fn right(&self) -> bool {
+        self.session.as_ref().map(|s| s.right).unwrap_or(false)
+    }
+
+    /// The drag is action-ambiguous (Shift+drag / right-button drag):
+    /// the caption is "…" and the drop opens the choice menu.
+    pub fn ambiguous(&self) -> bool {
+        self.session.as_ref().map(|s| s.right).unwrap_or(false) || self.shift
+    }
+
+    /// The caption for the cursor overlay (None when no drag is active).
+    pub fn caption(&self) -> Option<&DragCaption> {
+        self.caption.as_ref()
+    }
+
     pub fn set_modifiers(&mut self, ctrl: bool, shift: bool, alt: bool) {
         self.ctrl = ctrl;
         self.shift = shift;
         self.alt = alt;
+        self.refresh_caption();
     }
 
     /// Apply a normalized event; returns the feedback for the status bar.
@@ -431,6 +513,7 @@ impl Session {
                 self.registry.clear();
             }
         }
+        self.refresh_caption();
         self.feedback()
     }
 
@@ -444,6 +527,12 @@ impl Session {
             return format!("Dragging {n} item{}", if n == 1 { "" } else { "s" });
         };
         let permitted = permitted_actions(&session.payload, target);
+        if permitted.is_empty() {
+            return "Cannot drop here".into();
+        }
+        if self.ambiguous() {
+            return "Release to choose an action".into();
+        }
         let action = resolve_action(self.ctrl, self.shift, self.alt, &permitted);
         if action == DropAction::Reject {
             "Cannot drop here".into()
@@ -453,6 +542,71 @@ impl Session {
                 None => format!("{action:?}"),
             }
         }
+    }
+
+    /// Rebuild the cached caption from (session, target, modifiers).
+    fn refresh_caption(&mut self) {
+        self.caption = self.compute_caption();
+    }
+
+    fn compute_caption(&self) -> Option<DragCaption> {
+        let session = self.session.as_ref()?;
+        let Some(target) = self.registry.current() else {
+            // no target under the pointer (window chrome): nothing can
+            // happen there, same as a rejecting target
+            return Some(DragCaption::Banned);
+        };
+        // hovering the dragged items themselves, their own subtree, or
+        // their current parent folder: the drop would be a no-op — no
+        // badge at all (a rejection glyph would flicker over every
+        // harmless re-hover of the source)
+        if let DragPayload::Files(items) = &session.payload {
+            let sources: Vec<PathBuf> =
+                items.iter().filter_map(|i| uri_to_path(&i.uri)).collect();
+            if let Some(dest) = target.path()
+                && !sources.is_empty()
+                && !sources_fit(&sources, dest)
+            {
+                return Some(DragCaption::Hidden);
+            }
+        }
+        let permitted = permitted_actions(&session.payload, target);
+        if permitted.is_empty() {
+            return Some(DragCaption::Banned);
+        }
+        if self.ambiguous() {
+            return Some(DragCaption::Undecided);
+        }
+        // an executable offers Run and nothing else: no modifier
+        // negotiation, the caption is always "Run with"
+        let action = if permitted.contains(&DropAction::Run) {
+            DropAction::Run
+        } else {
+            resolve_action(self.ctrl, self.shift, self.alt, &permitted)
+        };
+        // the caption names the destination's folder, not its full path
+        let name = target
+            .path()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .or_else(|| target.path().map(|p| p.display().to_string()));
+        let label = match action {
+            DropAction::Move => match &name {
+                Some(n) => format!("Move to \"{n}\""),
+                None => "Move here".into(),
+            },
+            DropAction::Copy => match &name {
+                Some(n) => format!("Copy to \"{n}\""),
+                None => "Copy here".into(),
+            },
+            DropAction::Link => "Link here".to_string(),
+            DropAction::Run => match &name {
+                Some(n) => format!("Run with \"{n}\""),
+                None => return Some(DragCaption::Banned),
+            },
+            _ => return Some(DragCaption::Banned),
+        };
+        Some(DragCaption::Action { action, label })
     }
 }
 
@@ -519,8 +673,10 @@ mod tests {
 
     #[test]
     fn policy_directories_accept_files() {
+        // a source from a different folder (same-parent/self drops are
+        // banned — see policy_bans_self_parent_and_readonly)
         let payload = DragPayload::Files(vec![DraggedItem {
-            uri: "file:///tmp/a".into(),
+            uri: "file:///data/a".into(),
             kind: ItemKind::File,
         }]);
         for t in [
@@ -542,6 +698,38 @@ mod tests {
             kind: ItemKind::Other,
         }]);
         assert!(permitted_actions(&foreign, &DropTarget::Directory("/tmp".into())).is_empty());
+    }
+
+    /// Hovering the dragged item itself, its own subtree, its current
+    /// parent folder, or a read-only / permission-denied destination
+    /// offers nothing — the caption shows the banned glyph.
+    #[test]
+    fn policy_bans_self_parent_and_readonly() {
+        let src = PathBuf::from("/tmp/x_src");
+        let payload = DragPayload::Files(vec![DraggedItem {
+            uri: file_uri(&src),
+            kind: ItemKind::File,
+        }]);
+        // the dragged item itself, its own descendant, its parent
+        assert!(permitted_actions(&payload, &DropTarget::Directory(src.clone())).is_empty());
+        assert!(permitted_actions(&payload, &DropTarget::Directory(src.join("child"))).is_empty());
+        assert!(permitted_actions(&payload, &DropTarget::Directory(PathBuf::from("/tmp"))).is_empty());
+        assert!(
+            permitted_actions(&payload, &DropTarget::EmptyDirectory(PathBuf::from("/tmp"))).is_empty()
+        );
+        // a genuine sibling folder stays droppable
+        let tmp = std::env::temp_dir().join("explorer_policy_writable");
+        std::fs::create_dir_all(&tmp).unwrap();
+        assert!(!permitted_actions(&payload, &DropTarget::Directory(tmp.clone())).is_empty());
+        // a read-only destination is banned (chmod has no effect on Windows)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o555)).unwrap();
+            assert!(permitted_actions(&payload, &DropTarget::Directory(tmp.clone())).is_empty());
+            std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]

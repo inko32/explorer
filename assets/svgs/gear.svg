@@ -1,0 +1,12 @@
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'>
+<circle cx='8' cy='8' r='4.5' fill='{fg}'/>
+<circle cx='14' cy='8' r='1.5' fill='{fg}'/>
+<circle cx='12.24' cy='12.24' r='1.5' fill='{fg}'/>
+<circle cx='8' cy='14' r='1.5' fill='{fg}'/>
+<circle cx='3.76' cy='12.24' r='1.5' fill='{fg}'/>
+<circle cx='2' cy='8' r='1.5' fill='{fg}'/>
+<circle cx='3.76' cy='3.76' r='1.5' fill='{fg}'/>
+<circle cx='8' cy='2' r='1.5' fill='{fg}'/>
+<circle cx='12.24' cy='3.76' r='1.5' fill='{fg}'/>
+<circle cx='8' cy='8' r='2' fill='{bg}'/>
+</svg>

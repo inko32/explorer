@@ -177,6 +177,7 @@ commands:
   cmdToggleFrame: 76
   cmdToggleRainbow: 79
   cmdToggleGrayDisabled: 307
+  cmdIconPack: 308
 
   # ---- Drive Tools ----
   cmdCtxDrive: 100
@@ -293,6 +294,8 @@ metrics:
   tree_font_scale: 0.75  # icon(16px) x scale = 12px nav labels
   bar_button_multiplier: 2.2
   gap_scale: 0.5
+  # horizontal gap between the tabs on the tab strip
+  tab_gap: 1
   # extra px the group titles sit lower (the bottom line follows)
   footer_shift: 3
   # functionless spacer between the nav pane (and its splitter) and the
@@ -709,6 +712,7 @@ tabs:
           - { type: toggle_button, command: cmdToggleFrame, size: small, image: gear, label: Win8 frame, tooltip: "Switch between Win8 and Win10 frame styles" }
           - { type: toggle_button, command: cmdToggleRainbow, size: small, image: gear, label: Rainbow, tooltip: "Paint the folder view backdrop with a rainbow gradient" }
           - { type: toggle_button, command: cmdToggleGrayDisabled, size: small, image: gear, label: Gray disabled, tooltip: "Unavailable buttons are gray-scaled and faded instead of only faded" }
+          - { type: toggle_button, command: cmdIconPack, size: small, image: star, label: Breeze icons, keytip: "BZ", tooltip: "Use the system Breeze icon theme instead of the embedded icon pack (names resolve via icons.yaml)" }
 
   # ============================================================ Contextual: Drive Tools
   - id: drive_tools

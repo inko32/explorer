@@ -227,6 +227,11 @@ pub struct DetailsCfg {
     /// DetailsRowHeight: normal and compact (compact is the default).
     pub row_h: f32,
     pub row_h_compact: f32,
+    /// Vertical gap between rows, in border pixels (follows the
+    /// border DPI unscale like `theme::border_w`): negative overlaps
+    /// rows so adjacent item borders coincide (-1 shares a 1px
+    /// border); positive is looser.
+    pub row_gap: f32,
     /// Column header strip (overlays the scrollable's top).
     pub header_h: f32,
     pub icon: f32,
@@ -246,6 +251,7 @@ impl Default for DetailsCfg {
             index: 2,
             row_h: 32.0,
             row_h_compact: 24.0,
+            row_gap: -1.0,
             header_h: 24.0,
             icon: 16.0,
             icon_cell_w: 26.0,
@@ -549,6 +555,17 @@ impl ViewCfg {
         if compact { d.row_h_compact } else { d.row_h }
     }
 
+    /// §8.1 Details row pitch: row height plus the effective row gap.
+    /// The configured gap is in border pixels, so it goes through the
+    /// same DPI unscale as the chrome borders (`theme::border_w`). All
+    /// scroll math (extent, anchors, hit tests) must use the pitch,
+    /// never the bare row height. Clamped so a hostile gap can't
+    /// break the math.
+    pub fn details_pitch(&self, compact: bool) -> f32 {
+        let gap = crate::theme::border_w(self.layouts.details.row_gap);
+        (self.details_row_h(compact) + gap).max(1.0)
+    }
+
     /// Initial Details column widths (Date modified / Type / Size),
     /// padded to 3 with the yaml defaults.
     pub fn details_col_widths(&self) -> [f32; 3] {
@@ -620,7 +637,7 @@ impl ViewCfg {
         match self.family(index) {
             Family::Content => n_items as f32 * l.content.row_h,
             Family::Details => {
-                l.details.header_h + n_items as f32 * self.details_row_h(details_compact)
+                l.details.header_h + n_items as f32 * self.details_pitch(details_compact)
             }
             Family::List => {
                 n_items.div_ceil(self.list_rows_per_col(viewport_h)) as f32
@@ -660,7 +677,7 @@ impl ViewCfg {
             Family::Details => {
                 // content starts below the header strip
                 let y = (offset - l.details.header_h).max(0.0);
-                (y / self.details_row_h(details_compact)).floor() as usize
+                (y / self.details_pitch(details_compact)).floor() as usize
             }
             Family::Tiles => {
                 (offset / l.tiles.cell_h).floor() as usize
@@ -699,7 +716,7 @@ impl ViewCfg {
         match self.family(index) {
             Family::Content => item as f32 * l.content.row_h,
             Family::Details => {
-                l.details.header_h + item as f32 * self.details_row_h(details_compact)
+                l.details.header_h + item as f32 * self.details_pitch(details_compact)
             }
             Family::Tiles => {
                 (item / grid_cols(l.tiles.cell_w, 0.0, pane_w)) as f32 * l.tiles.cell_h

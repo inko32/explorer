@@ -1,651 +1,129 @@
-//! Placeholder SVG icon set (spec: "draw an svg and leave all icons pointing
-//! to it"). Every icon is a tiny SVG string with theme colors baked in.
-//! Swap for a real icon theme / shell32-derived set later — only this file
-//! changes. Vocabulary grows with features.
-#![allow(dead_code)]
+//! Builtin theme-colored SVG icon templates — the `svg: builtin` entries
+//! of the explorer pack in icons.yaml. Every template is a file under
+//! `assets/svgs/<name>.svg` holding `{token}` placeholders that are
+//! substituted from the active skin at render time:
+//!
+//!   {fg}          icon glyph color (skin.text)
+//!   {bg}          page/screen fill  (skin.window_bg)
+//!   {subtle}      secondary strokes (skin.subtle)
+//!   {folder}      folder fill       (skin.folder)
+//!   {folder_edge} folder outline    (skin.folder_edge)
+//!   {hover}       screen content    (skin.hover)
+//!   {title}       caption glyph on the title bar (skin.title_text)
+//!
+//! Design colors that must not follow the skin (the manila paste board,
+//! the green check, the white caption glyphs drawn on the dark title
+//! bar) stay as literal hex in the templates. A name with no template
+//! resolves to nothing — the icon module draws its unavailable marker.
+//! Swap a template file to change the glyph; add one to grow the set.
 
-use iced::widget::svg;
 use iced::Color;
+use iced::widget::svg;
 
 use crate::ui_common::skin::Skin;
 
-/// Builtin theme-colored SVG generator dispatch (registry `svg: builtin`).
-pub fn builtin_svg(name: &str, s: &Skin) -> svg::Handle {
-    match name {
-        "home" => home(s),
-        "desktop" => computer(s),
-        "documents" => documents(s),
-        "downloads" => downloads(s),
-        "pictures" => pictures(s),
-        "music" => music(s),
-        "videos" => videos(s),
-        "recent" => recent(s),
-        "network" => network(s),
-        "drive" => drive(s),
-        "back" => back(s),
-        "forward" => forward(s),
-        "up" => up(s),
-        "refresh" => refresh(s),
-        "search" => search(s),
-        "chevron_down" => chevron_down(s),
-        "undo" => undo(s),
-        "redo" => redo(s),
-        "nav_pane" => nav_pane(s),
-        "preview_pane" => preview_pane(s),
-        "details_pane" => details_pane(s),
-        "sort_by" => sort_by(s),
-        "chevron_right" => chevron_right(s),
-        "help" => help(s),
-        "minimize" => minimize(s),
-        "maximize" => maximize(s),
-        "restore" => restore(s),
-        "close" => close(s),
-        "minimize8" => minimize8(s),
-        "maximize8" => maximize8(s),
-        "close8" => close8(s),
-        "gear" => gear(s),
-        "open" => open(s),
-        "copy_path" => copy_path(s),
-        _ => file(s),
-    }
+macro_rules! svg_templates {
+    ($($name:literal => $file:literal),* $(,)?) => {
+        fn template(name: &str) -> Option<&'static str> {
+            Some(match name {
+                $( $name => include_str!(concat!("../assets/svgs/", $file)), )*
+                _ => return None,
+            })
+        }
+    };
 }
 
-/// Does the builtin generator set know this name? (`builtin_svg` falls
-/// back to the file placeholder for anything else.)
-pub fn has_builtin(name: &str) -> bool {
-    matches!(
-        name,
-        "home" | "desktop" | "documents" | "downloads" | "pictures" | "music"
-            | "videos" | "recent" | "network" | "drive" | "back" | "forward"
-            | "up" | "refresh" | "search" | "chevron_down" | "undo" | "redo"
-            | "nav_pane" | "preview_pane" | "details_pane" | "sort_by"
-            | "chevron_right" | "help" | "minimize" | "maximize" | "restore"
-            | "close" | "minimize8" | "maximize8" | "close8" | "gear"
-            | "open" | "copy_path"
+// Keep in sync with files present in assets/svgs/.
+svg_templates!(
+    "home" => "home.svg",
+    "desktop" => "computer.svg",
+    "documents" => "documents.svg",
+    "downloads" => "downloads.svg",
+    "pictures" => "pictures.svg",
+    "music" => "music.svg",
+    "videos" => "videos.svg",
+    "recent" => "recent.svg",
+    "network" => "network.svg",
+    "drive" => "drive.svg",
+    "back" => "back.svg",
+    "forward" => "forward.svg",
+    "up" => "up.svg",
+    "refresh" => "refresh.svg",
+    "search" => "search.svg",
+    "chevron_down" => "chevron_down.svg",
+    "chevron_right" => "chevron_right.svg",
+    "nav_pane" => "nav_pane.svg",
+    "preview_pane" => "preview_pane.svg",
+    "details_pane" => "details_pane.svg",
+    "sort_by" => "sort_by.svg",
+    "undo" => "undo.svg",
+    "redo" => "redo.svg",
+    "help" => "help.svg",
+    "close" => "close.svg",
+    "gear" => "gear.svg",
+    "open" => "open.svg",
+    "copy_path" => "copy_path.svg",
+    "rename" => "rename.svg",
+);
+
+/// Render a builtin template with the skin colors baked in; `None` when
+/// no template exists for `name` (the caller draws the unavailable
+/// marker).
+pub fn builtin_svg(name: &str, s: &Skin) -> Option<svg::Handle> {
+    let tpl = template(name)?;
+    Some(svg::Handle::from_memory(render(tpl, s).into_bytes()))
+}
+
+fn render(tpl: &str, s: &Skin) -> String {
+    // {folder_edge} must be substituted before its {folder} prefix
+    tpl.replace("{folder_edge}", &hex(s.folder_edge))
+        .replace("{folder}", &hex(s.folder))
+        .replace("{fg}", &hex(s.text))
+        .replace("{bg}", &hex(s.window_bg))
+        .replace("{subtle}", &hex(s.subtle))
+        .replace("{hover}", &hex(s.hover))
+        .replace("{title}", &hex(s.title_text))
+}
+
+pub(crate) fn hex(c: Color) -> String {
+    format!(
+        "#{:02x}{:02x}{:02x}",
+        (c.r * 255.0) as u8,
+        (c.g * 255.0) as u8,
+        (c.b * 255.0) as u8
     )
 }
 
-fn hex(c: Color) -> String {
-    format!("#{:02x}{:02x}{:02x}", (c.r * 255.0) as u8, (c.g * 255.0) as u8, (c.b * 255.0) as u8)
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-/// SVG fill attribute: fully transparent renders as `none` (alpha is dropped
-/// by `hex`, and SVG's default fill is black).
-fn fill_attr(c: Color) -> String {
-    if c.a < 0.01 {
-        "none".to_string()
-    } else {
-        hex(c)
+    #[test]
+    fn every_manifest_entry_resolves_and_substitutes() {
+        let skin = crate::ui_common::skin::light();
+        for name in [
+            "home", "desktop", "documents", "downloads", "pictures", "music", "videos", "recent",
+            "network", "drive", "back", "forward", "up", "refresh", "search", "chevron_down",
+            "chevron_right", "nav_pane", "preview_pane", "details_pane", "sort_by", "undo",
+            "redo", "help", "close", "gear", "open", "copy_path", "rename",
+        ] {
+            let handle = builtin_svg(name, &skin)
+                .unwrap_or_else(|| panic!("template {name} must exist"));
+            let iced::advanced::svg::Data::Bytes(bytes) = handle.data() else {
+                panic!("template {name} must render in memory");
+            };
+            let text = std::str::from_utf8(bytes).expect("utf-8 svg");
+            // every placeholder replaced: no raw skin color remains unknown
+            assert!(!text.contains("{"), "template {name} has an unreplaced token");
+            assert!(text.starts_with("<svg"), "template {name} is an svg document");
+            // must parse with the same pipeline the renderer uses
+            let parsed = resvg::usvg::Tree::from_str(
+                text,
+                &resvg::usvg::Options::default(),
+            );
+            assert!(parsed.is_ok(), "template {name} must parse: {:?}", parsed.err());
+        }
+        // unknown names have no template
+        assert!(builtin_svg("definitely_unknown", &skin).is_none());
     }
-}
-
-fn doc(inner: String) -> svg::Handle {
-    svg::Handle::from_memory(
-        format!("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'>{inner}</svg>")
-            .into_bytes(),
-    )
-}
-
-fn poly(points: &[(f32, f32)], fill: Color) -> String {
-    let pts: Vec<String> = points.iter().map(|(x, y)| format!("{x},{y}")).collect();
-    format!("<polygon points='{}' fill='{}'/>", pts.join(" "), hex(fill))
-}
-
-fn rect(x: f32, y: f32, w: f32, h: f32, fill: Color, stroke: Option<(Color, f32)>) -> String {
-    match stroke {
-        Some((c, sw)) => format!(
-            "<rect x='{x}' y='{y}' width='{w}' height='{h}' fill='{}' stroke='{}' stroke-width='{sw}'/>",
-            fill_attr(fill),
-            hex(c)
-        ),
-        None => format!("<rect x='{x}' y='{y}' width='{w}' height='{h}' fill='{}'/>", fill_attr(fill)),
-    }
-}
-
-fn circle(cx: f32, cy: f32, r: f32, fill: Color, stroke: Option<(Color, f32)>) -> String {
-    match stroke {
-        Some((c, sw)) => format!(
-            "<circle cx='{cx}' cy='{cy}' r='{r}' fill='{}' stroke='{}' stroke-width='{sw}'/>",
-            fill_attr(fill),
-            hex(c)
-        ),
-        None => format!("<circle cx='{cx}' cy='{cy}' r='{r}' fill='{}'/>", fill_attr(fill)),
-    }
-}
-
-fn line(x1: f32, y1: f32, x2: f32, y2: f32, stroke: Color, sw: f32) -> String {
-    format!("<line x1='{x1}' y1='{y1}' x2='{x2}' y2='{y2}' stroke='{}' stroke-width='{sw}'/>", hex(stroke))
-}
-
-fn path(d: &str, fill: Color, stroke: Option<(Color, f32)>) -> String {
-    match stroke {
-        Some((c, sw)) => format!("<path d='{d}' fill='{}' stroke='{}' stroke-width='{sw}'/>", fill_attr(fill), hex(c)),
-        None => format!("<path d='{d}' fill='{}'/>", fill_attr(fill)),
-    }
-}
-
-fn glyph(s: &Skin) -> Color {
-    s.text
-}
-
-pub fn folder(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}",
-        path("M1 4.5 h4.6 l1.4 2 H15 v7.5 H1 z", s.folder, None),
-        path("M1 4.5 h4.6 l1.4 2 H15 v7.5 H1 z", Color::TRANSPARENT, Some((s.folder_edge, 1.0))),
-    ))
-}
-
-pub fn file(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}{}",
-        path("M3.5 1 h6 l3 3 v11 h-9 z", s.window_bg, Some((s.subtle, 1.0))),
-        path("M9.5 1 v3 h3", Color::TRANSPARENT, Some((s.subtle, 1.0))),
-        line(5.5, 8.0, 10.5, 8.0, s.subtle, 0.8),
-    ) + &line(5.5, 10.5, 10.5, 10.5, s.subtle, 0.8))
-}
-
-pub fn file_image(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}{}{}{}",
-        path("M3.5 1 h6 l3 3 v11 h-9 z", s.window_bg, Some((s.subtle, 1.0))),
-        path("M9.5 1 v3 h3", Color::TRANSPARENT, Some((s.subtle, 1.0))),
-        circle(6.5, 7.0, 1.0, s.subtle, None),
-        line(5.0, 12.0, 8.0, 8.5, s.subtle, 0.8),
-        line(8.0, 8.5, 11.0, 12.0, s.subtle, 0.8),
-    ))
-}
-
-pub fn computer(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}{}{}",
-        rect(1.5, 2.0, 13.0, 9.0, s.window_bg, Some((glyph(s), 1.0))),
-        rect(6.5, 11.5, 3.0, 2.0, s.window_bg, Some((glyph(s), 1.0))),
-        rect(4.5, 13.5, 7.0, 1.2, glyph(s), None),
-        rect(2.5, 3.0, 11.0, 7.0, s.hover, None),
-    ))
-}
-
-#[allow(dead_code)]
-pub fn drive(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}",
-        rect(1.5, 4.0, 13.0, 8.0, s.window_bg, Some((glyph(s), 1.0))),
-        circle(12.0, 10.0, 1.0, Color::from_rgb(0.18, 0.72, 0.18), None),
-    ))
-}
-
-pub fn network(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}{}{}",
-        line(3.0, 5.0, 13.0, 5.0, glyph(s), 1.0),
-        circle(3.0, 5.0, 1.8, s.window_bg, Some((glyph(s), 1.0))),
-        circle(8.0, 5.0, 1.8, s.window_bg, Some((glyph(s), 1.0))),
-        circle(13.0, 5.0, 1.8, s.window_bg, Some((glyph(s), 1.0))),
-    ) + &line(3.0, 5.0, 8.0, 12.0, glyph(s), 1.0)
-        + &line(13.0, 5.0, 8.0, 12.0, glyph(s), 1.0)
-        + &circle(8.0, 12.0, 1.8, s.window_bg, Some((glyph(s), 1.0))))
-}
-
-pub fn star(_s: &Skin) -> svg::Handle {
-    let mut pts = Vec::new();
-    for i in 0..10 {
-        let ang = -std::f32::consts::FRAC_PI_2 + i as f32 * std::f32::consts::PI / 5.0;
-        let r = if i % 2 == 0 { 7.0 } else { 3.2 };
-        pts.push((8.0 + r * ang.cos(), 8.0 + r * ang.sin()));
-    }
-    doc(poly(&pts, Color::from_rgb(1.0, 0.73, 0.0)))
-}
-
-pub fn star_outline(s: &Skin) -> svg::Handle {
-    let mut pts = Vec::new();
-    for i in 0..10 {
-        let ang = -std::f32::consts::FRAC_PI_2 + i as f32 * std::f32::consts::PI / 5.0;
-        let r = if i % 2 == 0 { 7.0 } else { 3.2 };
-        pts.push((8.0 + r * ang.cos(), 8.0 + r * ang.sin()));
-    }
-    let pts_s: Vec<String> = pts.iter().map(|(x, y)| format!("{x},{y}")).collect();
-    doc(format!(
-        "<polygon points='{}' fill='none' stroke='{}' stroke-width='1'/>",
-        pts_s.join(" "),
-        hex(glyph(s))
-    ))
-}
-
-pub fn home(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}{}",
-        poly(&[(1.5, 8.0), (8.0, 1.5), (14.5, 8.0)], Color::from_rgb(0.75, 0.31, 0.27)),
-        rect(3.5, 8.0, 9.0, 6.5, Color::from_rgb(0.91, 0.89, 0.85), Some((glyph(s), 0.8))),
-        rect(7.0, 10.0, 2.0, 4.5, glyph(s), None),
-    ))
-}
-
-pub fn documents(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}{}",
-        path("M3.5 1 h6 l3 3 v11 h-9 z", s.window_bg, Some((glyph(s), 1.0))),
-        path("M9.5 1 v3 h3", Color::TRANSPARENT, Some((glyph(s), 1.0))),
-        line(5.5, 8.0, 10.5, 8.0, glyph(s), 0.8),
-    ) + &line(5.5, 10.5, 10.5, 10.5, glyph(s), 0.8))
-}
-
-pub fn downloads(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}{}",
-        rect(2.0, 10.5, 12.0, 3.5, s.folder, Some((s.folder_edge, 1.0))),
-        line(8.0, 2.0, 8.0, 9.0, glyph(s), 1.4),
-        poly(&[(5.0, 7.5), (11.0, 7.5), (8.0, 10.5)], glyph(s)),
-    ))
-}
-
-pub fn pictures(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}{}{}",
-        rect(2.0, 2.5, 12.0, 11.0, s.window_bg, Some((glyph(s), 1.0))),
-        circle(10.5, 6.0, 1.3, glyph(s), None),
-        line(3.5, 11.5, 7.5, 7.5, glyph(s), 1.0),
-        line(7.5, 7.5, 12.5, 12.5, glyph(s), 1.0),
-    ))
-}
-
-pub fn music(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}{}{}",
-        line(6.0, 12.5, 6.0, 3.0, glyph(s), 1.2),
-        line(6.0, 3.0, 12.5, 1.5, glyph(s), 1.2),
-        line(12.5, 1.5, 12.5, 10.5, glyph(s), 1.2),
-        circle(4.2, 12.5, 1.8, glyph(s), None),
-    ) + &circle(10.7, 10.5, 1.8, glyph(s), None))
-}
-
-pub fn videos(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}",
-        rect(2.5, 3.5, 11.0, 9.0, s.window_bg, Some((glyph(s), 1.0))),
-        poly(&[(6.5, 5.5), (11.5, 8.0), (6.5, 10.5)], glyph(s)),
-    ))
-}
-
-pub fn recent(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}{}",
-        circle(8.0, 8.0, 6.0, Color::TRANSPARENT, Some((glyph(s), 1.2))),
-        line(8.0, 8.0, 8.0, 4.0, glyph(s), 1.2),
-        line(8.0, 8.0, 11.0, 9.5, glyph(s), 1.2),
-    ))
-}
-
-pub fn back(s: &Skin) -> svg::Handle {
-    doc(poly(&[(10.5, 2.5), (5.0, 8.0), (10.5, 13.5)], glyph(s)))
-}
-
-pub fn forward(s: &Skin) -> svg::Handle {
-    doc(poly(&[(5.5, 2.5), (11.0, 8.0), (5.5, 13.5)], glyph(s)))
-}
-
-pub fn up(s: &Skin) -> svg::Handle {
-    doc(poly(&[(2.5, 10.5), (8.0, 5.0), (13.5, 10.5)], glyph(s)))
-}
-
-pub fn refresh(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}",
-        path("M13.0 8.0 a5.0 5.0 0 1 1 -1.5 -3.5", Color::TRANSPARENT, Some((glyph(s), 1.4))),
-        poly(&[(13.5, 2.0), (13.5, 6.0), (9.5, 5.0)], glyph(s)),
-    ))
-}
-
-pub fn search(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}",
-        circle(7.0, 7.0, 4.5, Color::TRANSPARENT, Some((glyph(s), 1.4))),
-        line(10.5, 10.5, 14.0, 14.0, glyph(s), 1.6),
-    ))
-}
-
-pub fn chevron_down(s: &Skin) -> svg::Handle {
-    doc(poly(&[(3.5, 5.5), (12.5, 5.5), (8.0, 11.0)], glyph(s)))
-}
-
-/// Navigation pane: window with a filled left panel.
-pub fn nav_pane(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}",
-        rect(1.0, 2.0, 14.0, 12.0, Color::TRANSPARENT, Some((glyph(s), 1.2))),
-        rect(2.5, 3.5, 4.0, 9.0, glyph(s), None),
-    ))
-}
-
-/// Preview pane: filled right panel.
-pub fn preview_pane(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}",
-        rect(1.0, 2.0, 14.0, 12.0, Color::TRANSPARENT, Some((glyph(s), 1.2))),
-        rect(9.5, 3.5, 4.0, 9.0, glyph(s), None),
-    ))
-}
-
-/// Details pane: filled bottom strip.
-pub fn details_pane(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}",
-        rect(1.0, 2.0, 14.0, 12.0, Color::TRANSPARENT, Some((glyph(s), 1.2))),
-        rect(2.5, 9.5, 11.0, 3.0, glyph(s), None),
-    ))
-}
-
-/// Sort: A over Z with a down arrow.
-pub fn sort_by(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}{}",
-        path("M2 6 L4.2 1.5 L6.4 6 M2.8 4.6 H5.6", Color::TRANSPARENT, Some((glyph(s), 1.1))),
-        path("M2.5 12 H6 L4.2 15.5", Color::TRANSPARENT, Some((glyph(s), 1.1))),
-        path("M10 1.5 V14 M7.8 11.5 L10 14.2 L12.2 11.5", Color::TRANSPARENT, Some((glyph(s), 1.2))),
-    ))
-}
-
-/// Win8 QAT undo: curved arrow sweeping back to the left.
-pub fn undo(_s: &Skin) -> svg::Handle {
-    let c = Color::WHITE; // sits on the accent title bar
-    doc(format!(
-        "{}{}",
-        path(
-            "M12.4 11.8 a4.4 4.4 0 1 1 0.4 -5.4",
-            Color::TRANSPARENT,
-            Some((c, 1.6)),
-        ),
-        poly(&[(11.2, 1.6), (6.2, 4.4), (11.8, 6.6)], c),
-    ))
-}
-
-/// Win8 QAT redo: mirror of undo.
-pub fn redo(_s: &Skin) -> svg::Handle {
-    let c = Color::WHITE;
-    doc(format!(
-        "{}{}",
-        path(
-            "M3.6 11.8 a4.4 4.4 0 1 0 -0.4 -5.4",
-            Color::TRANSPARENT,
-            Some((c, 1.6)),
-        ),
-        poly(&[(4.8, 1.6), (9.8, 4.4), (4.2, 6.6)], c),
-    ))
-}
-
-pub fn chevron_right(s: &Skin) -> svg::Handle {
-    doc(poly(&[(5.5, 3.5), (11.0, 8.0), (5.5, 12.5)], glyph(s)))
-}
-
-pub fn copy(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}",
-        rect(2.0, 2.0, 8.0, 10.0, s.window_bg, Some((glyph(s), 1.0))),
-        rect(5.0, 5.0, 8.0, 9.0, s.window_bg, Some((glyph(s), 1.0))),
-    ))
-}
-
-pub fn paste(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}{}",
-        rect(3.0, 3.0, 10.0, 12.0, Color::from_rgb(0.89, 0.85, 0.73), Some((glyph(s), 1.0))),
-        rect(5.5, 1.5, 5.0, 2.5, s.window_bg, Some((glyph(s), 1.0))),
-        rect(5.5, 6.5, 5.0, 6.0, s.window_bg, Some((glyph(s), 0.8))),
-    ))
-}
-
-pub fn cut(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}{}{}",
-        circle(4.0, 3.5, 1.8, Color::TRANSPARENT, Some((glyph(s), 1.2))),
-        circle(12.0, 3.5, 1.8, Color::TRANSPARENT, Some((glyph(s), 1.2))),
-        line(5.2, 4.8, 9.0, 13.5, glyph(s), 1.2),
-        line(10.8, 4.8, 7.0, 13.5, glyph(s), 1.2),
-    ))
-}
-
-pub fn delete(s: &Skin) -> svg::Handle {
-    let red = Color::from_rgb(0.82, 0.19, 0.19);
-    doc(format!(
-        "{}{}{}{}",
-        line(2.5, 4.0, 13.5, 4.0, red, 1.4),
-        line(6.5, 2.0, 9.5, 2.0, red, 1.4),
-        line(8.0, 2.0, 8.0, 4.0, red, 1.4),
-        rect(4.0, 5.0, 8.0, 9.5, Color::TRANSPARENT, Some((glyph(s), 1.0))),
-    ) + &line(6.0, 7.0, 6.0, 12.5, glyph(s), 0.8)
-        + &line(8.0, 7.0, 8.0, 12.5, glyph(s), 0.8)
-        + &line(10.0, 7.0, 10.0, 12.5, glyph(s), 0.8))
-}
-
-pub fn rename(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}",
-        rect(1.5, 4.5, 13.0, 7.0, Color::TRANSPARENT, Some((glyph(s), 1.2))),
-        circle(5.0, 8.0, 1.2, s.window_bg, Some((glyph(s), 1.0))),
-    ))
-}
-
-pub fn new_folder(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}{}",
-        path("M1 4.5 h4.6 l1.4 2 H15 v7.5 H1 z", s.folder, None),
-        path("M1 4.5 h4.6 l1.4 2 H15 v7.5 H1 z", Color::TRANSPARENT, Some((s.folder_edge, 1.0))),
-        line(11.0, 7.0, 11.0, 12.0, glyph(s), 1.6),
-    ) + &line(8.5, 9.5, 13.5, 9.5, glyph(s), 1.6))
-}
-
-pub fn properties(_s: &Skin) -> svg::Handle {
-    doc(path(
-        "M2.5 8.5 L6.5 12.5 L13.5 3.5",
-        Color::TRANSPARENT,
-        Some((Color::from_rgb(0.12, 0.62, 0.24), 2.2)),
-    ))
-}
-
-pub fn open(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}",
-        rect(2.0, 2.0, 12.0, 12.0, Color::TRANSPARENT, Some((glyph(s), 1.2))),
-        poly(&[(8.0, 4.5), (11.5, 9.5), (4.5, 9.5)], glyph(s)),
-    ))
-}
-
-pub fn edit(s: &Skin) -> svg::Handle {
-    doc(poly(
-        &[(3.0, 13.0), (4.0, 9.0), (11.5, 1.5), (14.0, 4.0), (6.5, 11.5)],
-        glyph(s),
-    ))
-}
-
-pub fn history(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}{}",
-        path("M3.0 8.0 a5.0 5.0 0 1 0 1.5 -3.5", Color::TRANSPARENT, Some((glyph(s), 1.2))),
-        line(8.0, 5.0, 8.0, 8.5, glyph(s), 1.2),
-        line(8.0, 8.5, 10.5, 10.0, glyph(s), 1.2),
-    ) + &poly(&[(2.5, 2.5), (6.0, 4.5), (3.0, 6.0)], glyph(s)))
-}
-
-pub fn move_to(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}",
-        rect(2.0, 2.0, 8.0, 10.0, s.window_bg, Some((glyph(s), 1.0))),
-        poly(&[(9.5, 8.0), (14.5, 8.0), (12.0, 12.5)], glyph(s)),
-    ))
-}
-
-pub fn copy_to(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}{}",
-        rect(2.0, 2.0, 8.0, 10.0, s.window_bg, Some((glyph(s), 1.0))),
-        rect(5.0, 5.0, 8.0, 9.0, s.window_bg, Some((glyph(s), 1.0))),
-        poly(&[(12.5, 3.0), (15.0, 6.0), (10.0, 6.0)], glyph(s)),
-    ))
-}
-
-pub fn easy_access(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}{}",
-        circle(8.0, 8.0, 6.5, Color::TRANSPARENT, Some((glyph(s), 1.2))),
-        line(8.0, 4.5, 8.0, 11.5, glyph(s), 1.4),
-        line(4.5, 8.0, 11.5, 8.0, glyph(s), 1.4),
-    ))
-}
-
-pub fn new_item(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}{}",
-        path("M4.5 1 h5 l3 3 v11 h-8 z", s.window_bg, Some((glyph(s), 1.0))),
-        line(8.0, 6.0, 8.0, 12.0, glyph(s), 1.4),
-        line(5.0, 9.0, 11.0, 9.0, glyph(s), 1.4),
-    ))
-}
-
-pub fn copy_path(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}{}",
-        rect(1.5, 4.0, 13.0, 8.0, Color::TRANSPARENT, Some((glyph(s), 1.0))),
-        circle(4.0, 8.0, 1.0, glyph(s), None),
-        circle(12.0, 8.0, 1.0, glyph(s), None),
-    ) + &line(5.0, 8.0, 11.0, 8.0, glyph(s), 1.0))
-}
-
-pub fn paste_shortcut(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}",
-        rect(2.5, 2.5, 9.0, 11.0, Color::from_rgb(0.89, 0.85, 0.73), Some((glyph(s), 1.0))),
-        rect(4.5, 0.8, 5.0, 2.5, s.window_bg, Some((glyph(s), 1.0))),
-    ) + &circle(12.0, 12.0, 2.5, s.window_bg, Some((glyph(s), 1.0))))
-}
-
-pub fn select_all(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}",
-        rect(2.0, 2.0, 12.0, 12.0, Color::TRANSPARENT, Some((glyph(s), 1.2))),
-        path("M4.5 8.5 L7.0 11.0 L11.5 4.5", Color::TRANSPARENT, Some((glyph(s), 1.4))),
-    ))
-}
-
-pub fn select_none(s: &Skin) -> svg::Handle {
-    doc(rect(2.0, 2.0, 12.0, 12.0, Color::TRANSPARENT, Some((glyph(s), 1.2))))
-}
-
-pub fn invert_sel(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}",
-        rect(2.0, 2.0, 12.0, 12.0, Color::TRANSPARENT, Some((glyph(s), 1.2))),
-        rect(5.0, 5.0, 6.0, 6.0, glyph(s), None),
-    ))
-}
-
-pub fn view_details(s: &Skin) -> svg::Handle {
-    let mut out = String::new();
-    for i in 0..3 {
-        let y = 3.0 + i as f32 * 4.0;
-        out += &circle(3.0, y, 1.0, glyph(s), None);
-        out += &line(6.0, y, 14.0, y, glyph(s), 1.0);
-    }
-    doc(out)
-}
-
-pub fn view_large(s: &Skin) -> svg::Handle {
-    doc(rect(2.5, 2.5, 11.0, 11.0, s.folder, Some((s.folder_edge, 1.0))))
-}
-
-pub fn archive(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}{}",
-        rect(2.0, 3.5, 12.0, 10.0, s.folder, Some((s.folder_edge, 1.0))),
-        rect(2.0, 3.5, 12.0, 2.5, s.folder_edge, None),
-        rect(7.0, 6.5, 2.0, 3.0, s.window_bg, Some((glyph(s), 0.8))),
-    ))
-}
-
-pub fn gear(s: &Skin) -> svg::Handle {
-    let mut out = circle(8.0, 8.0, 4.5, glyph(s), None);
-    for i in 0..8 {
-        let ang = i as f32 * std::f32::consts::TAU / 8.0;
-        let (x, y) = (8.0 + 6.0 * ang.cos(), 8.0 + 6.0 * ang.sin());
-        out += &circle(x, y, 1.5, glyph(s), None);
-    }
-    out += &circle(8.0, 8.0, 2.0, s.window_bg, None);
-    doc(out)
-}
-
-pub fn minimize(_s: &Skin) -> svg::Handle {
-    doc(line(3.0, 8.0, 13.0, 8.0, Color::WHITE, 1.4))
-}
-
-pub fn maximize(_s: &Skin) -> svg::Handle {
-    doc(rect(3.0, 3.0, 10.0, 10.0, Color::TRANSPARENT, Some((Color::WHITE, 1.4))))
-}
-
-pub fn restore(_s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}",
-        rect(2.5, 2.5, 8.0, 8.0, Color::TRANSPARENT, Some((Color::WHITE, 1.2))),
-        rect(5.5, 5.5, 8.0, 8.0, Color::TRANSPARENT, Some((Color::WHITE, 1.2))),
-    ))
-}
-
-/// Dropdown-menu arrow: 90-degree apex downward triangle in an 8x4 box.
-/// Its top base (the longest line) is meant to sit at the x-height top of
-/// the adjacent text (top of aszxcv/y, middle of b) — the caller pads it.
-pub fn drop_arrow(c: Color) -> svg::Handle {
-    svg::Handle::from_memory(
-        format!(
-            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 6 3'><path d='M0 0 H6 L3 3 Z' fill='{}'/></svg>",
-            hex(c)
-        )
-        .into_bytes(),
-    )
-}
-
-/// Win8 caption glyphs, redrawn pixel-per-pixel from /tmp/user-win8cap.png
-/// (real Win8 capture). Ratios are against the 21px button height, rendered
-/// in a 16-unit box at 13px. min/max take the title-bar text color (dark on
-/// the light blue), the X stays white. All three share one baseline at
-/// ~70% of the button (`_` bottom = box bottom = X bottom, like text).
-pub fn minimize8(s: &Skin) -> svg::Handle {
-    let c = s.title_text;
-    // 7.3 x 2.1 px low bar
-    doc(rect(3.5, 11.4, 9.0, 2.6, c, None))
-}
-
-pub fn maximize8(s: &Skin) -> svg::Handle {
-    let c = s.title_text;
-    // 10.5 x 8.4 px outline, top bar 2.1 px, sides/bottom 1.05 px
-    // (a mini window with a thicker title bar)
-    doc(format!(
-        "{}{}{}{}",
-        rect(1.55, 2.85, 12.9, 2.6, c, None),
-        rect(1.55, 2.85, 1.3, 10.35, c, None),
-        rect(13.15, 2.85, 1.3, 10.35, c, None),
-        rect(1.55, 11.9, 12.9, 1.3, c, None),
-    ))
-}
-
-pub fn close8(_s: &Skin) -> svg::Handle {
-    // 8.4 x 7.3 px, stroke 2.1, flat butt ends cut short of the corners
-    doc(format!(
-        "{}{}",
-        line(2.85, 3.5, 13.15, 12.55, Color::WHITE, 2.6),
-        line(13.15, 3.5, 2.85, 12.55, Color::WHITE, 2.6),
-    ))
-}
-
-pub fn close(_s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}",
-        line(3.5, 3.5, 12.5, 12.5, Color::WHITE, 1.5),
-        line(12.5, 3.5, 3.5, 12.5, Color::WHITE, 1.5),
-    ))
-}
-
-pub fn help(s: &Skin) -> svg::Handle {
-    doc(format!(
-        "{}{}",
-        circle(8.0, 8.0, 6.5, Color::TRANSPARENT, Some((s.subtle, 1.0))),
-        "<text x='8' y='12' font-size='11' text-anchor='middle' fill='#a0a0a0'>?</text>",
-    ))
 }

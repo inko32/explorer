@@ -48,6 +48,29 @@ pub struct SettingsCfg {
     pub extensionless_group: String,
     /// Compound extensions (".tar.gz") matched before the final one.
     pub compound_extensions: Vec<String>,
+    /// menu.yaml `menu_click_through` (1/0/true/false): a click that
+    /// dismisses an open menu also activates the item beneath it
+    /// (Windows behavior) instead of being swallowed by the modal shield.
+    pub menu_click_through: ClickThrough,
+}
+
+/// A bool that menu.yaml may spell as `1`/`0` or `true`/`false`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ClickThrough(pub bool);
+
+impl<'de> Deserialize<'de> for ClickThrough {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Repr {
+            Flag(bool),
+            Num(i64),
+        }
+        match Repr::deserialize(d)? {
+            Repr::Flag(b) => Ok(ClickThrough(b)),
+            Repr::Num(n) => Ok(ClickThrough(n != 0)),
+        }
+    }
 }
 
 impl Default for SettingsCfg {
@@ -57,6 +80,7 @@ impl Default for SettingsCfg {
             open_backend: "kde".into(),
             extensionless_group: String::new(),
             compound_extensions: Vec::new(),
+            menu_click_through: ClickThrough(true),
         }
     }
 }
@@ -329,6 +353,24 @@ pub struct Item {
 }
 
 impl Item {
+    /// A plain enabled command item (no applicability filtering) —
+    /// used for menus built in code rather than from menu.yaml
+    /// (the drag drop-behavior menu).
+    pub fn plain(id: &str, label: String) -> Self {
+        Self {
+            id: id.into(),
+            label,
+            shortcut: String::new(),
+            icon: None,
+            enabled: true,
+            bold: false,
+            run: None,
+            files: true,
+            dirs: true,
+            single: false,
+        }
+    }
+
     /// §8 applicability against the whole selection.
     fn applies(&self, has_files: bool, has_dirs: bool, n: usize) -> bool {
         (self.files || !has_files)
@@ -577,23 +619,56 @@ pub fn view<'a>(open: &'a Open, cfg: &'a MenuCfg, skin: skin::Skin) -> Element<'
             Entry::Item(item) => col = col.push(item_row(i, item, open.hover == Some(i), l, skin)),
         }
     }
-    container(col)
-        .width(Length::Fixed(content_w))
-        .style(move |_t: &iced::Theme| container::Style {
-            background: Some(skin.menu_bg.into()),
-            border: iced::Border {
-                color: skin.menu_border,
-                width: crate::theme::border_w(1.0),
-                radius: l.corner_radius.into(),
-            },
-            shadow: iced::Shadow {
-                color: Color { a: 0.25, ..skin.text },
-                offset: iced::Vector::new(2.0, 2.0),
-                blur_radius: 6.0,
-            },
-            ..Default::default()
-        })
-        .boxed()
+    let m = mouse_area(
+        container(col)
+            .width(Length::Fixed(content_w))
+            .style(move |_t: &iced::Theme| container::Style {
+                background: Some(skin.menu_bg.into()),
+                border: iced::Border {
+                    color: skin.menu_border,
+                    width: crate::theme::border_w(1.0),
+                    radius: l.corner_radius.into(),
+                },
+                shadow: iced::Shadow {
+                    color: Color { a: 0.25, ..skin.text },
+                    offset: iced::Vector::new(2.0, 2.0),
+                    blur_radius: 6.0,
+                },
+                ..Default::default()
+            }),
+    )
+    // Ribbon-style hover: ONE hit-test at the menu level (the row
+    // geometry is fixed and known here). Per-item on_enter/on_exit
+    // publishes both messages on a single CursorMoved in tree order —
+    // moving up ended with the stale on_exit(None), so the highlight
+    // only ever worked top-to-bottom.
+    .on_move(move |pos| {
+        Message::MenuHover(hover_at(&open.entries, pos.y, l))
+    })
+    .on_exit(Message::MenuHover(None));
+    m.boxed()
+}
+
+/// The entry index under a menu-local `y`, or None over separators,
+/// the border, or below the last item. Mirrors the fixed row geometry
+/// of `view` (items of `item_height`, separators of `separator_height`,
+/// content starting after the 1px border).
+fn hover_at(entries: &[Entry], y: f32, l: &LayoutCfg) -> Option<usize> {
+    let mut top = crate::theme::border_w(1.0);
+    for (i, e) in entries.iter().enumerate() {
+        let h = match e {
+            Entry::Item(_) => l.item_height,
+            Entry::Sep => l.separator_height,
+        };
+        if y >= top && y < top + h {
+            return match e {
+                Entry::Item(_) => Some(i),
+                Entry::Sep => None,
+            };
+        }
+        top += h;
+    }
+    None
 }
 
 fn item_row<'a>(
@@ -637,9 +712,7 @@ fn item_row<'a>(
             ..Default::default()
         });
     }
-    let area = mouse_area(cell)
-        .on_enter(Message::MenuHover(Some(i)))
-        .on_exit(Message::MenuHover(None));
+    let area = mouse_area(cell);
     if item.enabled {
         area.on_press(Message::MenuPick(i)).boxed()
     } else {
@@ -780,6 +853,27 @@ mod tests {
             .collect()
     }
 
+    #[test]
+    fn hover_hit_test_matches_row_geometry() {
+        let c = cfg();
+        let l = &c.layout;
+        let item = || Entry::Item(Item::plain("x", "x".into()));
+        let entries = vec![item(), Entry::Sep, item()];
+        let b = crate::theme::border_w(1.0);
+        let h = l.item_height;
+        let s = l.separator_height;
+        // on the border / over a separator / below the last row: nothing
+        assert_eq!(hover_at(&entries, b - 0.5, l), None);
+        assert_eq!(hover_at(&entries, b + h + s / 2.0, l), None);
+        assert_eq!(hover_at(&entries, b + 2.0 * h + s + 1.0, l), None);
+        // the first and last rows resolve in both directions — the
+        // hit-test is order-independent, unlike enter/exit pairs
+        assert_eq!(hover_at(&entries, b + 0.5, l), Some(0));
+        assert_eq!(hover_at(&entries, b + h - 0.5, l), Some(0));
+        assert_eq!(hover_at(&entries, b + h + s + 0.5, l), Some(2));
+        assert_eq!(hover_at(&entries, b + 2.0 * h + s - 0.5, l), Some(2));
+    }
+
     fn resolve_all(c: &MenuCfg, specs: &[ItemSpec]) -> Vec<Entry> {
         specs.iter().map(|s| resolve(c, s)).collect()
     }
@@ -889,6 +983,19 @@ mod tests {
         });
         assert_eq!(paste.map(|i| i.enabled), Some(true));
     }
+
+    #[test]
+    fn menu_click_through_accepts_1_0_true_false() {
+        // the shipped default: Windows one-click behavior
+        let c = cfg();
+        assert!(c.settings.menu_click_through.0);
+        for (v, want) in [("0", false), ("false", false), ("1", true), ("true", true)] {
+            let c: MenuCfg =
+                serde_yaml::from_str(&format!("settings:\n  menu_click_through: {v}\n"))
+                    .unwrap_or_else(|e| panic!("menu_click_through: {v} must parse: {e}"));
+            assert_eq!(c.settings.menu_click_through.0, want, "menu_click_through: {v}");
+        }
+    }
 }
 
 /// Menu layer for ui.rs (default in-window rendering): the floated menu
@@ -896,7 +1003,7 @@ mod tests {
 /// stop dispatching at the first captured event, and the LAST child is
 /// on top (gets events first), so the menu handles its own hover/clicks
 /// and the shield blocks everything behind it. A press outside the menu
-/// closes it.
+/// closes it (`menu_click_through`: it also reaches the items behind).
 pub fn layer<'a>(open: &'a Open, cfg: &'a MenuCfg, skin: skin::Skin) -> Element<'a, Message> {
     let (x, y) = (open.x, open.y);
     let menu = iced::widget::float(view(open, cfg, skin)).translate(
@@ -914,15 +1021,27 @@ pub fn layer<'a>(open: &'a Open, cfg: &'a MenuCfg, skin: skin::Skin) -> Element<
             Vector::new(tx.max(0.0) - bounds.x, ty.max(0.0) - bounds.y)
         },
     );
-    iced::widget::stack![Shield { on_press: Message::CloseMenu }.boxed(), menu].boxed()
+    iced::widget::stack![
+        Shield {
+            on_press: Message::CloseMenu,
+            click_through: cfg.settings.menu_click_through.0,
+        }
+        .boxed(),
+        menu
+    ]
+    .boxed()
 }
 
 /// Modal shield under an open menu: captures all mouse/touch events so
-/// the UI behind the menu stays inert; a press closes the menu.
+/// the UI behind the menu stays inert; a press closes the menu. With
+/// `menu_click_through` a press is NOT captured: it closes the menu and
+/// also reaches the items behind it (one click dismisses AND activates,
+/// Windows behavior).
 impl iced::advanced::widget::Meta for Shield {}
 
 struct Shield {
     on_press: Message,
+    click_through: bool,
 }
 
 impl Widget<Message, iced::Theme, iced::Renderer> for Shield {
@@ -968,7 +1087,11 @@ impl Widget<Message, iced::Theme, iced::Renderer> for Shield {
                 if !shell.is_event_captured() {
                     shell.publish(self.on_press.clone());
                 }
-                shell.capture_event();
+                // click-through: the press continues to the items behind
+                // the menu; otherwise the shield swallows it
+                if !self.click_through {
+                    shell.capture_event();
+                }
             }
             iced::Event::Mouse(_) | iced::Event::Touch(_) => {
                 shell.capture_event();
@@ -1071,17 +1194,20 @@ impl<'a> Widget<Message, iced::Theme, iced::Renderer> for MenuHost<'a> {
             tree: &mut state.tree,
             layout: menu_layout,
             window,
+            click_through: self.cfg.settings.menu_click_through.0,
         }))]
     }
 }
 
 /// The menu overlay: hosts the menu widget tree at the anchor point and
-/// captures all pointer events (modal).
+/// captures all pointer events (modal); `click_through` lets a
+/// dismiss-press reach the UI behind the menu (see `Shield`).
 struct MenuOverlay<'a> {
     content: Element<'a, Message>,
     tree: &'a mut Tree,
     layout: Layout,
     window: Size,
+    click_through: bool,
 }
 
 impl<'a> overlay::Overlay<Message, iced::Theme, iced::Renderer> for MenuOverlay<'a> {
@@ -1128,7 +1254,10 @@ impl<'a> overlay::Overlay<Message, iced::Theme, iced::Renderer> for MenuOverlay<
                 if !shell.is_event_captured() {
                     shell.publish(Message::CloseMenu);
                 }
-                shell.capture_event();
+                // click-through: the press continues to the UI behind
+                if !self.click_through {
+                    shell.capture_event();
+                }
             }
             iced::Event::Mouse(_) | iced::Event::Touch(_) => {
                 shell.capture_event();

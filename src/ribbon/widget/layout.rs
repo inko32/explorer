@@ -522,6 +522,11 @@ fn tab_strip(
     let spec = ctx.spec();
     let selected = view.selected_tab();
 
+    // The tab elements follow the DPI like the rest of the chrome; only
+    // the connected border's thickness stays a constant physical 1px
+    // (lw). The inter-tab gap is a spec metric (ribbon.yaml).
+    let tab_gap = ctx.spec().metrics.tab_gap;
+
     let mut x = (ctx.text_w("File", 12.5) + 26.0) * 8.0 / 7.0;
     let visible = visible_tabs(ctx);
     // Pre-scan: base tab widths, then widen the last tab of each
@@ -548,7 +553,7 @@ fn tab_strip(
             }
             if let Some(name) = &name {
                 let run_w: f32 =
-                    ws[i..=j].iter().sum::<f32>() + 2.0 * (j - i) as f32;
+                    ws[i..=j].iter().sum::<f32>() + tab_gap * (j - i) as f32;
                 let target = ctx.text_w(name, 12.0) + 6.0;
                 if run_w < target {
                     ws[j] += target - run_w;
@@ -561,6 +566,13 @@ fn tab_strip(
     let mut contextual_run: Option<(ContextualColor, f32, f32, String)> = None;
     // Geometry of the active tab, for the connected line (Filled style).
     let mut active_tab: Option<(f32, f32, Option<ContextualColor>)> = None;
+    // Geometry of the hovered tab: the same connected line, lighter,
+    // drawn behind the active tab's line; a contextual tab hovers in
+    // its accent color instead.
+    let mut hover_tab: Option<(f32, f32, Option<ContextualColor>)> = None;
+    // Inactive contextual tabs (left/right edge + accent): they get
+    // the fading 2/4 verticals instead of a full outline.
+    let mut ctx_lines: Vec<(f32, f32, Color)> = Vec::new();
 
     for (pos, &idx) in visible.iter().enumerate() {
         let tab = &spec.tabs[idx];
@@ -590,6 +602,13 @@ fn tab_strip(
             });
         if is_active {
             active_tab = Some((x, x + w, accent));
+        } else if ctx.hovered(&Target::Tab(idx)) {
+            hover_tab = Some((x, x + w, accent));
+        }
+        if !is_active
+            && let Some(ccol) = accent
+        {
+            ctx_lines.push((x, x + w, ccol.accent()));
         }
 
         let filled = ctx.theme.tab_style == crate::ribbon::theme::TabStyle::Filled;
@@ -704,37 +723,91 @@ fn tab_strip(
                 Size::new(w, STRIP_H),
             ),
         });
-        x += w + 2.0;
+        x += w + tab_gap;
     }
     let _ = finish_contextual(ctx, scene, strip_y, contextual_run.take());
 
-    // Connected line (win7/8 "filled" tabs): a 1px line along the bottom
-    // of the tab bar that turns up, right and down to wrap around the
-    // active tab, so tab and command pane read as one connected surface.
-    // A contextual active tab colors the whole line with its accent.
+    // --- connected tab outlines (Filled tab style) ---
+    //
+    // Per-tab segment numbering: (1) baseline left of the tab,
+    // (2) up the tab's left edge, (3) across the top,
+    // (4) down the tab's right edge, (5) baseline right of the tab.
+    //
+    // Drawn back to front: the inactive contextual tabs' fading
+    // verticals, the on-hover outline, then the active tab's solid
+    // connected line on top.
+    //
+    // Every outline keeps a constant PHYSICAL 1px thickness and snaps
+    // to the physical pixel grid (`ps`) — without the snap a 1px line
+    // at a fractional position smears across two pixel rows and reads
+    // as "scaled". Only the lengths follow the scaled tab geometry.
     if ctx.theme.tab_style == crate::ribbon::theme::TabStyle::Filled {
-        let (tab_l, tab_r, accent) =
-            active_tab.unwrap_or((f32::MAX, f32::MAX, None));
-        let color = accent.map_or(ctx.theme.tab_line, |c| c.accent());
-        let line_y = strip_y + STRIP_H - 1.0;
-        let mut line = |lx: f32, ly: f32, lw: f32, lh: f32| {
+        let w1 = lw(ctx, 1.0);
+        // logical -> physical pixel grid (crisp hairlines at any DPI)
+        let ps = |v: f32| {
+            (v / ctx.theme.border_scale).round() * ctx.theme.border_scale
+        };
+        let mut seg = |lx: f32, ly: f32, sw: f32, sh: f32, fill: Fill| {
             quad(
                 scene,
-                Rectangle::new(Point::new(lx, ly), Size::new(lw, lh)),
-                Fill::Color(color),
+                Rectangle::new(Point::new(lx, ly), Size::new(sw, sh)),
+                fill,
                 None,
                 0.0,
             );
         };
-        // baseline, left of the active tab
-        line(0.0, line_y, tab_l.min(width), lw(ctx, 1.0));
+        // baseline: 1 physical px, hugging the strip's bottom edge;
+        // the verticals (2)/(4) run from the top down onto it
+        let line_y = ps(strip_y + STRIP_H - w1);
+        let line_h = line_y + w1 - strip_y;
+
+        // inactive contextual tabs: only the (2) and (4) verticals,
+        // fading from colorless at the pane to the solid contextual
+        // accent at the top — a quiet "these tools are available" hint.
+        // Constant physical 1px, no DPI.
+        for (cl, cr, ccol) in ctx_lines {
+            let lx = ps(cl);
+            let rx = ps(cr);
+            let fade = Fill::GradientV(ccol, Color::TRANSPARENT);
+            seg(lx, strip_y, w1, line_h, fade);
+            seg(rx - w1, strip_y, w1, line_h, fade);
+        }
+
+        // on-hover outline: segments (2)-(4) only — up, across, down
+        // around the hovered tab, open at the pane. Drawn first, so it
+        // stays *behind* the active tab's solid line where they overlap.
+        // A contextual tab hovers in its accent, not the light outline.
+        if let Some((hc, (hl, hr, hacc))) =
+            ctx.theme.tab_hover_line.zip(hover_tab)
+            && hl < width
+        {
+            let hc = hacc.map_or(hc, |c| c.accent());
+            let lx = ps(hl);
+            let rx = ps(hr);
+            seg(lx, strip_y, w1, line_h, Fill::Color(hc));
+            seg(lx, strip_y, rx - lx, w1, Fill::Color(hc));
+            seg(rx - w1, strip_y, w1, line_h, Fill::Color(hc));
+        }
+
+        // active tab: the solid connected line, all 5 segments — tab
+        // and command pane read as one connected surface. A contextual
+        // active tab colors the whole line with its accent.
+        let (tab_l, tab_r, accent) =
+            active_tab.unwrap_or((f32::MAX, f32::MAX, None));
+        let color = accent.map_or(ctx.theme.tab_line, |c| c.accent());
+        let lx = ps(tab_l.min(width));
+        // (1) baseline, left of the active tab
+        seg(0.0, line_y, lx, w1, Fill::Color(color));
         if tab_l < width {
-            // up, right, down around the active tab (open at the pane)
-            line(tab_l, strip_y, lw(ctx, 1.0), STRIP_H);
-            line(tab_l, strip_y, tab_r - tab_l, lw(ctx, 1.0));
-            line(tab_r - 1.0, strip_y, lw(ctx, 1.0), STRIP_H);
-            // baseline, right of the active tab
-            line(tab_r, line_y, width - tab_r, lw(ctx, 1.0));
+            let rx = ps(tab_r);
+            // (2) up the tab's left edge
+            seg(lx, strip_y, w1, line_h, Fill::Color(color));
+            // (3) across the tab's top
+            seg(lx, strip_y, rx - lx, w1, Fill::Color(color));
+            // (4) down the tab's right edge
+            seg(rx - w1, strip_y, w1, line_h, Fill::Color(color));
+            // (5) baseline, right of the active tab
+            seg(rx, line_y, width - rx, w1, Fill::Color(color));
         }
     }
 

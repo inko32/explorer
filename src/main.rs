@@ -13,11 +13,12 @@ mod folder;
 mod fonts;
 mod fs;
 mod icon;
+mod icon_theme;
 mod icons;
 mod menu;
 mod model;
 mod nav_pane;
-// TODO(perf): assets/performance.yaml rate caps — disabled, see model.rs
+// TODO(perf): assets/performance.yaml rate caps — disabled, see model/explorer.rs
 #[allow(dead_code)]
 mod perf;
 mod navigation;

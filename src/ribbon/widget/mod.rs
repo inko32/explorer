@@ -1625,6 +1625,13 @@ pub fn draw_scene<Renderer>(
                                 .add_stop(1.0, bottom.scale_alpha(alpha)),
                             ))
                         }
+                        Fill::GradientV(top, bottom) => {
+                            Background::Gradient(iced::Gradient::Linear(
+                                iced::gradient::Linear::new(std::f32::consts::PI)
+                                    .add_stop(0.0, top.scale_alpha(alpha))
+                                    .add_stop(1.0, bottom.scale_alpha(alpha)),
+                            ))
+                        }
                     };
                     renderer.fill_quad(
                         renderer::Quad {

@@ -275,7 +275,9 @@ fn push_tree_node<'a>(
     let kids = state.nav.children.get(path);
     let expanded = state.nav.expanded.contains(path);
     let has_children = kids.map(|k| !k.is_empty()).unwrap_or(false);
-    let selected = state.cwd == path;
+    // the cwd node is always marked; a right-clicked row is marked too
+    // while its context menu is open (nav_selected)
+    let selected = state.cwd == path || state.nav_selected.as_deref() == Some(path);
     let hovered = state.nav_hover.as_deref() == Some(path);
     let targeted = state.drop_targeted(path);
     let mut list = list.push(tree_item(
@@ -454,11 +456,12 @@ pub(crate) fn nav_pane(state: &Explorer, skin: skin::Skin, width: f32) -> Elemen
     list = list.push(section_header(row_w, "Favorites", "star", state.nav.favorites_open, NavSection::Favorites, m, skin));
     if state.nav.favorites_open {
         for (label, icon_name, target) in favorites() {
-            // shortcuts: never show the selected state (only the Computer
-            // tree highlights the current folder)
+            // shortcuts never show the cwd state; a right-clicked row
+            // shows the context-menu mark like the tree does
+            let selected = target.is_some() && target == state.nav_selected;
             let hovered = target.is_some() && target == state.nav_hover;
             let targeted = target.as_ref().is_some_and(|t| state.drop_targeted(t));
-            list = list.push(tree_item(row_w, label, icon_name, 1, None, false, hovered, targeted, state, target, m, skin));
+            list = list.push(tree_item(row_w, label, icon_name, 1, None, selected, hovered, targeted, state, target, m, skin));
         }
     }
 
@@ -470,7 +473,7 @@ pub(crate) fn nav_pane(state: &Explorer, skin: skin::Skin, width: f32) -> Elemen
         "computer",
         0,
         Some(root_open),
-        state.cwd == Path::new("/"),
+        state.cwd == Path::new("/") || state.nav_selected.as_deref() == Some(Path::new("/")),
         state.nav_hover.as_deref() == Some(Path::new("/")),
         state.drop_targeted(Path::new("/")),
         state,

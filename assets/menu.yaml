@@ -10,6 +10,7 @@ settings:
   open_backend: kde           # kde | yaml
   extensionless_group: ""     # file-type group for extensionless files ("" = none)
   compound_extensions: []     # e.g. [.tar.gz, .tar.xz] matched before the final extension
+  menu_click_through: 1       # 1/true: a click that closes a menu also activates the item beneath it (Windows); 0/false: the click only closes
 
 # §5 file opening. kde: the first command on PATH wins, paths passed as
 # individual arguments (no shell). yaml: extension -> argv, the paths are

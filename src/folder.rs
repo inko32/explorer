@@ -399,11 +399,14 @@ fn item_chrome<'a>(
         },
         ..Default::default()
     });
-    // drop target: directories/archives accept, plain files reject per
-    // policy (the status bar says "Cannot drop here")
+    // drop target: directories/archives accept, executables offer
+    // "Run with", plain files reject per policy (the caption shows
+    // the banned glyph and the status bar says "Cannot drop here")
     let zone_target = state.entries.get(i).map(|e| {
         if e.is_dir() || fs::archive::is_archive_path(&e.path) {
             crate::dnd::DropTarget::Directory(e.path.clone())
+        } else if e.is_executable {
+            crate::dnd::DropTarget::Executable(e.path.clone())
         } else {
             crate::dnd::DropTarget::File(e.path.clone())
         }
@@ -411,7 +414,7 @@ fn item_chrome<'a>(
     let el: Element<Message> = mouse_area(styled)
         .on_press(Message::Select(i))
         .on_double_click(Message::Open(i))
-        .on_right_press(Message::ContextSelect(i))
+        .on_right_press(Message::RightPress(i))
         .on_enter(Message::Hover(Some(i)))
         .on_exit(Message::HoverExit(i))
         .boxed();
@@ -522,7 +525,7 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
     let line = match family {
         vs::Family::Content => cfg.layouts.content.row_h,
         vs::Family::Tiles => cfg.layouts.tiles.cell_h,
-        vs::Family::Details => cfg.details_row_h(state.details_compact),
+        vs::Family::Details => cfg.details_pitch(state.details_compact),
         vs::Family::List => cfg.list_col_w(longest),
         vs::Family::SmallIcon => {
             let m = cfg.small_icon(s);
@@ -861,17 +864,20 @@ fn tile_cell<'a>(i: usize, e: &Entry, state: &'a Explorer, skin: skin::Skin) -> 
 fn details_view(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     let d = &state.view_cfg.layouts.details;
     let row_h = state.view_cfg.details_row_h(state.details_compact);
+    // rows are spaced by the effective gap (row_h → pitch); the gap is
+    // in border pixels so it follows the border DPI unscale
+    let gap = state.view_cfg.details_pitch(state.details_compact) - row_h;
     let total = state.entries.len();
     // the content reserves the header strip (the real header overlays it)
     let (first, last) = row_window(
         total,
-        row_h,
+        row_h + gap,
         (state.scroll_y - d.header_h).max(0.0),
         state.viewport_h,
     );
-    let mut rows = column![vspacer(d.header_h)].spacing(0);
+    let mut rows = column![vspacer(d.header_h)].spacing(gap);
     if first > 0 {
-        rows = rows.push(vspacer(first as f32 * row_h).boxed());
+        rows = rows.push(vspacer(first as f32 * (row_h + gap)).boxed());
     }
     for i in first..last {
         if let Some(e) = state.entries.get(i) {
@@ -879,7 +885,7 @@ fn details_view(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         }
     }
     if last < total {
-        rows = rows.push(vspacer((total - last) as f32 * row_h).boxed());
+        rows = rows.push(vspacer((total - last) as f32 * (row_h + gap)).boxed());
     }
     file_scrollable(rows).boxed()
 }

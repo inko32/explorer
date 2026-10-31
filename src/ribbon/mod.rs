@@ -148,6 +148,9 @@ pub mod cmd {
     pub const TOGGLE_BORDER: u32 = 75;
     pub const TOGGLE_FRAME: u32 = 76;
     pub const TOGGLE_GRAY_DISABLED: u32 = 307;
+    /// View → Options: use the system Breeze icon theme instead of the
+    /// embedded explorer pack.
+    pub const TOGGLE_ICON_PACK: u32 = 308;
     /// TEMP: rainbow gradient on the folder-view backdrop rectangle.
     pub const TOGGLE_RAINBOW: u32 = 79;
     pub const FOLDER_OPTIONS: u32 = 77;
@@ -472,6 +475,8 @@ pub struct Snapshot {
     pub rainbow: bool,
     /// Disabled buttons/icons get the gray-scaled-faded style.
     pub disabled_gray: bool,
+    /// System icon theme (Breeze) instead of the embedded explorer pack.
+    pub breeze_icons: bool,
     pub cwd: PathBuf,
     pub selected_paths: Vec<PathBuf>,
     pub first_selected: Option<usize>,
@@ -496,6 +501,7 @@ impl Explorer {
             win8_frame: self.frame_style == crate::model::FrameStyle::Win8,
             rainbow: self.rainbow,
             disabled_gray: self.disabled_gray,
+            breeze_icons: self.breeze_icons,
             cwd: self.cwd.clone(),
             selected_paths: self.selected_paths(),
             first_selected: self.selected.iter().next().copied(),
@@ -605,6 +611,7 @@ impl CommandHandler for ExplorerHandler {
             cmd::TOGGLE_BORDER => out.push(Message::ToggleSelfBorder),
             cmd::TOGGLE_FRAME => out.push(Message::ToggleFrameStyle),
             cmd::TOGGLE_GRAY_DISABLED => out.push(Message::ToggleGrayDisabled),
+            cmd::TOGGLE_ICON_PACK => out.push(Message::ToggleIconPack),
             cmd::TOGGLE_RAINBOW => out.push(Message::ToggleRainbow),
             cmd::CTX_MENU => out.push(Message::Status("Context menu".into())),
             cmd::HELP => out.push(Message::Status("Help is not implemented yet".into())),
@@ -663,6 +670,7 @@ impl CommandHandler for ExplorerHandler {
                     cmd::TOGGLE_BORDER => snap.self_border,
                     cmd::TOGGLE_FRAME => snap.win8_frame,
                     cmd::TOGGLE_GRAY_DISABLED => snap.disabled_gray,
+                    cmd::TOGGLE_ICON_PACK => snap.breeze_icons,
                     cmd::TOGGLE_RAINBOW => snap.rainbow,
                     _ => false,
                 };
@@ -742,6 +750,7 @@ fn command_name(command: u32) -> String {
         cmd::TOGGLE_BORDER => "Custom window border",
         cmd::TOGGLE_FRAME => "Windows 8 frame style",
         cmd::TOGGLE_GRAY_DISABLED => "Gray out unavailable buttons",
+        cmd::TOGGLE_ICON_PACK => "Breeze icon theme",
         cmd::TOGGLE_RAINBOW => "Rainbow pane backdrop",
         cmd::HELP => "Help",
         _ => return format!("Command #{command}"),
@@ -1113,9 +1122,12 @@ pub fn theme(dark: bool, gray_disabled: bool, scale_dpi: f32, focused: bool) -> 
     t.text = r.text;
     t.tab_text = r.tab_text;
     // hover is the folder-view hover color everywhere in the ribbon
-    // (tabs, buttons, popup menu rows); buttons additionally get the
-    // bluer hover border, in both themes
-    t.tab_hover = p.hover;
+    // (buttons, popup menu rows); buttons additionally get the
+    // bluer hover border, in both themes. The *tabs* hover nearly
+    // white (#FDFDFF), with a lighter connected line around the
+    // hovered tab (theme `tab_hover_outline`).
+    t.tab_hover = if dark { p.hover } else { Color::from_rgb8(0xFD, 0xFD, 0xFF) };
+    t.tab_hover_line = Some(p.tab_hover_outline);
     t.hover_bg = p.hover;
     t.hover_border = Some(p.hover_btn_border);
     // pressed = the folder-view pressed blue (light theme included)
@@ -1149,6 +1161,7 @@ pub fn theme(dark: bool, gray_disabled: bool, scale_dpi: f32, focused: bool) -> 
         // layout time, so transparent hover colors guarantee no hover
         // paint even if stale hover state survives
         t.tab_hover = Color::TRANSPARENT;
+        t.tab_hover_line = None;
         t.hover_bg = Color::TRANSPARENT;
         t.hover_border = None;
         t.pressed_bg = p.sel_inactive;

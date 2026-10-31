@@ -51,7 +51,6 @@ pub enum Content {
 const TEXT_EXTS: &[&str] = &[
     "txt", "md", "log", "rs", "toml", "yaml", "yml", "json", "csv", "sh", "py", "c", "h", "cpp",
 ];
-const IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif", "bmp", "webp"];
 /// Preview reads at most this many bytes.
 const TEXT_CAP: usize = 8192;
 
@@ -82,7 +81,9 @@ pub fn load(path: &Path, is_dir: bool) -> Content {
             Err(_) => Content::None,
         };
     }
-    if IMAGE_EXTS.contains(&ext.as_str()) {
+    // raster formats only: the image widget can't rasterize svg
+    // (icons go through the svg widget instead)
+    if ext != "svg" && crate::fs::IMAGE_EXTS.contains(&ext.as_str()) {
         return Content::Image(iced::widget::image::Handle::from_path(path));
     }
     Content::None

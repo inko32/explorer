@@ -21,6 +21,9 @@ pub struct Entry {
     pub modified: Option<i64>,
     pub is_hidden: bool,
     pub is_symlink: bool,
+    /// Executable permission (regular files only) — the drag target
+    /// offers "Run with" for these.
+    pub is_executable: bool,
     /// Symlink target as display text (when cheaply known).
     pub symlink_target: Option<String>,
 }
@@ -37,6 +40,18 @@ pub struct Volume {
     pub name: String,
     pub mount: PathBuf,
     pub fs_type: Option<String>,
+}
+
+/// Image file extensions (lowercase), recognized app-wide: the ribbon
+/// picture-tools context and the preview pane. `svg` counts as an image
+/// for the context; the preview pane can't rasterize it (see pane.rs).
+pub const IMAGE_EXTS: &[&str] = &["bmp", "gif", "jpeg", "jpg", "png", "svg", "webp"];
+
+/// True when `name` has an image extension.
+pub fn is_image_name(name: &str) -> bool {
+    name.rsplit_once('.')
+        .map(|(_, ext)| IMAGE_EXTS.contains(&ext.to_lowercase().as_str()))
+        .unwrap_or(false)
 }
 
 #[derive(Debug)]
