@@ -112,6 +112,71 @@ pub(crate) fn frame_color(state: &Explorer, skin: skin::Skin) -> Color {
     }
 }
 
+// ---------------------------------------------------------------------------
+// caption glyphs
+//
+// The ONLY hard-coded icons in the app (the D14 exception): the caption
+// buttons are window chrome — they follow the frame style and the
+// title-bar colors, not the icon pack (a Breeze user still gets the
+// Win8/Win10 frame buttons). Every other icon resolves through the
+// icon registry.
+
+/// One caption button in both frame variants. The Win8 glyphs are drawn
+/// pixel-per-pixel from a real Win8 capture (ratios against the 21px
+/// button height, rendered in a 16-unit box); `{title}` is the title-bar
+/// text color (dark on the light-blue Win8 bar). The Win10 glyphs are
+/// white on the dark title bar.
+struct CaptionGlyph {
+    /// Win8 frame; `{title}` = title-bar text color.
+    win8: &'static str,
+    /// Win10 frame (white on the title bar).
+    win10: &'static str,
+}
+
+/// `_` `[]` `X` — index-parallel to the caption button row in
+/// [`caption_overlay`].
+static CAPTION_GLYPHS: [CaptionGlyph; 3] = [
+    CaptionGlyph {
+        // minimize: 7.3 x 2.1 px low bar
+        win8: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'>\
+               <rect x='3.5' y='11.4' width='9' height='2.6' fill='{title}'/></svg>",
+        win10: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'>\
+                <line x1='3' y1='8' x2='13' y2='8' stroke='#ffffff' stroke-width='1.4'/></svg>",
+    },
+    CaptionGlyph {
+        // maximize: 10.5 x 8.4 px outline, top bar 2.1 px, sides/bottom
+        // 1.05 px (a mini window with a thicker title bar)
+        win8: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'>\
+               <rect x='1.55' y='2.85' width='12.9' height='2.6' fill='{title}'/>\
+               <rect x='1.55' y='2.85' width='1.3' height='10.35' fill='{title}'/>\
+               <rect x='13.15' y='2.85' width='1.3' height='10.35' fill='{title}'/>\
+               <rect x='1.55' y='11.9' width='12.9' height='1.3' fill='{title}'/></svg>",
+        win10: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'>\
+                <rect x='3' y='3' width='10' height='10' fill='none' stroke='#ffffff' stroke-width='1.4'/></svg>",
+    },
+    CaptionGlyph {
+        // close: 8.4 x 7.3 px, stroke 2.1, flat butt ends cut short of
+        // the corners (win10: thinner X)
+        win8: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'>\
+               <line x1='2.85' y1='3.5' x2='13.15' y2='12.55' stroke='#ffffff' stroke-width='2.6'/>\
+               <line x1='13.15' y1='3.5' x2='2.85' y2='12.55' stroke='#ffffff' stroke-width='2.6'/></svg>",
+        win10: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'>\
+                <line x1='3.5' y1='3.5' x2='12.5' y2='12.5' stroke='#ffffff' stroke-width='1.5'/>\
+                <line x1='12.5' y1='3.5' x2='3.5' y2='12.5' stroke='#ffffff' stroke-width='1.5'/></svg>",
+    },
+];
+
+/// Render a caption glyph for the frame style: `{title}` takes the
+/// title-bar text color (Win8); Win10 templates have no tokens.
+fn caption_svg(template: &'static str, skin: skin::Skin) -> iced::widget::svg::Handle {
+    let doc = if template.contains("{title}") {
+        template.replace("{title}", &crate::icons::hex(skin.title_text))
+    } else {
+        template.to_string()
+    };
+    iced::widget::svg::Handle::from_memory(doc.into_bytes())
+}
+
 /// Caption buttons (_ [] X) as an overlay at the window's top-right corner:
 /// they contact the top edge (Win8: over the frame) and the right edge.
 /// Win8: min/max width = 60% of close width, short (20px), thin glyphs.
@@ -121,13 +186,21 @@ pub(crate) fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'st
     // buttons hang below the top frame (y=2), height 21 = 69% of the 30px
     // title bar; adjacent, no gaps; min/max w = 1.33x h, close w = 2.24x h;
     // glyph baseline at ~70% of the button height.
-    let (mw, cw, h, glyph, y, right_pad, names) = match state.frame_style {
-        crate::model::FrameStyle::Win8 => (
-            28.0, 47.0, 21.0, 13.0, 1.0, 6.0,
-            ("minimize8", "maximize8", "close8"),
-        ),
-        crate::model::FrameStyle::Win10 => (46.0, 46.0, 29.0, 15.0, 1.0, 1.0,
-            ("minimize", "maximize", "close")),
+    let (mw, cw, h, glyph, y, right_pad) = match state.frame_style {
+        crate::model::FrameStyle::Win8 => (28.0, 47.0, 21.0, 13.0, 1.0, 6.0),
+        crate::model::FrameStyle::Win10 => (46.0, 46.0, 29.0, 15.0, 1.0, 1.0),
+    };
+    let glyphs: [&'static str; 3] = match state.frame_style {
+        crate::model::FrameStyle::Win8 => [
+            CAPTION_GLYPHS[0].win8,
+            CAPTION_GLYPHS[1].win8,
+            CAPTION_GLYPHS[2].win8,
+        ],
+        crate::model::FrameStyle::Win10 => [
+            CAPTION_GLYPHS[0].win10,
+            CAPTION_GLYPHS[1].win10,
+            CAPTION_GLYPHS[2].win10,
+        ],
     };
     // Win8: buttons are opaque at rest (titlebar blue / close red) so the
     // frame's top edge never shows as a line above/through them
@@ -136,7 +209,7 @@ pub(crate) fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'st
         crate::model::FrameStyle::Win10 => None,
     };
     // glyph bottoms share one baseline at ~70% of the button height
-    let one = move |icon_name: &'static str,
+    let one = move |glyph_tpl: &'static str,
                     w: f32,
                     msg: Message,
                     hover_bg: Color,
@@ -154,11 +227,15 @@ pub(crate) fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'st
             a: 1.0,
         };
         button(
-            container(crate::icon::view(icon_name, glyph, &skin))
-                .width(Length::Fixed(w))
-                .height(Length::Fixed(h))
-                .center_x(Length::Fixed(w))
-                .center_y(Length::Fixed(h)),
+            container(
+                iced::widget::svg(caption_svg(glyph_tpl, skin))
+                    .width(Length::Fixed(glyph))
+                    .height(Length::Fixed(glyph)),
+            )
+            .width(Length::Fixed(w))
+            .height(Length::Fixed(h))
+            .center_x(Length::Fixed(w))
+            .center_y(Length::Fixed(h)),
         )
         .width(Length::Fixed(w))
         .height(Length::Fixed(h))
@@ -189,9 +266,9 @@ pub(crate) fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'st
     let ghost = skin.glass_ghost;
     container(
         row![
-            one(names.0, mw, Message::Minimize, ghost, false),
-            one(names.1, mw, Message::Maximize, ghost, false),
-            one(names.2, cw, Message::Close, skin.close_hover, true),
+            one(glyphs[0], mw, Message::Minimize, ghost, false),
+            one(glyphs[1], mw, Message::Maximize, ghost, false),
+            one(glyphs[2], cw, Message::Close, skin.close_hover, true),
         ]
         .height(Length::Fixed(h)),
     )

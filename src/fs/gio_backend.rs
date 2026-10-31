@@ -4,7 +4,7 @@ use super::{Backend, Entry, EntryKind, FsError, Volume};
 use gio::prelude::*;
 use std::path::{Path, PathBuf};
 
-const ATTRIBUTES: &str = "standard::name,standard::type,standard::size,standard::is-hidden,standard::is-symlink,standard::symlink-target,time::modified";
+const ATTRIBUTES: &str = "standard::name,standard::type,standard::size,standard::is-hidden,standard::is-symlink,standard::symlink-target,access::can-execute,time::modified";
 
 #[allow(dead_code)]
 pub struct GioBackend {
@@ -52,6 +52,7 @@ impl Backend for GioBackend {
                     })
                 });
             let is_symlink = info.is_symlink();
+            let is_executable = kind == EntryKind::File && info.boolean("access::can-execute");
             let is_hidden = info.is_hidden() || name.starts_with('.');
             let symlink_target = if is_symlink {
                 std::fs::read_link(&path).ok().map(|p| p.to_string_lossy().into_owned())
@@ -66,6 +67,7 @@ impl Backend for GioBackend {
                 modified,
                 is_hidden,
                 is_symlink,
+                is_executable,
                 symlink_target,
             });
         }
@@ -165,4 +167,19 @@ fn is_pseudo_fs(fs: &str) -> bool {
             | "hugetlbfs" | "ramfs" | "overlay" | "autofs" | "binfmt_misc" | "bpf" | "efivarfs"
             | "nfsd" | "nsfs" | "selinuxfs" | "squashfs"
     )
+}
+
+/// Whether the current user can write to `path` (GIO `access::can-write`):
+/// read-only mounts and no-write directories report false, and a failed
+/// query (e.g. denied traversal) means not writable. One stat per call —
+/// the dnd policy probes it on target enter only, never per frame.
+pub(crate) fn writable(path: &Path) -> bool {
+    gio::File::for_path(path)
+        .query_info(
+            "access::can-write",
+            gio::FileQueryInfoFlags::NONE,
+            None::<&gio::Cancellable>,
+        )
+        .map(|i| i.boolean("access::can-write"))
+        .unwrap_or(false)
 }

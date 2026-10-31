@@ -137,6 +137,8 @@ pub struct MetricsSpec {
     /// Horizontal gap multiplier for the ribbon (group edge padding,
     /// inter-group and column gaps).
     pub gap_scale: f32,
+    /// Horizontal gap between the tabs on the tab strip (px).
+    pub tab_gap: f32,
     /// Extra px the group footers (group titles + dialog launchers) sit
     /// below their default position; the ribbon body grows with it, so
     /// the bottom separator line moves down too.
@@ -155,6 +157,7 @@ impl Default for MetricsSpec {
             tree_font_scale: 0.75,
             bar_button_multiplier: 2.2,
             gap_scale: 1.0,
+            tab_gap: 2.0,
             footer_shift: 3.0,
             nav_gap: 4.0,
         }

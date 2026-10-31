@@ -1,2 +1,2 @@
-//! Ribbon command dispatch (extracted from model.rs) — placeholder until the
+//! Ribbon command dispatch (extracted from the model module) — placeholder until the
 //! extraction lands.

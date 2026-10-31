@@ -187,6 +187,7 @@ fn children(items: Vec<ArchiveItem>, archive: &Path, inner: &str) -> Vec<Entry> 
             modified: item.modified,
             is_hidden: name.starts_with('.'),
             is_symlink: false,
+            is_executable: false,
             symlink_target: None,
         });
     }

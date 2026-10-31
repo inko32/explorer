@@ -30,6 +30,190 @@ fn spacer(w: f32, skin: skin::Skin, line: bool) -> Element<'static, Message> {
         .boxed()
 }
 
+/// The "no drop here" badge: a red circle with a diagonal slash (no
+/// caption box around it).
+fn banned_icon() -> Element<'static, Message> {
+    const SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7.5" fill="none" stroke="#E81123" stroke-width="2.2"/><line x1="5.6" y1="14.4" x2="14.4" y2="5.6" stroke="#E81123" stroke-width="2.2"/></svg>"##;
+    iced::widget::svg(iced::widget::svg::Handle::from_memory(
+        SVG.as_bytes().to_vec(),
+    ))
+    .width(Length::Fixed(20.0))
+    .height(Length::Fixed(20.0))
+    .boxed()
+}
+
+/// The caption's bordered text plate (menu colors — the same visual
+/// family as the context menu).
+fn boxed_caption(label: &str, skin: skin::Skin) -> Element<'_, Message> {
+    container(iced::widget::text(label).size(13.0))
+        .padding(iced::Padding::from([2.0, 7.0]))
+        .style(move |_t: &iced::Theme| container::Style {
+            background: Some(skin.menu_bg.into()),
+            border: iced::Border {
+                color: skin.menu_border,
+                width: crate::theme::border_w(1.0),
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        })
+        .boxed()
+}
+
+/// The drag cursor caption (SPEC/DRAGGING.md §5.1): a small bordered
+/// label floating right-lower of the cursor — "Move to …", "Copy to …",
+/// "Link here", "Run with …", "…" while the action is undecided, the
+/// banned glyph when nothing can happen here, or nothing at all while
+/// hovering the dragged items themselves. The caption text is cached in
+/// the drag session (rebuilt on target/modifier changes only); this
+/// layer just places it at the cursor. Independent from the icon badge.
+fn drag_caption(state: &Explorer, skin: skin::Skin) -> Option<Element<'_, Message>> {
+    if !state.dnd.active() {
+        return None;
+    }
+    let cap = state.dnd.caption()?;
+    // near the cursor: 10px right-down, in window-logical pixels
+    const DX: f32 = 16.0;
+    const DY: f32 = 16.0;
+    let badge: Element<Message> = match cap {
+        crate::dnd::DragCaption::Hidden => return None,
+        crate::dnd::DragCaption::Banned => banned_icon(),
+        crate::dnd::DragCaption::Undecided => boxed_caption("…", skin),
+        crate::dnd::DragCaption::Action { label, .. } => boxed_caption(label, skin),
+    };
+    // a full-window layer; the container's left/top alignment parks the
+    // badge at the padded offset
+    Some(
+        container(badge)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(iced::Padding {
+                top: state.cursor.y + DY,
+                left: state.cursor.x + DX,
+                ..Default::default()
+            })
+            .boxed(),
+    )
+}
+
+/// The drag-image badge, independent from the cursor caption: a fixed
+/// 50px blue square (44px icon area + 3px padding on all sides) with
+/// up to five 32px icons — each next one 3px right-down, covering the
+/// previous, the last one on top — and the item count in the square's
+/// bottom-left corner. Square, icons and count all draw at 0.6 opacity.
+fn drag_icon_badge(state: &Explorer, skin: skin::Skin) -> Option<Element<'static, Message>> {
+    if !state.dnd.active() {
+        return None;
+    }
+    let items = match state.dnd.payload()? {
+        crate::dnd::DragPayload::Files(items) if !items.is_empty() => items,
+        _ => return None,
+    };
+    /// Everything in the badge fades together.
+    const FADE: f32 = 0.6;
+    const BADGE: f32 = 50.0; // outer square side
+    const PAD: f32 = 3.0; // square padding, all sides
+    const AREA: f32 = BADGE - 2.0 * PAD; // 44px icon area
+    const STEP: f32 = 3.0; // cascade step, right-down per icon
+    const MAX: usize = 5; // a full deck: 32px icons + 4 steps = 44
+    const COUNT: f32 = 18.0; // multi-drag count plate side
+    // the grabbed item first (front of the deck); draw deepest first so
+    // each next covers it — the front icon ends bottom-right-most, on top
+    let top = state.dnd.top();
+    let mut shown: Vec<&crate::dnd::DraggedItem> = items
+        .iter()
+        .filter(|i| Some(i.uri.as_str()) != top)
+        .take(MAX - 1)
+        .collect();
+    if let Some(t) = items.iter().find(|i| Some(i.uri.as_str()) == top) {
+        shown.insert(0, t);
+    } else {
+        // no recorded top: payload order, first on top
+        shown = items.iter().take(MAX).collect();
+    }
+    let n = shown.len();
+    // fewer than five icons: scale them up so the deck still fills the
+    // area (n = 5 lands on 32px exactly: 44 - 4*3)
+    let icon = AREA - (n as f32 - 1.0) * STEP;
+    let mut deck: iced::widget::Stack<Element<'static, Message>> = stack![];
+    for (j, it) in shown.iter().enumerate().rev() {
+        let off = (n - 1 - j) as f32 * STEP;
+        let name = crate::dnd::uri_to_path(&it.uri)
+            .and_then(|p| p.file_name().map(|f| f.to_string_lossy().into_owned()))
+            .unwrap_or_else(|| it.uri.clone());
+        deck = deck.push(
+            container(crate::icon::for_name_opacity(
+                it.kind == crate::dnd::ItemKind::Directory,
+                &name,
+                icon,
+                &skin,
+                FADE,
+            ))
+            .width(Length::Fixed(AREA))
+            .height(Length::Fixed(AREA))
+            // top+left only: [v, h] would pad all four sides and the
+            // largest offsets would squeeze the 32px icon below 32
+            .padding(iced::Padding {
+                top: off,
+                left: off,
+                ..Default::default()
+            })
+            .boxed(),
+        );
+    }
+    let mut badge: iced::widget::Stack<Element<'static, Message>> = stack![container(deck)
+        .width(Length::Fixed(BADGE))
+        .height(Length::Fixed(BADGE))
+        .padding(PAD)
+        .style(move |_t: &iced::Theme| container::Style {
+            background: Some(iced::Color { a: FADE, ..skin.accent }.into()),
+            ..Default::default()
+        })
+        .boxed()];
+    if items.len() > 1 {
+        // solid plate, bottom-left: the number of dragged files (solid
+        // on the faded badge — readable)
+        let total = items.len().to_string();
+        let plate = container(
+            iced::widget::text(total)
+                .size(11.0)
+                .color(iced::Color::WHITE)
+                .boxed(),
+        )
+        .width(Length::Fixed(COUNT))
+        .height(Length::Fixed(COUNT))
+        .align_x(iced::alignment::Horizontal::Center)
+        .align_y(iced::alignment::Vertical::Center)
+        .style(move |_t: &iced::Theme| container::Style {
+            background: Some(skin.accent.into()),
+            ..Default::default()
+        });
+        badge = badge.push(
+            container(plate)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(iced::alignment::Horizontal::Left)
+                .align_y(iced::alignment::Vertical::Bottom)
+                .boxed(),
+        );
+    }
+    // left-higher of the caption: the badge's bottom-right corner sits
+    // 19px above-left of the caption plate (the caption sits at DX/DY)
+    const DX: f32 = 16.0;
+    const DY: f32 = 20.0;
+    const GAP: f32 = 19.0;
+    Some(
+        container(badge)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(iced::Padding {
+                top: (state.cursor.y + DY - BADGE - GAP).max(0.0),
+                left: (state.cursor.x + DX - BADGE - GAP).max(0.0),
+                ..Default::default()
+            })
+            .boxed(),
+    )
+}
+
 pub fn view(state: &Explorer) -> Element<'_, Message> {
     UI_DEBUG.store(state.ui_debug, std::sync::atomic::Ordering::Relaxed);
     // border widths: constant physical size unless the theme says they
@@ -170,6 +354,13 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
                     .boxed(),
             );
         }
+        // drag icon badge + cursor caption above the content, below the menu
+        if let Some(el) = drag_icon_badge(state, skin) {
+            s = s.push(dbg("drag_icon_badge", el));
+        }
+        if let Some(el) = drag_caption(state, skin) {
+            s = s.push(dbg("drag_caption", el));
+        }
         // context menu above everything (SPEC/MENU_SPEC.MD): in-window
         // by default, overlay layer with menu.yaml layout.popup
         if let Some(open) = &state.menu {
@@ -182,14 +373,30 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
         }
         s.boxed()
     } else {
+        // drag cursor caption above the content, below the menu
         if let Some(open) = &state.menu {
             let el = if state.menu_cfg.layout.popup {
                 crate::menu::host(open, &state.menu_cfg, skin)
             } else {
                 crate::menu::layer(open, &state.menu_cfg, skin)
             };
-            return stack![framed, dbg("menu", el)].boxed();
+            let mut s: iced::widget::Stack<Element<'_, Message>> = stack![framed];
+            if let Some(b) = drag_icon_badge(state, skin) {
+                s = s.push(b);
+            }
+            if let Some(c) = drag_caption(state, skin) {
+                s = s.push(c);
+            }
+            return s.push(dbg("menu", el)).boxed();
         }
-        framed
+        let badge = drag_icon_badge(state, skin);
+        match (drag_caption(state, skin), badge) {
+            (Some(c), Some(b)) => {
+                stack![framed, dbg("drag_icon_badge", b), dbg("drag_caption", c)].boxed()
+            }
+            (Some(c), None) => stack![framed, dbg("drag_caption", c)].boxed(),
+            (None, Some(b)) => stack![framed, dbg("drag_icon_badge", b)].boxed(),
+            (None, None) => framed,
+        }
     }
 }

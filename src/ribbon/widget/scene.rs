@@ -9,11 +9,18 @@ use crate::ribbon::image::UiImage;
 
 use super::Target;
 
-/// Fill for a quad: solid color or vertical linear gradient.
+/// Fill for a quad: solid color or linear gradient.
 #[derive(Debug, Clone, Copy)]
 pub enum Fill {
     Color(Color),
+    /// Horizontal gradient: first color at the LEFT edge, second at the
+    /// RIGHT (rendered as iced `Linear::new(FRAC_PI_2)` — iced's
+    /// gradient angle is measured from the vertical, so FRAC_PI_2 runs
+    /// along the horizontal axis).
     Gradient(Color, Color),
+    /// Vertical gradient: first color at the TOP, second at the BOTTOM
+    /// (iced `Linear::new(PI)` — angle measured from the vertical).
+    GradientV(Color, Color),
 }
 
 impl Fill {
@@ -21,6 +28,7 @@ impl Fill {
         match self {
             Fill::Color(c) => c,
             Fill::Gradient(top, _) => top,
+            Fill::GradientV(top, _) => top,
         }
     }
 }

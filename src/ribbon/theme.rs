@@ -178,6 +178,9 @@ pub struct Theme {
     /// bottom hairline. When a contextual tab is active the widget draws
     /// this line in the contextual accent instead.
     pub tab_line: Color,
+    /// Lighter connected line drawn around a *hovered* tab (behind the
+    /// active tab's line). `None` skips it (Windows 10 underline style).
+    pub tab_hover_line: Option<Color>,
     /// Radius of the application-menu orb.
     pub orb_radius: f32,
 }
@@ -221,6 +224,7 @@ impl Theme {
             round_radius: 9.0,
             tab_style: TabStyle::Underline,
             tab_line: rgb(0xE1E1E1),
+            tab_hover_line: None,
             orb_radius: 11.0,
         }
     }
@@ -267,6 +271,7 @@ impl Theme {
             round_radius: 0.0,
             tab_style: TabStyle::Filled,
             tab_line: rgb(0xD0D0D0),
+            tab_hover_line: Some(tint(rgb(0xD0D0D0), 0.25)),
             orb_radius: 11.0,
         }
     }
@@ -307,6 +312,7 @@ impl Theme {
             round_radius: 9.0,
             tab_style: TabStyle::Filled,
             tab_line: rgb(0xC4C4C4),
+            tab_hover_line: Some(tint(rgb(0xC4C4C4), 0.25)),
             orb_radius: 11.0,
         }
     }

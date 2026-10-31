@@ -25,10 +25,10 @@ export CARGO_HOME=$(TMPROOT)/cargo
 export RUSTUP_HOME=$(TMPROOT)/rustup
 export PATH := $(TMPROOT)/cargo/bin:$(PATH)
 
-# Program icon source: libraries-48.png preferred, else the largest
-# libraries-*.png (glob order is size order)
+# Program icon source: 48/libraries.png preferred, else the largest
+# */libraries.png (glob order is size order)
 APP_ICON     := assets/app-icon.png
-APP_ICON_SRC := $(or $(wildcard assets/icons/libraries-48.png),$(lastword $(sort $(wildcard assets/icons/libraries-*.png))))
+APP_ICON_SRC := $(or $(wildcard assets/icons/48/libraries.png),$(lastword $(sort $(wildcard assets/icons/*/libraries.png))))
 
 .PHONY: all build check run test dist clean fmt size setup-toolchain bloat tree clippy clippy-json
 
@@ -49,7 +49,7 @@ all: build
 setup-env:
 	@ln -sf $(CARGO_TARGET_DIR) target
 	@mkdir -p $(CARGO_HOME) $(RUSTUP_HOME)
-	@# program icon: the proper assets/icons/libraries-*.png (48px
+	@# program icon: the proper assets/icons/*/libraries.png (48px
 	@# preferred, else the largest) is copied to the canonical name the
 	@# code embeds — the source never names a size-specific file
 	@cp $(APP_ICON_SRC) $(APP_ICON)
@@ -128,11 +128,16 @@ dist: build
 		kill "$${p##*/}" 2>/dev/null || true; \
 	done; \
 	sleep 0.3
-	cp $(CARGO_TARGET_DIR)/$(TARGET)/release/$(BIN) $(DIST)/$(BIN)
+	@# strip + upx rewrite the binary in place (several full passes),
+	@# so they run on a staging copy in the tmpfs — the SSD dist/ only
+	@# ever receives the finished artifact (one sequential write)
+	@mkdir -p $(CARGO_TARGET_DIR)/dist
+	cp $(CARGO_TARGET_DIR)/$(TARGET)/release/$(BIN) $(CARGO_TARGET_DIR)/dist/$(BIN)
 	@if [ "$(COMPRESS)" != "0" ]; then \
-		strip --strip-all $(DIST)/$(BIN) 2>/dev/null || true; \
-		./tools/upx $(DIST)/$(BIN) || true; \
+		strip --strip-all $(CARGO_TARGET_DIR)/dist/$(BIN) 2>/dev/null || true; \
+		./tools/upx $(CARGO_TARGET_DIR)/dist/$(BIN) || true; \
 	fi
+	cp $(CARGO_TARGET_DIR)/dist/$(BIN) $(DIST)/$(BIN)
 	@ls -l $(DIST)/$(BIN)
 	@file $(DIST)/$(BIN)
 

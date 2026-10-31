@@ -16,7 +16,8 @@ pub mod archive;
 mod gio_backend;
 pub mod model;
 
-pub use model::{Entry, EntryKind, FsError, Volume};
+pub(crate) use gio_backend::writable;
+pub use model::{Entry, EntryKind, FsError, Volume, IMAGE_EXTS, is_image_name};
 
 use iced::futures::channel::mpsc;
 use std::path::{Path, PathBuf};
