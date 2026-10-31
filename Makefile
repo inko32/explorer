@@ -9,6 +9,9 @@ SHELL := /bin/bash
 TMPROOT   ?= /tmp/zramfs_inkodaily/explorer-rs-build
 DIST      ?= $(CURDIR)/dist
 BIN       := explorer
+# COMPRESS=0 keeps the dist binary unstripped and uncompressed (for
+# size/symbol analysis); default applies strip + upx.
+COMPRESS  ?= 1
 
 
 TOOLCHAIN   ?= stable
@@ -27,7 +30,7 @@ export PATH := $(TMPROOT)/cargo/bin:$(PATH)
 APP_ICON     := assets/app-icon.png
 APP_ICON_SRC := $(or $(wildcard assets/icons/libraries-48.png),$(lastword $(sort $(wildcard assets/icons/libraries-*.png))))
 
-.PHONY: all build check run test dist clean fmt size setup-toolchain
+.PHONY: all build check run test dist clean fmt size setup-toolchain bloat tree clippy clippy-json
 
 
 all: build
@@ -75,6 +78,23 @@ setup-env:
 		[ $$n -le 3 ] || exit 1; \
 	fi
 
+# minimal profile excludes clippy; install the component on first use
+# (same on-demand pattern as the bloat target)
+define CLIPPY_ENSURE
+	@if ! rustup +$(TOOLCHAIN) component list --installed 2>/dev/null | grep -q '^clippy'; then \
+		echo "==> Adding component 'clippy' for $(TOOLCHAIN)..."; \
+		n=1; while [ $$n -le 3 ]; do \
+			if rustup +$(TOOLCHAIN) component add clippy; then \
+				break; \
+			fi; \
+			echo "==> Download failed, retrying ($$n/3)..."; \
+			n=$$((n + 1)); \
+			sleep 2; \
+		done; \
+		[ $$n -le 3 ] || exit 1; \
+	fi
+endef
+
 build: setup-env
 	cargo +$(TOOLCHAIN) build --release --target $(TARGET) $(if $(FEATURES),--features $(FEATURES),)
 
@@ -88,18 +108,19 @@ test: setup-env
 	cargo +$(TOOLCHAIN) test --target $(TARGET) $(if $(FEATURES),--features $(FEATURES),)
 
 clippy: setup-env
+	$(CLIPPY_ENSURE)
 	cargo +$(TOOLCHAIN) clippy --target $(TARGET) $(if $(FEATURES),--features $(FEATURES),)
 
 # machine-readable clippy (one JSON diagnostic per line) — for tooling
 # that sorts/filters the warning list.
 clippy-json: setup-env
-	cargo +$(TOOLCHAIN) clippy --target $(TARGET) --message-format=json $(if $(FEATURES),--features $(FEATURES),) 2>/dev/null | grep '"reason":"compiler-message"' > /tmp/clippy.jsonl
+	$(CLIPPY_ENSURE)
+	@# grep exits 1 on zero matches (clean run) — not an error here
+	-cargo +$(TOOLCHAIN) clippy --target $(TARGET) --message-format=json $(if $(FEATURES),--features $(FEATURES),) 2>/dev/null | grep '"reason":"compiler-message"' > /tmp/clippy.jsonl || true
 	@echo "wrote /tmp/clippy.jsonl"
 
 dist: build
 	@mkdir -p $(DIST)
-	-strip --strip-all $(CARGO_TARGET_DIR)/$(TARGET)/release/$(BIN) 2>/dev/null || true
-	-./tools/upx  $(CARGO_TARGET_DIR)/$(TARGET)/release/$(BIN) || true
 	@target="$$(realpath $(DIST)/$(BIN))"; \
 	for p in /proc/[0-9]*; do \
 		[ "$$(readlink "$$p/exe" 2>/dev/null)" = "$$target (deleted)" ] || \
@@ -108,11 +129,39 @@ dist: build
 	done; \
 	sleep 0.3
 	cp $(CARGO_TARGET_DIR)/$(TARGET)/release/$(BIN) $(DIST)/$(BIN)
+	@if [ "$(COMPRESS)" != "0" ]; then \
+		strip --strip-all $(DIST)/$(BIN) 2>/dev/null || true; \
+		./tools/upx $(DIST)/$(BIN) || true; \
+	fi
 	@ls -l $(DIST)/$(BIN)
 	@file $(DIST)/$(BIN)
 
 size: dist
 	@size $(DIST)/$(BIN) 2>/dev/null || true
+
+# Per-crate .text attribution of the release binary. Installs cargo-bloat
+# into the tmpfs CARGO_HOME on first use; touch forces a fresh link so the
+# analyzed binary is not the stale stripped one from an earlier 'dist'.
+bloat: setup-env
+	@if ! command -v cargo-bloat >/dev/null 2>&1; then \
+		echo "==> Installing cargo-bloat into $(CARGO_HOME)..."; \
+		n=1; while [ $$n -le 3 ]; do \
+			if cargo +$(TOOLCHAIN) install --locked cargo-bloat; then \
+				break; \
+			fi; \
+			echo "==> Install failed, retrying ($$n/3)..."; \
+			n=$$((n + 1)); \
+			sleep 2; \
+		done; \
+		[ $$n -le 3 ] || exit 1; \
+	fi
+	@find src -name '*.rs' -exec touch {} +
+	cargo +$(TOOLCHAIN) bloat --release --target $(TARGET) --crates $(if $(FEATURES),--features $(FEATURES),)
+
+# dependency graph inspection; pass args via ARGS, e.g.
+# make tree ARGS="-i exr"  (inverse: what pulls in exr)
+tree: setup-env
+	cargo +$(TOOLCHAIN) tree --target $(TARGET) $(if $(FEATURES),--features $(FEATURES),) $(ARGS)
 
 fmt: setup-env
 	cargo +$(TOOLCHAIN) fmt
