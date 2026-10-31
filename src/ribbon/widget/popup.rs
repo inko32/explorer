@@ -343,11 +343,15 @@ fn draw_menu_level_offset(
             image,
             if enabled { 1.0 } else { 0.35 },
         );
+        // the renderer clips labels to this rectangle, so the box must
+        // reach the panel's right padding (12px; submenu rows reserve
+        // the 16px arrow column) or the last glyph is covered
+        let right_pad = if has_sub || path.contains(&idx) { 26.0 } else { 12.0 };
         text(
             scene,
             Rectangle::new(
                 Point::new(origin.x + 30.0, y),
-                Size::new(w - 48.0, 25.0),
+                Size::new((w - 30.0 - right_pad).max(0.0), 25.0),
             ),
             ctx.label(cmd),
             ctx.fonts.ribbon.menu,
