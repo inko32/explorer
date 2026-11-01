@@ -168,6 +168,7 @@ impl Explorer {
             y: self.cursor.y,
             hover: None,
             nav_target: None,
+            bar: None,
         });
     }
 

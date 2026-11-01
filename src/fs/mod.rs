@@ -126,6 +126,9 @@ impl Backend for VfsBackend {
 #[derive(Debug)]
 pub enum Job {
     List(PathBuf),
+    /// List for an address-bar dropdown (breadcrumb subfolders) — the
+    /// result routes to the bar menu, not the folder view.
+    BarList(PathBuf),
     Volumes,
     Mkdir(PathBuf),
     Rename(PathBuf, PathBuf),
@@ -138,6 +141,8 @@ pub enum Job {
 #[derive(Debug, Clone)]
 pub enum FsEvent {
     Listed { path: PathBuf, result: Result<Vec<Entry>, String> },
+    /// Address-bar dropdown listing finished.
+    BarListed { path: PathBuf, result: Result<Vec<Entry>, String> },
     Volumes(Vec<Volume>),
     DirCreated { parent: PathBuf, result: Result<String, String> },
     Renamed { result: Result<(), String> },
@@ -186,6 +191,10 @@ fn worker(backend: impl Backend, jobs: std::sync::mpsc::Receiver<Job>, tx: Event
             Job::List(path) => {
                 let result = backend.list(&path).map_err(|e| e.to_string());
                 let _ = tx.unbounded_send(FsEvent::Listed { path, result });
+            }
+            Job::BarList(path) => {
+                let result = backend.list(&path).map_err(|e| e.to_string());
+                let _ = tx.unbounded_send(FsEvent::BarListed { path, result });
             }
             Job::Volumes => {
                 let _ = tx.unbounded_send(FsEvent::Volumes(backend.volumes()));

@@ -151,7 +151,7 @@ pub struct MetricsSpec {
 impl Default for MetricsSpec {
     fn default() -> Self {
         Self {
-            band_height: 32.0,
+            band_height: 36.0,
             tree_item_height: 22.0,
             tree_indention: 14.0,
             tree_font_scale: 0.75,

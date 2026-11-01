@@ -32,6 +32,44 @@ pub enum Message {
     NavSplitMove(f32),
     /// Hover state of the address/search splitter (drives tint + cursor).
     SplitterHover(bool),
+    /// Hover state of the back/forward history chevron (drives its
+    /// glyph color, #808080 -> #50ACFF; SPEC/Address_bar.md).
+    BackListHover(bool),
+    /// Hover state of the address bar's right-list button (shows its
+    /// left divider line only while hovered).
+    RightListHover(bool),
+    /// Breadcrumb member hover: a text element and its arrow are
+    /// tracked separately — hovering the arrow greys the text while
+    /// hovering the text lights both blue (SPEC/Address_bar.md). The
+    /// exit clears only when that same member is still hovered
+    /// (enter-before-exit event order between neighbors).
+    CrumbHoverEnter {
+        group: usize,
+        arrow: bool,
+    },
+    CrumbHoverExit {
+        group: usize,
+        arrow: bool,
+    },
+    /// A breadcrumb dropdown arrow was clicked (segment index; 0 = the
+    /// independent root arrow): list the subfolders on the fs worker
+    /// and open the dropdown.
+    CrumbArrow(usize),
+    /// The back/forward history chevron was clicked: open the history
+    /// dropdown.
+    HistoryMenu,
+    /// Clicked the free space of the address bar: enter address edit
+    /// mode (the breadcrumbs become an editable full path).
+    AddressEditStart,
+    /// Address edit buffer change.
+    AddressEditInput(String),
+    /// Enter in the address edit field: go there.
+    AddressEditSubmit,
+    /// Escape / click-away: discard the address edits.
+    CancelAddressEdit,
+    /// The address bar right-list was clicked: open the location
+    /// selector (the history, anchored below the address bar).
+    SelectorMenu,
     Navigate(PathBuf),
     /// Nav-pane row clicked: marks the nav pane as the active pane,
     /// then navigates (SPEC/Unfocused_Window.md §1).

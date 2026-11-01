@@ -62,6 +62,7 @@ light:
   sel_btn_border: "#62A2E4"
   nav_hover: "#E5F3FB"       # circular nav-button hover fill
   nav_hover_border: "#70C0E7"
+  nav_grey: "#D9D9D9"        # breadcrumb text fill while its arrow is hovered
   plate_hover: "#CBECFD"     # color-plate swatch hover fill
   plate_hover_border: "#64A5E7"
   search_btn_bg: "#E8F1FB"   # recessed search-box button fill
@@ -147,6 +148,7 @@ dark:
   sel_btn_border: "#5A89C0"
   nav_hover: "#3A4046"
   nav_hover_border: "#4A90D9"
+  nav_grey: "#4A4A4A"
   file_tab: "#1979CA"
   file_tab_hover: "#2B87D8"
   sel: "#2F5480"

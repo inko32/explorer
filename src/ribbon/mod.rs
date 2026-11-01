@@ -1074,7 +1074,7 @@ impl Ribbon {
                 spec.metrics.tree_indention,
                 spec.metrics.tree_font_scale,
             ),
-            Err(_) => (32.0, 22.0, 14.0, 0.7),
+            Err(_) => (36.0, 22.0, 14.0, 0.7),
         }
     }
 }
