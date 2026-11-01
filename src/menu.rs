@@ -388,6 +388,30 @@ pub struct Open {
     pub hover: Option<usize>,
     /// Nav-pane menu target (the row's path).
     pub nav_target: Option<PathBuf>,
+    /// Address-bar dropdown marker (history / subfolders / selector):
+    /// picks index straight into `paths`, bypassing the yaml command
+    /// dispatch below.
+    pub bar: Option<BarMenu>,
+}
+
+/// An address-bar dropdown (SPEC/Address_bar.md): which one is open,
+/// the folder whose children are listed (Subdirs) and the entry paths
+/// (parallel to `Open.entries`).
+#[derive(Clone, Debug)]
+pub struct BarMenu {
+    pub kind: BarMenuKind,
+    pub prefix: PathBuf,
+    pub paths: Vec<PathBuf>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BarMenuKind {
+    /// Back/forward history (the back_list chevron).
+    History,
+    /// Subfolders of a breadcrumb segment.
+    Subdirs,
+    /// Location selector (the address bar right-list).
+    Selector,
 }
 
 fn resolve(cfg: &MenuCfg, spec: &ItemSpec) -> Entry {

@@ -201,7 +201,12 @@ fn window_size() -> iced::Size {
 
 /// Global keyboard shortcuts (binding table). When an inline rename editor is
 /// open, only Escape reaches the app — everything else belongs to the editor.
-pub fn handle_key(event: iced::Event, renaming: bool, menu_open: bool) -> Option<Message> {
+pub fn handle_key(
+    event: iced::Event,
+    renaming: bool,
+    menu_open: bool,
+    address_editing: bool,
+) -> Option<Message> {
     use iced::keyboard::{key::Named, Event as KeyEvent, Key};
     let iced::Event::Keyboard(KeyEvent::KeyPressed { key, modifiers, .. }) = event else {
         return None;
@@ -211,6 +216,11 @@ pub fn handle_key(event: iced::Event, renaming: bool, menu_open: bool) -> Option
     }
     if renaming {
         return (key == Key::Named(Named::Escape)).then_some(Message::CancelRename);
+    }
+    // while the address field is focused the keystrokes belong to it;
+    // only Escape (discard) is handled globally
+    if address_editing {
+        return (key == Key::Named(Named::Escape)).then_some(Message::CancelAddressEdit);
     }
     // the Menu key (near AltGr) opens the context menu for the selection
     if key == Key::Named(Named::ContextMenu) {

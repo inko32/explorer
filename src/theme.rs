@@ -52,6 +52,9 @@ pub struct Palette {
     pub sel_btn_border: Color,
     pub nav_hover: Color,
     pub nav_hover_border: Color,
+    /// Breadcrumb text fill while its dropdown arrow is hovered
+    /// (SPEC/Address_bar.md: the pair shows grey text + blue arrow).
+    pub nav_grey: Color,
     pub plate_hover: Color,
     pub plate_hover_border: Color,
     pub search_btn_bg: Color,
@@ -299,6 +302,7 @@ struct PaletteDto {
     sel_btn_border: Hex,
     nav_hover: Hex,
     nav_hover_border: Hex,
+    nav_grey: Hex,
     plate_hover: Hex,
     plate_hover_border: Hex,
     search_btn_bg: Hex,
@@ -399,6 +403,7 @@ impl From<PaletteDto> for Palette {
             sel_btn_border: v.sel_btn_border.0,
             nav_hover: v.nav_hover.0,
             nav_hover_border: v.nav_hover_border.0,
+            nav_grey: v.nav_grey.0,
             plate_hover: v.plate_hover.0,
             plate_hover_border: v.plate_hover_border.0,
             search_btn_bg: v.search_btn_bg.0,

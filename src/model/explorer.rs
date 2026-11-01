@@ -18,6 +18,22 @@ pub(crate) const DOUBLE_CLICK_MS: u128 = 400;
 /// 1152px reference content width.
 const DEFAULT_SEARCH_SHARE: f32 = 180.0 / 1152.0;
 
+/// Runtime cap of the back/forward history stacks (the address-bar
+/// dropdown lists at most this many entries per side).
+const HISTORY_MAX: usize = 20;
+
+/// Widget id of the address edit field (focus/selection tasks).
+const ADDRESS_INPUT_ID: &str = "address-input";
+
+/// Push onto a history stack, dropping the oldest entry past
+/// [`HISTORY_MAX`].
+fn push_history(stack: &mut Vec<PathBuf>, p: PathBuf) {
+    stack.push(p);
+    if stack.len() > HISTORY_MAX {
+        stack.remove(0);
+    }
+}
+
 /// Narrowest the navigation pane can be dragged to (window-logical px).
 const MIN_NAV_W: f32 = 110.0;
 
@@ -73,6 +89,21 @@ pub struct Explorer {
     pub bar_split: bool,
     /// Pointer over the address/search splitter.
     pub splitter_hover: bool,
+    /// Pointer over the back/forward history chevron.
+    pub(crate) back_list_hover: bool,
+    /// Pointer over the address bar's right-list button (its left
+    /// divider line is visible only while hovered).
+    pub(crate) right_list_hover: bool,
+    /// Hovered breadcrumb member: `(segment index, is_arrow)`. The
+    /// text and its arrow are tracked separately — arrow hover greys
+    /// the text, text hover lights both (SPEC/Address_bar.md).
+    pub(crate) crumb_hover: Option<(usize, bool)>,
+    /// Breadcrumb segment whose subfolder listing is in flight (the
+    /// BarListed event with this path opens the dropdown).
+    bar_listing: Option<PathBuf>,
+    /// Address edit mode: `Some(buffer)` while the address bar shows an
+    /// editable full path (SPEC/Address_bar.md).
+    pub(crate) address_edit: Option<String>,
     pub maximized: bool,
     /// Ctrl held (drives Ctrl+scroll view zoom over the file view).
     pub ctrl_held: bool,
@@ -226,6 +257,11 @@ impl Explorer {
             search_share: DEFAULT_SEARCH_SHARE,
             bar_split: false,
             splitter_hover: false,
+            back_list_hover: false,
+            right_list_hover: false,
+            crumb_hover: None,
+            bar_listing: None,
+            address_edit: None,
             maximized: false,
             ctrl_held: false,
             shift_held: false,
@@ -373,13 +409,162 @@ impl Explorer {
         if path == self.cwd {
             return iced::Task::none();
         }
-        self.back.push(self.cwd.clone());
+        push_history(&mut self.back, self.cwd.clone());
         self.forward.clear();
         self.cwd = path;
         self.selected.clear();
         self.renaming = None;
         self.press = None;
         self.dnd.take(); // a navigation cancels any active drag
+        self.restore_folder_view();
+        self.request_listing();
+        self.nav_reveal_cwd()
+    }
+
+    /// Window-logical anchor for the address-bar dropdowns: the cursor
+    /// x, just below the navigation band (SPEC/Address_bar.md — the
+    /// selector shows "just below the address bar, not like a menu").
+    fn bar_anchor(&self) -> (f32, f32) {
+        let (ft, fr, _, fl) =
+            crate::border::frame_insets_pub(self.self_border, self.frame_style);
+        let title_h = if self.self_border {
+            crate::border::TITLEBAR_H
+        } else {
+            0.0
+        };
+        let content_w = self.win_w - fl - fr;
+        let mult = self.dpi_multiplier();
+        let (min_ribbon_w, _, _, _) = self.ribbon.sacrifice();
+        let ribbon_h = if content_w >= min_ribbon_w * mult {
+            crate::ribbon::widget::layout::ribbon_height(&self.ribbon.framework().view())
+        } else {
+            0.0
+        };
+        (self.cursor.x, ft + title_h + ribbon_h + self.ribbon.band_height())
+    }
+
+    /// The history dropdown (back_list chevron) and the location
+    /// selector (right_list): the back stack (most recent first), a
+    /// separator, then the forward stack (next first) — picks index
+    /// into `BarMenu.paths`.
+    fn history_menu(&mut self, kind: crate::menu::BarMenuKind) {
+        if self.back.is_empty() && self.forward.is_empty() {
+            self.status = "no history yet".into();
+            return;
+        }
+        let mut entries = Vec::new();
+        let mut paths = Vec::new();
+        for p in self.back.iter().rev() {
+            entries.push(crate::menu::Entry::Item(crate::menu::Item::plain(
+                "bar",
+                p.to_string_lossy().into_owned(),
+            )));
+            paths.push(p.clone());
+        }
+        // separator between the back and the forward sections (a dummy
+        // path keeps `paths` parallel to `entries` for the dispatch)
+        if !self.back.is_empty() && !self.forward.is_empty() {
+            entries.push(crate::menu::Entry::Sep);
+            paths.push(PathBuf::new());
+        }
+        for p in self.forward.iter().rev() {
+            entries.push(crate::menu::Entry::Item(crate::menu::Item::plain(
+                "bar",
+                p.to_string_lossy().into_owned(),
+            )));
+            paths.push(p.clone());
+        }
+        let (x, y) = self.bar_anchor();
+        self.menu = Some(crate::menu::Open {
+            entries,
+            x,
+            y,
+            hover: None,
+            nav_target: None,
+            bar: Some(crate::menu::BarMenu {
+                kind,
+                prefix: PathBuf::new(),
+                paths,
+            }),
+        });
+    }
+
+    /// The subfolder dropdown for a breadcrumb segment: one entry per
+    /// child directory (the listing ran off the UI thread in the
+    /// CrumbArrow task).
+    fn crumb_menu(&mut self, prefix: PathBuf, dirs: Vec<PathBuf>) {
+        if dirs.is_empty() {
+            self.status = format!("{} has no subfolders", prefix.display());
+            return;
+        }
+        let entries = dirs
+            .iter()
+            .map(|p| {
+                crate::menu::Entry::Item(crate::menu::Item::plain(
+                    "bar",
+                    p.file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| p.display().to_string()),
+                ))
+            })
+            .collect();
+        let (x, y) = self.bar_anchor();
+        self.menu = Some(crate::menu::Open {
+            entries,
+            x,
+            y,
+            hover: None,
+            nav_target: None,
+            bar: Some(crate::menu::BarMenu {
+                kind: crate::menu::BarMenuKind::Subdirs,
+                prefix,
+                paths: dirs,
+            }),
+        });
+    }
+
+    /// History-dropdown pick: jump to the entry while preserving the
+    /// chronology around it (unlike a plain navigate, which truncates
+    /// the forward stack). `navigate_to` only swaps `cwd` + reloads.
+    pub(crate) fn history_nav(&mut self, target: PathBuf) -> iced::Task<Message> {
+        if let Some(pos) = self.back.iter().rposition(|p| p == &target) {
+            // rewind: the current folder and the entries newer than the
+            // target become the forward stack, in chronology order —
+            // existing forward below, then cwd, then the re-forwarded
+            // entries on top (the forward pop order reads them first)
+            self.forward.push(self.cwd.clone());
+            while self.back.len() > pos + 1 {
+                let p = self.back.pop().expect("len checked above");
+                self.forward.push(p);
+            }
+            let p = self.back.pop().expect("pos checked above");
+            return self.navigate_to(p);
+        }
+        if let Some(pos) = self.forward.iter().rposition(|p| p == &target) {
+            // entries chronologically after the target are dropped;
+            // the cursor and the in-between entries join the back stack
+            self.back.push(self.cwd.clone());
+            for j in (pos + 1..self.forward.len()).rev() {
+                let p = self.forward.remove(j);
+                self.back.push(p);
+            }
+            let p = self.forward.remove(pos);
+            return self.navigate_to(p);
+        }
+        self.navigate(target)
+    }
+
+    /// `navigate` without touching the history stacks (the stacks were
+    /// already rearranged by `history_nav`).
+    fn navigate_to(&mut self, path: PathBuf) -> iced::Task<Message> {
+        if path == self.cwd {
+            return iced::Task::none();
+        }
+        self.cwd = path;
+        self.selected.clear();
+        self.renaming = None;
+        self.press = None;
+        self.dnd.take();
         self.restore_folder_view();
         self.request_listing();
         self.nav_reveal_cwd()
@@ -489,6 +674,29 @@ impl Explorer {
 
     fn handle_fs_event(&mut self, ev: FsEvent) {
         match ev {
+            FsEvent::BarListed { path, result } => {
+                // only the listing the bar is waiting for opens a menu
+                if self.bar_listing.take().as_deref() != Some(path.as_path()) {
+                    return;
+                }
+                if let Ok(entries) = &result {
+                    self.nav.store(&path, entries, self.show_hidden);
+                    let show_hidden = self.show_hidden;
+                    let mut dirs: Vec<PathBuf> = entries
+                        .iter()
+                        .filter(|e| e.is_dir() && (show_hidden || !e.is_hidden))
+                        .map(|e| e.path.clone())
+                        .collect();
+                    dirs.sort_by_key(|p| {
+                        p.file_name()
+                            .map(|n| n.to_string_lossy().to_lowercase())
+                            .unwrap_or_default()
+                    });
+                    self.crumb_menu(path, dirs);
+                } else if let Err(e) = &result {
+                    self.status = e.clone();
+                }
+            }
             FsEvent::Listed { path, result } => {
                 // every listing also feeds the nav tree cache (folders/archives only)
                 if let Ok(entries) = &result {
@@ -650,7 +858,7 @@ impl Explorer {
             Message::Navigate(p) => self.navigate(p),
             Message::Back => {
                 if let Some(p) = self.back.pop() {
-                    self.forward.push(self.cwd.clone());
+                    push_history(&mut self.forward, self.cwd.clone());
                     self.cwd = p;
                     self.selected.clear();
                     self.renaming = None;
@@ -661,7 +869,7 @@ impl Explorer {
             }
             Message::Forward => {
                 if let Some(p) = self.forward.pop() {
-                    self.back.push(self.cwd.clone());
+                    push_history(&mut self.back, self.cwd.clone());
                     self.cwd = p;
                     self.selected.clear();
                     self.renaming = None;
@@ -906,6 +1114,7 @@ impl Explorer {
                     y: self.cursor.y,
                     hover: None,
                     nav_target: None,
+                    bar: None,
                 });
                 iced::Task::none()
             }
@@ -922,6 +1131,7 @@ impl Explorer {
                     y: self.cursor.y,
                     hover: None,
                     nav_target: Some(path),
+                    bar: None,
                 });
                 iced::Task::none()
             }
@@ -1342,8 +1552,25 @@ impl Explorer {
                     }
                     return iced::Task::none();
                 }
-                if let Some(m) = crate::handle_key(e, self.renaming.is_some(), self.menu.is_some())
+                // address edit mode: a press outside the address bar
+                // discards the edits (a press on the bar keeps them)
+                if self.address_edit.is_some()
+                    && matches!(
+                        e,
+                        iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
+                            iced::mouse::Button::Left
+                        ))
+                    )
+                    && !crate::navigation::bar_rect(self).contains(self.cursor)
                 {
+                    self.address_edit = None;
+                }
+                if let Some(m) = crate::handle_key(
+                    e,
+                    self.renaming.is_some(),
+                    self.menu.is_some(),
+                    self.address_edit.is_some(),
+                ) {
                     return self.update(m);
                 }
                 iced::Task::none()
@@ -1364,15 +1591,89 @@ impl Explorer {
                 self.splitter_hover = h;
                 iced::Task::none()
             }
+            Message::BackListHover(h) => {
+                self.back_list_hover = h;
+                iced::Task::none()
+            }
+            Message::RightListHover(h) => {
+                self.right_list_hover = h;
+                iced::Task::none()
+            }
+            Message::CrumbHoverEnter { group, arrow } => {
+                if self.crumb_hover != Some((group, arrow)) {
+                    self.crumb_hover = Some((group, arrow));
+                }
+                iced::Task::none()
+            }
+            Message::CrumbHoverExit { group, arrow } => {
+                // moving into the neighboring member fires its enter
+                // first; only clear when this member is still hovered
+                if self.crumb_hover == Some((group, arrow)) {
+                    self.crumb_hover = None;
+                }
+                iced::Task::none()
+            }
+            Message::CrumbArrow(i) => {
+                // list the segment's subfolders on the fs worker (VFS:
+                // archives list like folders), then open the dropdown
+                // (the BarListed event)
+                let prefix = crate::navigation::prefix_of(&self.cwd, i);
+                self.bar_listing = Some(prefix.clone());
+                self.sched.send(Job::BarList(prefix));
+                iced::Task::none()
+            }
+            Message::HistoryMenu => {
+                self.history_menu(crate::menu::BarMenuKind::History);
+                iced::Task::none()
+            }
+            Message::SelectorMenu => {
+                // in edit mode the selector drops down while the edits
+                // stay alive (the border blue goes with the open menu)
+                self.history_menu(crate::menu::BarMenuKind::Selector);
+                iced::Task::none()
+            }
+            Message::AddressEditStart => {
+                if self.address_edit.is_none() {
+                    self.address_edit = Some(self.cwd.to_string_lossy().into_owned());
+                    let id = iced::widget::Id::new(ADDRESS_INPUT_ID);
+                    return iced::Task::batch([
+                        iced::widget::operation::focus(id.clone()),
+                        iced::widget::operation::text_input::select_all(id),
+                    ]);
+                }
+                iced::Task::none()
+            }
+            Message::AddressEditInput(s) => {
+                if let Some(buf) = &mut self.address_edit {
+                    *buf = s;
+                }
+                iced::Task::none()
+            }
+            Message::AddressEditSubmit => {
+                if let Some(buf) = self.address_edit.take() {
+                    let t = buf.trim();
+                    if !t.is_empty() {
+                        let p = PathBuf::from(t);
+                        // relative input resolves against the cwd
+                        let p = if p.is_absolute() { p } else { self.cwd.join(p) };
+                        return self.navigate(p);
+                    }
+                }
+                iced::Task::none()
+            }
+            Message::CancelAddressEdit => {
+                self.address_edit = None;
+                iced::Task::none()
+            }
             Message::BarSplitMove(x) => {
                 let (_, fr, _, fl) =
                     crate::border::frame_insets_pub(self.self_border, self.frame_style);
                 let content_w = (self.win_w - fl - fr).max(320.0);
-                // search right edge sits at content_w - 6 (band padding); the
-                // splitter center is 4px left of the search left edge (half
-                // the 4px splitter + 2px row spacing) -> offset 6 + 4 = 10
+                // search right edge sits at content_w - 12 (band padding);
+                // the splitter (12px) hugs the search left edge, so its
+                // center is 6px left of it -> offset 12 + 6 = 18
                 let search_w =
-                    (content_w - (x - fl) - 10.0).clamp(120.0, (content_w - 280.0).max(120.0));
+                    (content_w - (x - fl) - 18.0).clamp(120.0, (content_w - 280.0).max(120.0));
                 self.search_share = (search_w / content_w).clamp(0.08, 0.6);
                 iced::Task::none()
             }
@@ -1438,5 +1739,71 @@ impl Explorer {
                 iced::Task::none()
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod history_tests {
+    use super::*;
+
+    /// Navigate without caring about the returned task (tests only
+    /// assert the stack/cwd bookkeeping).
+    fn nav(e: &mut Explorer, p: &str) {
+        let _ = e.navigate(PathBuf::from(p));
+    }
+
+    #[test]
+    fn history_pick_rewinds_and_replays_chronology() {
+        let mut e = Explorer::new();
+        e.cwd = PathBuf::from("/a");
+        nav(&mut e, "/b");
+        nav(&mut e, "/c");
+        nav(&mut e, "/d");
+        // back=[/a,/b,/c], cwd=/d, forward=[]
+        let _ = e.history_nav(PathBuf::from("/b"));
+        assert_eq!(e.cwd, PathBuf::from("/b"));
+        assert_eq!(e.back, vec![PathBuf::from("/a")]);
+        // forward: pop -> /c, then /d (chronology /b -> /c -> /d)
+        assert_eq!(e.forward, vec![PathBuf::from("/d"), PathBuf::from("/c")]);
+
+        // picking a forward entry replays through the in-between ones
+        let _ = e.history_nav(PathBuf::from("/d"));
+        assert_eq!(e.cwd, PathBuf::from("/d"));
+        assert_eq!(
+            e.back,
+            vec![
+                PathBuf::from("/a"),
+                PathBuf::from("/b"),
+                PathBuf::from("/c")
+            ]
+        );
+        assert!(e.forward.is_empty());
+    }
+
+    #[test]
+    fn history_pick_forward_keeps_later_entries() {
+        let mut e = Explorer::new();
+        e.cwd = PathBuf::from("/a");
+        nav(&mut e, "/b");
+        nav(&mut e, "/c");
+        // chronology /a -> /b -> /c; go back once: cwd=/b, forward=[/c]
+        let _ = e.update(Message::Back);
+        // pick the next entry itself: no-op-ish, stacks unchanged
+        let _ = e.history_nav(PathBuf::from("/c"));
+        assert_eq!(e.cwd, PathBuf::from("/c"));
+        assert_eq!(e.back, vec![PathBuf::from("/a"), PathBuf::from("/b")]);
+        assert!(e.forward.is_empty());
+    }
+
+    #[test]
+    fn history_stack_capped() {
+        let mut stack = Vec::new();
+        for i in 0..25 {
+            push_history(&mut stack, PathBuf::from(format!("/p{i}")));
+        }
+        assert_eq!(stack.len(), HISTORY_MAX);
+        // the oldest five fell off
+        assert_eq!(stack.first(), Some(&PathBuf::from("/p5")));
+        assert_eq!(stack.last(), Some(&PathBuf::from("/p24")));
     }
 }

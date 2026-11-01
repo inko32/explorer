@@ -288,7 +288,8 @@ sacrifice:
 
 # UI metrics (explorer extension)
 metrics:
-  band_height: 32
+  # nav band: 6px top + 24px buttons + 6px bottom (SPEC/Address_bar.md)
+  band_height: 36
   tree_item_height: 22
   tree_indention: 8
   tree_font_scale: 0.75  # icon(16px) x scale = 12px nav labels

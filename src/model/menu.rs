@@ -52,6 +52,7 @@ impl Explorer {
             y,
             hover: None,
             nav_target: None,
+            bar: None,
         });
     }
 
@@ -67,6 +68,28 @@ impl Explorer {
         let pending = self.pending_drop.take();
         // the menu is closing: the nav context mark goes with it
         self.nav_selected = None;
+        // address-bar dropdowns (history / subfolders / selector): the
+        // pick goes straight to the entry paths — no yaml command lookup
+        if let Some(bar) = &open.bar {
+            let item = matches!(open.entries.get(idx), Some(crate::menu::Entry::Item(_)));
+            let path = bar
+                .paths
+                .get(idx)
+                .cloned()
+                .filter(|p| !p.as_os_str().is_empty());
+            // a bar-menu pick ends address edit mode (clicks on the
+            // dropdown entries give up the modifications)
+            self.address_edit = None;
+            if let (true, Some(path)) = (item, path) {
+                return match bar.kind {
+                    crate::menu::BarMenuKind::Subdirs => self.navigate(path),
+                    crate::menu::BarMenuKind::History | crate::menu::BarMenuKind::Selector => {
+                        self.history_nav(path)
+                    }
+                };
+            }
+            return iced::Task::none();
+        }
         let Some(crate::menu::Entry::Item(item)) = open.entries.get(idx).cloned() else {
             return iced::Task::none();
         };
