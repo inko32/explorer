@@ -83,8 +83,9 @@ pub enum Message {
     /// hovered one (event order: moving up, the new row's enter
     /// arrives before the old row's exit).
     HoverExit(usize),
-    /// Navigation tree row hover (same guarded-exit pattern).
-    NavHover(Option<PathBuf>),
+    /// Navigation tree row hover (same guarded-exit pattern); the bool
+    /// tags a Favorites shortcut row (see nav_pane HOVER_TINTS_SAME_PATH).
+    NavHover(Option<(PathBuf, bool)>),
     NavHoverExit(PathBuf),
     /// Rubber-band selection drag on empty folder-view space (content
     /// coordinates; the folder.rs MarqueeZone wrapper publishes these).
