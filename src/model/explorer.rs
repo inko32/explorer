@@ -141,6 +141,12 @@ pub struct Explorer {
     pub(crate) folder_views: std::collections::HashMap<PathBuf, u8>,
     /// §8.1 Details compact mode (24px rows); compact is the default.
     pub details_compact: bool,
+    /// §8.3 icon-top: estimated wrapped label line count per entry
+    /// (1..=cap), driving the dynamic row heights. Depends only on the
+    /// names and the step's cell width, so it is refreshed when the
+    /// entries (or their order) or the view step change — not on pane
+    /// resizes.
+    pub it_label_lines: Vec<u8>,
     /// Details column widths (Date modified / Type / Size); the Name
     /// column takes the remaining width. Adjustable via header handles.
     pub details_cols: [f32; 3],
@@ -280,6 +286,7 @@ impl Explorer {
             zoom_step_at: None,
             folder_views: Default::default(),
             details_compact: true,
+            it_label_lines: Vec::new(),
             details_cols,
             col_drag: None,
             sort: SortBy::Name,
@@ -635,6 +642,7 @@ impl Explorer {
             with_strip,
             self.viewport_h,
             longest,
+            &self.it_label_lines,
             self.details_compact,
         );
         let viewport_axis = if cfg.family(self.view_index) == crate::view_step::Family::List {
@@ -664,6 +672,39 @@ impl Explorer {
                 SortBy::Modified => a.modified.cmp(&b.modified),
             }
         });
+        // the cache is indexed by position — reordering invalidates it
+        self.refresh_it_label_lines();
+    }
+
+    /// (Re)compute the cached icon-top label line counts for the
+    /// current entries and view step (empty for other families).
+    pub(crate) fn refresh_it_label_lines(&mut self) {
+        self.it_label_lines = self.estimate_it_label_lines(self.view_index);
+    }
+
+    /// Label line counts for a step index, uncached.
+    fn estimate_it_label_lines(&self, index: u8) -> Vec<u8> {
+        if self.view_cfg.family(index) != crate::view_step::Family::IconTop {
+            return Vec::new();
+        }
+        let m = self.view_cfg.icon_top(self.view_cfg.icon_px(index));
+        let label_w = (m.cell_w - self.view_cfg.icon_top.label_pad).max(1.0);
+        let font = self.view_cfg.style.font_size;
+        self.entries
+            .iter()
+            .map(|e| crate::ui_common::wrap_line_count(&e.name, label_w, font).min(m.lines as usize) as u8)
+            .collect()
+    }
+
+    /// Label line counts for any step index: the cache when it matches
+    /// the current one, otherwise a fresh estimate (used for the OLD
+    /// layout while §9 view-switch anchoring).
+    pub(crate) fn it_lines_for(&self, index: u8) -> Vec<u8> {
+        if index == self.view_index {
+            self.it_label_lines.clone()
+        } else {
+            self.estimate_it_label_lines(index)
+        }
     }
 
     pub(crate) fn selected_paths(&self) -> Vec<PathBuf> {
