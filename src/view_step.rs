@@ -277,6 +277,9 @@ pub struct ListCfg {
     pub col_w_min: f32,
     /// ListMaxColW.
     pub col_w_max: f32,
+    /// Name unit budget (ASCII = 1, non-ASCII = 2); over-budget names
+    /// are tail-cut with "...". The full name is shown otherwise.
+    pub name_max_units: usize,
     pub pad_h: f32,
     pub pad_w: f32,
 }
@@ -292,6 +295,7 @@ impl Default for ListCfg {
             per_char: 7.2,
             col_w_min: 48.0,
             col_w_max: 240.0,
+            name_max_units: 100,
             pad_h: 0.0,
             pad_w: 4.0,
         }
@@ -357,8 +361,6 @@ pub struct IconTopCfg {
     pub label_line_h: f32,
     /// Horizontal breathing room for the elided label.
     pub label_pad: f32,
-    /// px per label character (elide estimate).
-    pub per_char: f32,
 }
 
 impl Default for IconTopCfg {
@@ -378,7 +380,6 @@ impl Default for IconTopCfg {
             label_lines_large: 3,
             label_line_h: 20.0,
             label_pad: 8.0,
-            per_char: 6.5,
         }
     }
 }
@@ -431,7 +432,24 @@ pub struct IconTopMetrics {
     pub cell_h: f32,
     pub pad: f32,
     pub gap: f32,
+    /// Label line cap for this step (configured 2/3, never above 4).
     pub lines: f32,
+}
+
+/// §8.3 icon-top grid with dynamic row heights: the row pitch follows
+/// the tallest label in the row, while each item's chrome (border /
+/// hover / selection area) is only as tall as its own label needs
+/// (icon + 1..=cap lines). Built from the per-entry label line counts
+/// (see `Explorer::refresh_it_label_lines`).
+pub struct IconTopRows {
+    /// grid columns at the pane width
+    pub cols: usize,
+    /// y offset of each grid row (prefix sums of the row pitches)
+    pub starts: Vec<f32>,
+    /// total content height (drives the scrollbar extent)
+    pub extent: f32,
+    /// chrome height of each item: pad + s + gap + lines*label_line_h + pad
+    pub item_h: Vec<f32>,
 }
 
 impl ViewCfg {
@@ -595,17 +613,55 @@ impl ViewCfg {
         let c = &self.icon_top;
         let pad = (c.pad_factor * s).floor().max(c.pad_min);
         let gap = (c.gap_factor * s).floor().max(c.gap_min);
-        let lines = if s >= c.label_lines_switch {
+        // a file name never wraps to more than 4 lines
+        let lines = (if s >= c.label_lines_switch {
             c.label_lines_large
         } else {
             c.label_lines_small
-        } as f32;
+        } as f32)
+            .min(4.0);
         IconTopMetrics {
             cell_w: (s + 2.0 * pad).max(c.w_min),
             cell_h: pad + s + gap + lines * c.label_line_h + pad,
             pad,
             gap,
             lines,
+        }
+    }
+
+    /// §8.3 dynamic row heights from the per-entry label line counts
+    /// (one per entry, 1..=cap; shorter/defensive input is truncated).
+    pub fn icon_top_rows(
+        &self,
+        index: u8,
+        n_items: usize,
+        pane_w: f32,
+        label_lines: &[u8],
+    ) -> IconTopRows {
+        let s = self.icon_px(index);
+        let m = self.icon_top(s);
+        let c = &self.icon_top;
+        let n = n_items.min(label_lines.len());
+        let cols = grid_cols(m.cell_w, m.gap, pane_w);
+        let item_h: Vec<f32> = label_lines[..n]
+            .iter()
+            .map(|&l| m.pad + s + m.gap + (l as f32).max(1.0) * c.label_line_h + m.pad)
+            .collect();
+        let mut starts = Vec::with_capacity(n.div_ceil(cols));
+        let mut y = 0.0f32;
+        for r in 0..n.div_ceil(cols) {
+            starts.push(y);
+            let row_max = item_h[r * cols..((r + 1) * cols).min(n)]
+                .iter()
+                .copied()
+                .fold(0.0f32, f32::max);
+            y += row_max + m.gap;
+        }
+        IconTopRows {
+            cols,
+            starts,
+            extent: y,
+            item_h,
         }
     }
 
@@ -624,6 +680,11 @@ impl ViewCfg {
     /// Content extent along the scroll axis (px; y, or x for List) —
     /// drives the scrollbar strip geometry and its collapse rule (the
     /// strip goes away when the content fits the viewport).
+    /// `label_lines` are the §8.3 per-entry label line counts (only
+    /// read for the icon-top family; pass an empty slice otherwise).
+    // metric inputs are independent; the callers (folder view, pane
+    // width probe) own them
+    #[allow(clippy::too_many_arguments)]
     pub fn content_extent(
         &self,
         index: u8,
@@ -631,6 +692,7 @@ impl ViewCfg {
         pane_w: f32,
         viewport_h: f32,
         longest_chars: usize,
+        label_lines: &[u8],
         details_compact: bool,
     ) -> f32 {
         let l = &self.layouts;
@@ -651,8 +713,7 @@ impl ViewCfg {
                 n_items.div_ceil(grid_cols(m.cell_w, m.gap, pane_w)) as f32 * (m.cell_h + m.gap)
             }
             Family::IconTop => {
-                let m = self.icon_top(self.icon_px(index));
-                n_items.div_ceil(grid_cols(m.cell_w, m.gap, pane_w)) as f32 * (m.cell_h + m.gap)
+                self.icon_top_rows(index, n_items, pane_w, label_lines).extent
             }
         }
     }
@@ -669,6 +730,7 @@ impl ViewCfg {
         viewport_h: f32,
         n_items: usize,
         longest_chars: usize,
+        label_lines: &[u8],
         details_compact: bool,
     ) -> usize {
         let l = &self.layouts;
@@ -693,9 +755,14 @@ impl ViewCfg {
                     * grid_cols(m.cell_w, m.gap, pane_w)
             }
             Family::IconTop => {
-                let m = self.icon_top(self.icon_px(index));
-                (offset / (m.cell_h + m.gap)).floor() as usize
-                    * grid_cols(m.cell_w, m.gap, pane_w)
+                let rows = self.icon_top_rows(index, n_items, pane_w, label_lines);
+                // last row whose start is at or above the offset
+                let r = rows
+                    .starts
+                    .partition_point(|&y| y <= offset)
+                    .saturating_sub(1)
+                    .min(rows.starts.len().saturating_sub(1));
+                r * rows.cols
             }
         };
         item.min(n_items.saturating_sub(1))
@@ -703,6 +770,8 @@ impl ViewCfg {
 
     /// §9 scroll anchor: the leading-edge offset of an item in the given
     /// layout (y, or x for List).
+    // metric inputs are independent; the caller (scroll anchor) owns them
+    #[allow(clippy::too_many_arguments)]
     pub fn item_offset(
         &self,
         index: u8,
@@ -710,6 +779,7 @@ impl ViewCfg {
         pane_w: f32,
         viewport_h: f32,
         longest_chars: usize,
+        label_lines: &[u8],
         details_compact: bool,
     ) -> f32 {
         let l = &self.layouts;
@@ -730,8 +800,9 @@ impl ViewCfg {
                 (item / grid_cols(m.cell_w, m.gap, pane_w)) as f32 * (m.cell_h + m.gap)
             }
             Family::IconTop => {
-                let m = self.icon_top(self.icon_px(index));
-                (item / grid_cols(m.cell_w, m.gap, pane_w)) as f32 * (m.cell_h + m.gap)
+                let rows = self.icon_top_rows(index, item + 1, pane_w, label_lines);
+                let r = (item / rows.cols).min(rows.starts.len().saturating_sub(1));
+                rows.starts.get(r).copied().unwrap_or(rows.extent)
             }
         }
     }
@@ -818,6 +889,31 @@ mod tests {
     }
 
     #[test]
+    fn icon_top_rows_follow_the_tallest_label() {
+        // §8.3 dynamic row heights: 4 items, 2 columns; item 2 wraps
+        // to 3 lines while the rest stay at 1
+        let cfg = ViewCfg::default();
+        let s = cfg.icon_px(cfg.presets.medium);
+        let m = cfg.icon_top(s);
+        let one = m.pad + s + m.gap + cfg.icon_top.label_line_h + m.pad;
+        let lines = [1u8, 1, 3, 1];
+        // a width that fits exactly 2 columns
+        let w = 2.0 * (m.cell_w + m.gap) - m.gap;
+        let rows = cfg.icon_top_rows(cfg.presets.medium, 4, w, &lines);
+        assert_eq!(rows.cols, 2);
+        // row 0: both 1 line; row 1: tallest is 3 lines
+        assert_eq!(rows.starts[0], 0.0);
+        assert_eq!(rows.starts[1], one + m.gap);
+        assert_eq!(
+            rows.extent,
+            2.0 * (one + m.gap) + 2.0 * cfg.icon_top.label_line_h
+        );
+        // each item's chrome is only as tall as its own label
+        assert_eq!(rows.item_h[0], one);
+        assert_eq!(rows.item_h[2], one + 2.0 * cfg.icon_top.label_line_h);
+    }
+
+    #[test]
     fn shipped_yaml_matches_the_defaults() {
         // assets/folder-view.yaml documents the defaults — it must parse
         // to exactly them, or the file and the code disagree
@@ -828,6 +924,7 @@ mod tests {
         assert_eq!(yaml.steps(), 48);
         assert_eq!(yaml.layouts.content.row_h, d.layouts.content.row_h);
         assert_eq!(yaml.layouts.details.col_widths, d.layouts.details.col_widths);
+        assert_eq!(yaml.layouts.list.name_max_units, d.layouts.list.name_max_units);
         assert_eq!(yaml.icon_top.label_lines_switch, d.icon_top.label_lines_switch);
         assert_eq!(yaml.input.notch_delta, d.input.notch_delta);
     }

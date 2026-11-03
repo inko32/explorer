@@ -87,6 +87,7 @@ layouts:
     per_char: 7.2           # px per name character
     col_w_min: 48.0
     col_w_max: 240.0        # ListMaxColW
+    name_max_units: 100    # name budget (ASCII=1, non-ASCII=2 units); over → tail "..."
     pad_h: 0.0
     pad_w: 4.0
 
@@ -115,10 +116,13 @@ icon_top:
   gap_min: 4.0
   label_lines_small: 2      # LabelLines: below label_lines_switch…
   label_lines_switch: 96.0  # …at or above this icon size…
-  label_lines_large: 3      # …this many label lines
+  label_lines_large: 3      # …this many label lines (capped at 4)
+                           # the name wraps to at most 4 lines; the tail
+                           # is cut to "..." when it would not fit
   label_line_h: 20.0
   label_pad: 8.0            # horizontal breathing room for the elided label
-  per_char: 6.5             # px per label character (elide estimate)
+                           # (the cut estimate weights per-char glyph
+                           # widths instead of a flat px/char average)
 
 # §8.4 common styling
 style:

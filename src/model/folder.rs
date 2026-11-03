@@ -18,6 +18,7 @@ impl Explorer {
         self.view_index = self
             .view_cfg
             .nearest_enabled(stored.unwrap_or(self.view_cfg.presets.details));
+        self.refresh_it_label_lines();
         self.zoom_acc = 0.0;
         self.zoom_step_at = None;
         self.scroll_x = 0.0;
@@ -36,6 +37,7 @@ impl Explorer {
         let old = self.view_index;
         let old_compact = self.details_compact;
         self.view_index = index;
+        self.refresh_it_label_lines();
         self.folder_views.insert(self.cwd.clone(), index);
         self.anchor_view(old, old_compact)
     }
@@ -57,6 +59,10 @@ impl Explorer {
         } else {
             self.scroll_y
         };
+        // §8.3 icon-top row heights are dynamic: the OLD layout's label
+        // line counts are recomputed on the fly (the cache matches the
+        // current index only)
+        let old_lines = self.it_lines_for(old_index);
         let item = cfg.first_visible(
             old_index,
             old_offset,
@@ -64,6 +70,7 @@ impl Explorer {
             self.viewport_h,
             n,
             longest,
+            &old_lines,
             old_compact,
         );
         let within = old_offset
@@ -73,6 +80,7 @@ impl Explorer {
                 pane_w,
                 self.viewport_h,
                 longest,
+                &old_lines,
                 old_compact,
             );
         let index = self.view_index;
@@ -82,6 +90,7 @@ impl Explorer {
             pane_w,
             self.viewport_h,
             longest,
+            &self.it_label_lines,
             self.details_compact,
         ) + within)
             .max(0.0);
@@ -306,13 +315,22 @@ impl Explorer {
                 )
             }
             vs::Family::IconTop => {
+                // §8.3 dynamic row heights: y comes from the per-row
+                // prefix sums; the height is this item's own chrome
                 let m = cfg.icon_top(s);
-                let cols = vs::grid_cols(m.cell_w, m.gap, pane_w);
+                let rows = cfg.icon_top_rows(
+                    self.view_index,
+                    self.entries.len(),
+                    pane_w,
+                    &self.it_label_lines,
+                );
+                let col = i % rows.cols;
+                let row = i / rows.cols;
                 (
-                    (i % cols) as f32 * (m.cell_w + m.gap),
-                    (i / cols) as f32 * (m.cell_h + m.gap),
+                    col as f32 * (m.cell_w + m.gap),
+                    rows.starts[row],
                     m.cell_w,
-                    m.cell_h,
+                    rows.item_h.get(i).copied().unwrap_or(m.cell_h),
                 )
             }
         }
@@ -320,15 +338,39 @@ impl Explorer {
 
     /// Rubber-band: select every item whose cell intersects the marquee.
     pub(crate) fn marquee_update(&mut self) {
+        use crate::view_step as vs;
         let Some(m) = &self.marquee else { return };
         let (x0, x1) = (m.x0.min(m.x1), m.x0.max(m.x1));
         let (y0, y1) = (m.y0.min(m.y1), m.y0.max(m.y1));
         let pane_w = self.file_pane_width();
         let mut hits = m.base.clone();
-        for i in 0..self.entries.len() {
-            let (ix, iy, iw, ih) = self.item_rect(i, pane_w);
-            if ix < x1 && ix + iw > x0 && iy < y1 && iy + ih > y0 {
-                hits.insert(i);
+        if self.view_cfg.family(self.view_index) == vs::Family::IconTop {
+            // §8.3 dynamic row heights: one geometry pass, then direct
+            // per-item math (item_rect would rebuild the prefix sums
+            // for every item)
+            let s = self.view_cfg.icon_px(self.view_index);
+            let m = self.view_cfg.icon_top(s);
+            let rows = self.view_cfg.icon_top_rows(
+                self.view_index,
+                self.entries.len(),
+                pane_w,
+                &self.it_label_lines,
+            );
+            for i in 0..self.entries.len() {
+                let ix = (i % rows.cols) as f32 * (m.cell_w + m.gap);
+                let iy = rows.starts[i / rows.cols];
+                let iw = m.cell_w;
+                let ih = rows.item_h.get(i).copied().unwrap_or(m.cell_h);
+                if ix < x1 && ix + iw > x0 && iy < y1 && iy + ih > y0 {
+                    hits.insert(i);
+                }
+            }
+        } else {
+            for i in 0..self.entries.len() {
+                let (ix, iy, iw, ih) = self.item_rect(i, pane_w);
+                if ix < x1 && ix + iw > x0 && iy < y1 && iy + ih > y0 {
+                    hits.insert(i);
+                }
             }
         }
         if hits != self.selected {

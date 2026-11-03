@@ -11,7 +11,7 @@ use iced::{Color, Element, Length, Rectangle, Size, Vector, mouse};
 
 use crate::fs::{self, Entry};
 use crate::model::{self, Explorer, Message};
-use crate::ui_common::{bg, elide, skin};
+use crate::ui_common::{bg, elide, elide_end, skin, truncate_units, wrap_elide};
 use crate::view_step as vs;
 
 pub(crate) fn file_scrollable_id() -> iced::widget::Id {
@@ -511,7 +511,8 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
     };
     let viewport_axis = if family == vs::Family::List { width } else { state.viewport_h };
     let content = cfg.content_extent(
-        state.view_index, total, w_with_strip, state.viewport_h, longest, state.details_compact,
+        state.view_index, total, w_with_strip, state.viewport_h, longest, &state.it_label_lines,
+        state.details_compact,
     );
     let need_strip = !state.loading && content > viewport_axis;
     let strip_w = if need_strip && family != vs::Family::List {
@@ -532,8 +533,10 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
             m.cell_h + m.gap
         }
         vs::Family::IconTop => {
+            // dynamic row heights: the strip arrows step one 1-line row
             let m = cfg.icon_top(s);
-            m.cell_h + m.gap
+            let c = &cfg.icon_top;
+            m.pad + s + m.gap + c.label_line_h + m.pad + m.gap
         }
     };
     let body: Element<Message> = if state.loading {
@@ -557,7 +560,7 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
                 // scrollable's top strip (the content reserves that
                 // strip with a spacer) and the strip sits beside both.
                 stack![
-                    details_view(state, skin),
+                    details_view(state, skin, inner_w),
                     container(details_header(state, skin)).width(Length::Fill),
                 ]
                 .boxed()
@@ -570,10 +573,8 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
                 })
             }
             vs::Family::IconTop => {
-                let m = cfg.icon_top(s);
-                grid_view(state, inner_w, m.cell_w, m.cell_h, m.gap, |i, e| {
-                    icon_top_cell(i, e, state, skin, s, &m)
-                })
+                let rows = cfg.icon_top_rows(state.view_index, total, inner_w, &state.it_label_lines);
+                icon_top_grid_view(state, skin, s, &rows)
             }
         }
     };
@@ -782,7 +783,7 @@ fn content_row<'a>(
     let text_w = (width - c.icon - c.icon_text_gap - 2.0 * c.pad_w - 8.0).max(60.0);
     let date = e.modified.map(model::format_date).unwrap_or_default();
     let lines = column![
-        text(elide(&e.name, text_w, 7.5))
+        text(elide_end(&e.name, text_w, 7.5))
             .size(c.name_size)
             .font(semibold)
             .color(skin.text)
@@ -839,7 +840,7 @@ fn tile_cell<'a>(i: usize, e: &Entry, state: &'a Explorer, skin: skin::Skin) -> 
     let content = row![
         crate::icon::for_entry(e, t.icon, &skin),
         column![
-            text(elide(&e.name, text_w, 7.5)).size(t.name_size).font(semibold).color(skin.text),
+            text(elide_end(&e.name, text_w, 7.5)).size(t.name_size).font(semibold).color(skin.text),
             text(elide(model::type_label(e), text_w, 6.6)).size(t.prop_size).color(skin.subtle),
             text(item_size(e)).size(t.prop_size).color(skin.subtle),
         ]
@@ -861,7 +862,7 @@ fn tile_cell<'a>(i: usize, e: &Entry, state: &'a Explorer, skin: skin::Skin) -> 
 // ---------------------------------------------------------------------------
 // index 2 — Details (§8.1)
 
-fn details_view(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
+fn details_view(state: &Explorer, skin: skin::Skin, width: f32) -> Element<'_, Message> {
     let d = &state.view_cfg.layouts.details;
     let row_h = state.view_cfg.details_row_h(state.details_compact);
     // rows are spaced by the effective gap (row_h → pitch); the gap is
@@ -881,7 +882,7 @@ fn details_view(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     }
     for i in first..last {
         if let Some(e) = state.entries.get(i) {
-            rows = rows.push(file_row(i, e, state, skin));
+            rows = rows.push(file_row(i, e, state, skin, width));
         }
     }
     if last < total {
@@ -890,11 +891,21 @@ fn details_view(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     file_scrollable(rows).boxed()
 }
 
-fn file_row<'a>(i: usize, e: &Entry, state: &'a Explorer, skin: skin::Skin) -> Element<'a, Message> {
+fn file_row<'a>(
+    i: usize,
+    e: &Entry,
+    state: &'a Explorer,
+    skin: skin::Skin,
+    width: f32,
+) -> Element<'a, Message> {
     let d = &state.view_cfg.layouts.details;
     let font = state.view_cfg.style.font_size;
     let row_h = state.view_cfg.details_row_h(state.details_compact);
     let [date_w, type_w, size_w] = state.details_cols;
+    // the Name column is the elastic one: pane width minus the icon
+    // slot, the fixed columns and the cell padding; an overlong name
+    // is tail-cut with "..." (3 chars reserved)
+    let name_w = (width - d.icon_cell_w - date_w - type_w - size_w - 2.0 * d.cell_padding_h).max(0.0);
     let name_cell: Element<Message> = if state.renaming.as_ref().map(|(ri, _)| *ri) == Some(i) {
         // text_input borrows the value — borrow the state's buffer ('a);
         // the submit payload owns a clone
@@ -906,7 +917,7 @@ fn file_row<'a>(i: usize, e: &Entry, state: &'a Explorer, skin: skin::Skin) -> E
             .padding(2)
             .boxed()
     } else {
-        text(e.name.clone()).size(font).color(skin.text).boxed()
+        text(elide_end(&e.name, name_w, 7.2)).size(font).color(skin.text).boxed()
     };
 
     let content = row![
@@ -984,7 +995,10 @@ fn list_view(state: &Explorer, skin: skin::Skin, width: f32) -> Element<'_, Mess
         .boxed()
 }
 
-/// §8.1 List cell: icon + name, 1 line, truncated with ellipsis.
+/// §8.1 List cell: icon + name on 1 line. The full name is shown (the
+/// pane scrolls horizontally); only names over the unit budget
+/// (name_max_units, non-ASCII = 2) are tail-cut with "...". The cell
+/// clips at the column edge.
 fn list_cell<'a>(
     i: usize,
     e: &Entry,
@@ -995,9 +1009,10 @@ fn list_cell<'a>(
     let l = &state.view_cfg.layouts.list;
     let content = row![
         crate::icon::for_entry(e, l.icon, &skin),
-        text(elide(&e.name, col_w - l.col_w_base, l.per_char))
+        text(truncate_units(&e.name, l.name_max_units))
             .size(state.view_cfg.style.font_size)
-            .color(skin.text),
+            .color(skin.text)
+            .wrapping(iced::widget::text::Wrapping::None),
     ]
     .spacing(l.icon_text_gap)
     .padding([l.pad_h, l.pad_w])
@@ -1007,7 +1022,8 @@ fn list_cell<'a>(
         container(content)
             .width(Length::Fixed(col_w))
             .height(Length::Fixed(l.row_h))
-            .align_y(iced::alignment::Vertical::Center),
+            .align_y(iced::alignment::Vertical::Center)
+            .clip(true),
         state,
         skin,
     )
@@ -1026,7 +1042,7 @@ fn small_icon_cell<'a>(
 ) -> Element<'a, Message> {
     let content = row![
         crate::icon::for_entry(e, s, &skin),
-        text(elide(&e.name, m.label_w, 7.2))
+        text(elide_end(&e.name, m.label_w, 7.2))
             .size(state.view_cfg.style.font_size)
             .color(skin.text)
             .width(Length::Fixed(m.label_w)),
@@ -1047,6 +1063,58 @@ fn small_icon_cell<'a>(
 // ---------------------------------------------------------------------------
 // indices 15..=47 — IconTop (§8.3): icon box centered, name below.
 
+/// §8.3 icon-top grid with dynamic row heights: the row pitch follows
+/// the tallest label in the row; each item's chrome (border / hover /
+/// selection area) is only as tall as its own label needs.
+fn icon_top_grid_view<'a>(
+    state: &'a Explorer,
+    skin: skin::Skin,
+    s: f32,
+    rows: &vs::IconTopRows,
+) -> Element<'a, Message> {
+    let m = state.view_cfg.icon_top(s);
+    let total_rows = rows.starts.len();
+    if total_rows == 0 {
+        return file_scrollable(column![]).boxed();
+    }
+    // first row whose start is at or above the scroll offset
+    let first = rows
+        .starts
+        .partition_point(|&y| y <= state.scroll_y)
+        .saturating_sub(1);
+    // rows intersecting the viewport, one row of overscan at the edge
+    let mut last = (first + 1).min(total_rows);
+    while last < total_rows && rows.starts[last] < state.scroll_y + state.viewport_h {
+        last += 1;
+    }
+    last = (last + 1).min(total_rows);
+    let mut grid = column![].spacing(0);
+    if first > 0 {
+        grid = grid.push(vspacer(rows.starts[first]).boxed());
+    }
+    for r in first..last {
+        let mut line = row![].spacing(m.gap);
+        for c in 0..rows.cols {
+            let idx = r * rows.cols + c;
+            if let Some(e) = state.entries.get(idx) {
+                line = line.push(icon_top_cell(idx, e, state, skin, s, &m));
+            } else {
+                line = line.push(Space::new().width(Length::Fixed(m.cell_w)).boxed());
+            }
+        }
+        let pitch = if r + 1 < total_rows {
+            rows.starts[r + 1] - rows.starts[r]
+        } else {
+            rows.extent - rows.starts[r]
+        };
+        grid = grid.push(container(line).height(Length::Fixed(pitch)).boxed());
+    }
+    if last < total_rows {
+        grid = grid.push(vspacer(rows.extent - rows.starts[last]).boxed());
+    }
+    file_scrollable(grid).boxed()
+}
+
 fn icon_top_cell<'a>(
     i: usize,
     e: &Entry,
@@ -1055,35 +1123,48 @@ fn icon_top_cell<'a>(
     s: f32,
     m: &vs::IconTopMetrics,
 ) -> Element<'a, Message> {
-    // §8.3: the full name is shown when the item is selected; otherwise
-    // the label wraps at word boundaries over `lines` lines with an
-    // ellipsis on the last line (approximated by a pre-elide).
+    // §8.3: the label is identical in every item state (hover /
+    // selected): it wraps across the full cell width — filling the
+    // selection rectangle — and only when the wrap exceeds the line
+    // cap is the last line tail-cut to "..." (line-aware cut, per-char
+    // em widths). The wrap is unconditional: a word longer than the
+    // label breaks mid-word instead of overflowing. The chrome height
+    // follows this item's own label line count (dynamic row heights);
+    // only the icon keeps the cell padding.
     let c = &state.view_cfg.icon_top;
-    let label = if state.selected.contains(&i) {
-        e.name.clone()
-    } else {
-        elide(&e.name, (m.cell_w - c.label_pad) * m.lines, c.per_char)
-    };
+    let own = state.it_label_lines.get(i).copied().unwrap_or(1).max(1) as f32;
+    let label = wrap_elide(
+        &e.name,
+        m.cell_w - c.label_pad,
+        m.lines as usize,
+        state.view_cfg.style.font_size,
+    );
     let content = column![
         container(crate::icon::for_entry(e, s, &skin))
             .width(Length::Fill)
-            .align_x(iced::alignment::Horizontal::Center),
+            .align_x(iced::alignment::Horizontal::Center)
+            .padding([0.0, m.pad]),
         container(
             text(label)
                 .size(state.view_cfg.style.font_size)
                 .color(skin.text)
                 .width(Length::Fill)
-                .align_x(iced::alignment::Horizontal::Center),
+                .align_x(iced::alignment::Horizontal::Center)
+                .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
         )
-        .height(Length::Fixed(m.lines * c.label_line_h)),
+        .width(Length::Fill)
+        .height(Length::Fixed(own * c.label_line_h))
+        .clip(true),
     ]
     .spacing(m.gap);
+    // chrome = pad + icon + gap + own label lines + pad
+    let item_h = m.pad + s + m.gap + own * c.label_line_h + m.pad;
     item_chrome(
         i,
         container(content)
             .width(Length::Fixed(m.cell_w))
-            .height(Length::Fixed(m.cell_h))
-            .padding(m.pad),
+            .height(Length::Fixed(item_h))
+            .padding([m.pad, 0.0]),
         state,
         skin,
     )
