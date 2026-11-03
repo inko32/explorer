@@ -53,8 +53,10 @@ pub struct Explorer {
     pub entries: Vec<fs::Entry>,
     pub selected: std::collections::BTreeSet<usize>,
     pub hovered: Option<usize>,
-    /// Hovered navigation tree row.
-    pub nav_hover: Option<PathBuf>,
+    /// Hovered navigation tree row: the path plus a tag that is true
+    /// when the hovered row is a Favorites shortcut (nav_pane uses it
+    /// to tint only that row when HOVER_TINTS_SAME_PATH is off).
+    pub nav_hover: Option<(PathBuf, bool)>,
     /// Nav row highlighted for the open context menu (right-click
     /// selection) — the file-view selection is left untouched.
     pub(crate) nav_selected: Option<PathBuf>,
@@ -964,7 +966,7 @@ impl Explorer {
                 iced::Task::none()
             }
             Message::NavHoverExit(p) => {
-                if self.menu.is_none() && self.nav_hover.as_ref() == Some(&p) {
+                if self.menu.is_none() && self.nav_hover.as_ref().is_some_and(|(h, _)| h == &p) {
                     self.nav_hover = None;
                 }
                 iced::Task::none()

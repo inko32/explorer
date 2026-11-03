@@ -326,7 +326,7 @@ fn hover_frozen_while_menu_open() {
     // hover events pass through the menu to the items behind: ignored
     ex.update(Message::Hover(Some(5)));
     assert_eq!(ex.hovered, None, "file hover frozen while the menu is open");
-    ex.update(Message::NavHover(Some(PathBuf::from("/x"))));
+    ex.update(Message::NavHover(Some((PathBuf::from("/x"), false))));
     assert_eq!(ex.nav_hover, None, "nav hover frozen too");
     ex.update(Message::CloseMenu);
     ex.update(Message::Hover(Some(7)));

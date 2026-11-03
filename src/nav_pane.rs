@@ -26,6 +26,23 @@ pub(crate) fn nav_scrollable_id() -> iced::widget::Id {
 }
 use crate::ui_common::{bg, icon, skin};
 
+/// Hover behavior of the nav tree: hovering a row tints every row that
+/// points to the same path — e.g. hovering Favorites/Downloads also
+/// tints the Computer/home/inko/Downloads node (and vice versa).
+/// Windows Explorer tints only the row under the cursor; set this to
+/// `false` to mimic Windows.
+const HOVER_TINTS_SAME_PATH: bool = false;
+
+/// Whether the row `path` (a Favorites shortcut row when `fav_row`, a
+/// tree row otherwise) shows the hover tint for the current
+/// `nav_hover` — the pair records the hovered path and which kind of
+/// row it was, so the tint can be limited to that row when
+/// HOVER_TINTS_SAME_PATH is off.
+fn hover_matches(hover: Option<&(PathBuf, bool)>, path: &Path, fav_row: bool) -> bool {
+    let Some((h, fav_src)) = hover else { return false };
+    h == path && (HOVER_TINTS_SAME_PATH || *fav_src == fav_row)
+}
+
 /// Nav-tree metrics derived from the ribbon markup: the row height drives
 /// the icon, chevron and text sizes; the indention doubles as the chevron
 /// slot width, so a child icon aligns under its parent's label.
@@ -138,6 +155,7 @@ fn tree_item(
     targeted: bool, // drag & drop: the row is the current drop target
     state: &Explorer, // activity model: focus, active pane, popup
     navigate: Option<PathBuf>,
+    fav_shortcut: bool, // the row is a Favorites shortcut (hover source tag)
     m: NavMetrics,
     skin: skin::Skin,
 ) -> Element<'static, Message> {
@@ -213,7 +231,7 @@ fn tree_item(
             mouse_area(item)
                 .on_press(Message::NavPress(p.clone()))
                 .on_right_press(Message::ContextNav(p.clone()))
-                .on_enter(Message::NavHover(Some(p.clone())))
+                .on_enter(Message::NavHover(Some((p.clone(), fav_shortcut))))
                 .on_exit(Message::NavHoverExit(p))
                 .interaction(iced::mouse::Interaction::Pointer)
                 .boxed()
@@ -278,7 +296,7 @@ fn push_tree_node<'a>(
     // the cwd node is always marked; a right-clicked row is marked too
     // while its context menu is open (nav_selected)
     let selected = state.cwd == path || state.nav_selected.as_deref() == Some(path);
-    let hovered = state.nav_hover.as_deref() == Some(path);
+    let hovered = hover_matches(state.nav_hover.as_ref(), path, false);
     let targeted = state.drop_targeted(path);
     let mut list = list.push(tree_item(
         row_w,
@@ -291,6 +309,7 @@ fn push_tree_node<'a>(
         targeted,
         state,
         Some(path.to_path_buf()),
+        false,
         m,
         skin,
     ));
@@ -459,9 +478,9 @@ pub(crate) fn nav_pane(state: &Explorer, skin: skin::Skin, width: f32) -> Elemen
             // shortcuts never show the cwd state; a right-clicked row
             // shows the context-menu mark like the tree does
             let selected = target.is_some() && target == state.nav_selected;
-            let hovered = target.is_some() && target == state.nav_hover;
+            let hovered = target.as_ref().is_some_and(|t| hover_matches(state.nav_hover.as_ref(), t, true));
             let targeted = target.as_ref().is_some_and(|t| state.drop_targeted(t));
-            list = list.push(tree_item(row_w, label, icon_name, 1, None, selected, hovered, targeted, state, target, m, skin));
+            list = list.push(tree_item(row_w, label, icon_name, 1, None, selected, hovered, targeted, state, target, true, m, skin));
         }
     }
 
@@ -474,10 +493,11 @@ pub(crate) fn nav_pane(state: &Explorer, skin: skin::Skin, width: f32) -> Elemen
         0,
         Some(root_open),
         state.cwd == Path::new("/") || state.nav_selected.as_deref() == Some(Path::new("/")),
-        state.nav_hover.as_deref() == Some(Path::new("/")),
+        hover_matches(state.nav_hover.as_ref(), Path::new("/"), false),
         state.drop_targeted(Path::new("/")),
         state,
         Some(PathBuf::from("/")),
+        false,
         m,
         skin,
     ));
@@ -512,6 +532,7 @@ pub(crate) fn nav_pane(state: &Explorer, skin: skin::Skin, width: f32) -> Elemen
             false,
             state,
             None,
+            false,
             m,
             skin,
         ));
