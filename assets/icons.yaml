@@ -4,17 +4,30 @@
 # "Breeze icons" toggle switches between `explorer` and the system
 # theme at runtime.
 #
-# themes.explorer — the embedded pack (assets/icons/, breeze-style
-#   layout: <size>/<name>.png + index.theme). `file:` names a PNG
-#   (nearest size variant >= the request wins); `svg: builtin` uses a
-#   skin-colored SVG template (one file per icon in assets/svgs/).
-# themes.breeze — the system icon theme (freedesktop lookup, e.g.
-#   /usr/share/icons/breeze with its Inherits chain). `icon:` maps an
-#   internal name to an icon-theme name; `file:`/`svg:` work here too.
+# Entry kinds (a pack entry is exactly one of):
+#   file: <name>   raster asset of the pack (embedded PNG, breeze-style
+#                  <size>/<name>.png under assets/icons/; nearest size
+#                  variant >= the request wins). The kind stays open to
+#                  other raster formats.
+#   svg: builtin   skin-colored SVG template, one file per icon in
+#                  assets/svgs/ ({fg} {bg} {subtle} {folder}
+#                  {folder_edge} {hover} {title} tokens). Templates may
+#                  keep design colors literal. The value slot is
+#                  reserved for future per-icon asset paths, so any SVG
+#                  file can join the pack without a format change.
+#   icon: <name>   freedesktop icon-theme name for a SYSTEM pack
+#                  (freedesktop lookup, e.g. /usr/share/icons/breeze
+#                  with its Inherits chain); resolves to whatever the
+#                  theme ships — SVG or PNG.
 #
 # NO FALLBACK between packs: the active pack stands alone. An icon the
 # pack cannot produce (no entry, theme lookup miss, missing asset)
 # renders as a solid circle — extend the pack's map explicitly instead.
+#
+# The explorer pack list is grouped: UI icons first (ribbon commands,
+# status bar, favorites/nav pane, window chrome — these are the
+# "special" non-mime icons), then the item/mime icons (to be refined
+# later). Keep the groups when adding entries.
 #
 # A user file at ~/.config/explorer/icons.yaml overrides `theme:` and
 # any entry (same shape; `theme:` may also name a system theme
@@ -25,149 +38,178 @@ theme: explorer
 themes:
   explorer:
     icons:
-      # items
-      folder:       { file: folder }
-      file:         { file: file }
-      file_image:   { file: file_image }
-      text:         { file: text }
-      zip:          { file: zip }
-      audio:        { file: audio }
-      video:        { file: video }
-      exe:          { file: exe }
-      disc:         { file: disc }
-      png:          { file: png }
-      archive:      { file: zip }
-      libraries:    { file: libraries }
-      computer:     { file: computer }
-      star:         { file: star }
-      # ribbon
-      paste:        { file: paste }
-      cut:          { file: cut }
-      copy:         { file: copy }
-      copy_path:    { svg: builtin }
+      # === UI icons (non-mime) =====================================
+      # --- ribbon command icons: every `image:` name of ribbon.yaml
+      # Clipboard
+      paste:          { file: paste }
+      cut:            { file: cut }
+      copy:           { file: copy }
+      copy_path:      { svg: builtin }
       paste_shortcut: { file: paste_shortcut }
-      move_to:      { file: move_to }
-      copy_to:      { file: copy_to }
-      delete:       { file: delete }
-      rename:       { svg: builtin }
-      undo:         { svg: builtin }
-      nav_pane:     { svg: builtin }
-      preview_pane: { svg: builtin }
-      details_pane: { svg: builtin }
-      sort_by:      { svg: builtin }
-      redo:         { svg: builtin }
-      new_folder:   { file: folder_new }
-      new_item:     { file: new_item }
-      easy_access:  { file: easy_access }
-      properties:   { file: properties }
-      open:         { svg: builtin }
-      edit:         { file: edit }
-      history:      { file: history }
-      select_all:   { file: select_all }
-      select_none:  { file: select_none }
-      invert_sel:   { file: invert_sel }
-      view_details: { file: view_details }
-      view_large:   { file: view_large }
-      view_list:    { file: view_list }
-      view_tiles:   { file: view_tiles }
-      share:        { file: share }
-      email:        { file: email }
-      gear:         { svg: builtin }
-      # nav/window placeholders (SVG until extracted)
-      home:         { svg: builtin }
-      desktop:      { svg: builtin }
-      documents:    { svg: builtin }
-      downloads:    { svg: builtin }
-      pictures:     { svg: builtin }
-      music:        { svg: builtin }
-      videos:       { svg: builtin }
-      recent:       { svg: builtin }
-      network:      { svg: builtin }
-      drive:        { svg: builtin }
-      back:         { svg: builtin }
-      forward:      { svg: builtin }
-      up:           { svg: builtin }
-      refresh:      { svg: builtin }
-      search:       { svg: builtin }
-      chevron_down: { svg: builtin }
-      chevron_right: { svg: builtin }
-      help:         { svg: builtin }
+      paste_special:  { svg: builtin }
+      move_to:        { file: move_to }
+      copy_to:        { file: copy_to }
+      delete:         { file: delete }
+      rename:         { svg: builtin }
+      # Organize
+      undo:           { svg: builtin }
+      redo:           { svg: builtin }
+      new_folder:     { file: folder_new }
+      new_item:       { file: new_item }
+      new:            { svg: builtin }
+      easy_access:    { file: easy_access }
+      properties:     { file: properties }
+      open:           { svg: builtin }
+      edit:           { file: edit }
+      history:        { file: history }
+      # Select
+      select_all:     { file: select_all }
+      select_none:    { file: select_none }
+      invert_sel:     { file: invert_sel }
+      # Share / find
+      share:          { file: share }
+      email:          { file: email }
+      pin:            { svg: builtin }
+      find:           { svg: builtin }
+      # View
+      view_details:   { file: view_details }
+      view_large:     { file: view_large }
+      view_list:      { file: view_list }
+      view_tiles:     { file: view_tiles }
+      sort_by:        { svg: builtin }
+      nav_pane:       { svg: builtin }
+      preview_pane:   { svg: builtin }
+      details_pane:   { svg: builtin }
+      # System
+      save:           { svg: builtin }
+      print:          { svg: builtin }
+      terminal:       { svg: builtin }
+      extract:        { svg: builtin }
+      exit:           { svg: builtin }
+      gear:           { svg: builtin }
+      # --- status bar: the view-mode buttons (also the ribbon View
+      # tab — view_details / view_large are shared, listed above)
+      # --- favorites / nav pane: favorites() entries + section
+      # header (star) and the This PC tree
+      home:           { svg: builtin }
+      desktop:        { svg: builtin }
+      documents:      { svg: builtin }
+      downloads:      { svg: builtin }
+      pictures:       { svg: builtin }
+      music:          { svg: builtin }
+      videos:         { svg: builtin }
+      recent:         { svg: builtin }
+      star:           { file: star }
+      computer:       { file: computer }
+      libraries:      { file: libraries }
+      network:        { svg: builtin }
+      drive:          { svg: builtin }
+      # --- window / navigation chrome (title bar, address bar)
+      back:           { svg: builtin }
+      forward:        { svg: builtin }
+      up:             { svg: builtin }
+      refresh:        { svg: builtin }
+      search:         { svg: builtin }
+      chevron_down:   { svg: builtin }
+      chevron_right:  { svg: builtin }
+      help:           { svg: builtin }
       # window caption buttons (_ [] X) are hard-coded window chrome in
       # src/border.rs (the D14 exception), not pack icons; `close` stays
       # in the pack for general UI use (e.g. the ribbon's Close search)
-      close:        { svg: builtin }
+      close:          { svg: builtin }
+
+      # === items (mime) — refined later ============================
+      folder:         { file: folder }
+      file:           { file: file }
+      file_image:     { file: file_image }
+      text:           { file: text }
+      zip:            { file: zip }
+      archive:        { file: zip }
+      audio:          { file: audio }
+      video:          { file: video }
+      exe:            { file: exe }
+      disc:           { file: disc }
+      png:            { file: png }
 
   # freedesktop names as shipped by /usr/share/icons/breeze — verified
   # against the theme; unmapped internal names fall back to explorer.
   breeze:
     icons:
-      # items
-      folder:       { icon: folder }
-      file:         { icon: unknown }
-      file_image:   { icon: image-x-generic }
-      text:         { icon: text-x-generic }
-      zip:          { icon: package-x-generic }
-      archive:      { icon: package-x-generic }
-      audio:        { icon: audio-x-generic }
-      video:        { icon: video-x-generic }
-      exe:          { icon: application-x-executable }
-      disc:         { icon: media-optical }
-      png:          { icon: image-png }
-      libraries:    { icon: folder-documents }
-      computer:     { icon: computer }
-      star:         { icon: favorites }
-      # ribbon
-      paste:        { icon: edit-paste }
-      cut:          { icon: edit-cut }
-      copy:         { icon: edit-copy }
-      copy_path:    { icon: edit-copy-path }
+      # ribbon command icons
+      paste:          { icon: edit-paste }
+      cut:            { icon: edit-cut }
+      copy:           { icon: edit-copy }
+      copy_path:      { icon: edit-copy-path }
       paste_shortcut: { icon: edit-link }
-      move_to:      { icon: edit-move }
-      copy_to:      { icon: edit-copy }
-      delete:       { icon: edit-delete }
-      rename:       { icon: edit-rename }
-      undo:         { icon: edit-undo }
-      redo:         { icon: edit-redo }
-      new_folder:   { icon: folder-new }
-      new_item:     { icon: document-new }
-      properties:   { icon: document-properties }
-      open:         { icon: document-open }
-      edit:         { icon: document-edit }
-      history:      { icon: document-open-recent }
-      select_all:   { icon: edit-select-all }
-      select_none:  { icon: edit-select-none }
-      invert_sel:   { icon: edit-select-invert }
-      view_details: { icon: view-list-details }
-      view_large:   { icon: view-preview }
-      view_list:    { icon: view-list-text }
-      view_tiles:   { icon: view-grid }
-      share:        { icon: document-share }
-      email:        { icon: mail-send }
-      gear:         { icon: configure }
-      preview_pane: { icon: fileview-preview }
-      details_pane: { icon: view-list-details }
-      sort_by:      { icon: view-sort-ascending }
-      # no breeze equivalent — keep the skin-colored templates (explicit,
-      # not a fallback)
-      nav_pane:     { svg: builtin }
-      easy_access:  { svg: builtin }
-      # nav/window
-      home:         { icon: user-home }
-      desktop:      { icon: user-desktop }
-      documents:    { icon: folder-documents }
-      downloads:    { icon: folder-download }
-      pictures:     { icon: folder-pictures }
-      music:        { icon: folder-music }
-      videos:       { icon: folder-videos }
-      recent:       { icon: document-open-recent }
-      network:      { icon: network-workgroup }
-      drive:        { icon: drive-harddisk }
-      back:         { icon: go-previous }
-      forward:      { icon: go-next }
-      up:           { icon: go-up }
-      refresh:      { icon: view-refresh }
-      search:       { icon: system-search }
-      chevron_down: { icon: go-down }
-      chevron_right: { icon: go-next }
-      help:         { icon: help-contents }
-      close:        { icon: window-close }
+      paste_special:  { svg: builtin }      # no freedesktop equivalent
+      move_to:        { icon: edit-move }
+      copy_to:        { icon: edit-copy }
+      delete:         { icon: edit-delete }
+      rename:         { icon: edit-rename }
+      undo:           { icon: edit-undo }
+      redo:           { icon: edit-redo }
+      new_folder:     { icon: folder-new }
+      new_item:       { icon: document-new }
+      new:            { icon: document-new }
+      easy_access:    { svg: builtin }      # no freedesktop equivalent
+      properties:     { icon: document-properties }
+      open:           { icon: document-open }
+      edit:           { icon: document-edit }
+      history:        { icon: document-open-recent }
+      select_all:     { icon: edit-select-all }
+      select_none:    { icon: edit-select-none }
+      invert_sel:     { icon: edit-select-invert }
+      share:          { icon: document-share }
+      email:          { icon: mail-send }
+      pin:            { icon: pin }
+      find:           { icon: system-search }
+      view_details:   { icon: view-list-details }
+      view_large:     { icon: view-preview }
+      view_list:      { icon: view-list-text }
+      view_tiles:     { icon: view-grid }
+      sort_by:        { icon: view-sort-ascending }
+      nav_pane:       { svg: builtin }      # no freedesktop equivalent
+      preview_pane:   { icon: fileview-preview }
+      details_pane:   { icon: view-list-details }
+      print:          { icon: document-print }
+      terminal:       { icon: utilities-terminal }
+      extract:        { icon: archive-extract }
+      exit:           { icon: application-exit }
+      gear:           { icon: configure }
+      # status bar (view_details / view_large shared, listed above)
+      # favorites / nav pane
+      home:           { icon: user-home }
+      desktop:        { icon: user-desktop }
+      documents:      { icon: folder-documents }
+      downloads:      { icon: folder-download }
+      pictures:       { icon: folder-pictures }
+      music:          { icon: folder-music }
+      videos:         { icon: folder-videos }
+      recent:         { icon: document-open-recent }
+      star:           { icon: favorites }
+      computer:       { icon: computer }
+      libraries:      { icon: folder-documents }
+      network:        { icon: network-workgroup }
+      drive:          { icon: drive-harddisk }
+      # window / navigation chrome
+      back:           { icon: go-previous }
+      forward:        { icon: go-next }
+      up:             { icon: go-up }
+      refresh:        { icon: view-refresh }
+      search:         { icon: system-search }
+      chevron_down:   { icon: go-down }
+      chevron_right:  { icon: go-next }
+      help:           { icon: help-contents }
+      close:          { icon: window-close }
+      # items (mime)
+      folder:         { icon: folder }
+      file:           { icon: unknown }
+      file_image:     { icon: image-x-generic }
+      text:           { icon: text-x-generic }
+      zip:            { icon: package-x-generic }
+      archive:        { icon: package-x-generic }
+      audio:          { icon: audio-x-generic }
+      video:          { icon: video-x-generic }
+      exe:            { icon: application-x-executable }
+      disc:           { icon: media-optical }
+      png:            { icon: image-png }

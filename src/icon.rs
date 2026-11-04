@@ -14,8 +14,9 @@
 //! The active pack stands alone — there is NO fallback between packs:
 //! an icon that is unavailable (no entry, theme lookup miss, missing
 //! PNG asset or template) renders as a solid circle. Ribbon chrome that
-//! is not part of any pack (the orb, keytip chevrons) resolves to
-//! nothing here so the ribbon can fall back to its own glyph set.
+//! is not part of any pack (the keytip chevron, the blank
+//! placeholder) resolves to nothing here so the ribbon can fall back
+//! to its own glyph set.
 //!
 //! Thumbnails will plug into [`for_entry`] later; nothing outside this
 //! module decides how an entry looks.

@@ -64,6 +64,17 @@ svg_templates!(
     "open" => "open.svg",
     "copy_path" => "copy_path.svg",
     "rename" => "rename.svg",
+    // ribbon command icons (colorful; page/outline shapes follow the
+    // skin via {bg}/{fg}, accents stay literal design colors)
+    "new" => "new.svg",
+    "save" => "save.svg",
+    "print" => "print.svg",
+    "exit" => "exit.svg",
+    "find" => "find.svg",
+    "pin" => "pin.svg",
+    "paste_special" => "paste_special.svg",
+    "terminal" => "terminal.svg",
+    "extract" => "extract.svg",
 );
 
 /// Render a builtin template with the skin colors baked in; `None` when
@@ -106,6 +117,8 @@ mod tests {
             "network", "drive", "back", "forward", "up", "refresh", "search", "chevron_down",
             "chevron_right", "nav_pane", "preview_pane", "details_pane", "sort_by", "undo",
             "redo", "help", "close", "gear", "open", "copy_path", "rename",
+            "new", "save", "print", "exit", "find", "pin", "paste_special",
+            "terminal", "extract",
         ] {
             let handle = builtin_svg(name, &skin)
                 .unwrap_or_else(|| panic!("template {name} must exist"));
