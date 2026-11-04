@@ -69,8 +69,6 @@ pub struct Explorer {
     /// Icons come from the system Breeze theme instead of the embedded
     /// explorer pack (View → Options “Breeze icons”).
     pub breeze_icons: bool,
-    /// `--ui-debug`: outline every element (colored 1px borders).
-    pub ui_debug: bool,
     /// TEMP: rainbow gradient on the folder-view backdrop rectangle.
     pub rainbow: bool,
     /// Window has keyboard focus; when false, selections fade to gray
@@ -253,7 +251,6 @@ impl Explorer {
             disabled_gray: false,
             // icons.yaml `theme:` may start on the system icon theme
             breeze_icons: crate::icon::system_active(),
-            ui_debug: std::env::var_os("EXPLORER_UI_DEBUG").is_some(),
             rainbow: false,
             focused: true,
             active_pane: Pane::Folder,

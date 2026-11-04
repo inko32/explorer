@@ -20,7 +20,7 @@ serde_yaml = "0.9"  # ribbon.yaml parsing (D12)
 # Same resvg 0.48 build iced's SVG pipeline uses; the raster-images
 # feature unifies onto it so embedded <image> in SVG decodes (the
 # gray-scaled-faded disabled icons wrap PNGs in a filtered SVG).
-resvg = { version = "0.49", default-features = false, features = ["raster-images"] }
+resvg = { version = "0.48", default-features = false, features = ["raster-images"] }
 libloading = "0.9"  # dlopen 7z.so for the native archive backend (D16)
 fontdb = "0.24"  # system font probing for the fonts.yaml fallback list (already in the tree via cosmic-text)
 
