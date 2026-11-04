@@ -6,7 +6,7 @@ use iced::widget::{column, container, mouse_area, row, stack, Space};
 use iced::{Element, Length};
 
 use crate::model::{Explorer, Message};
-use crate::ui_common::{bg, dbg, skin, UI_DEBUG};
+use crate::ui_common::{bg, skin};
 
 /// A pane splitter: an invisible (colorless) 4px drag target.
 /// A pane splitter: an invisible (colorless) 4px drag target. It needs
@@ -215,9 +215,8 @@ fn drag_icon_badge(state: &Explorer, skin: skin::Skin) -> Option<Element<'static
 }
 
 pub fn view(state: &Explorer) -> Element<'_, Message> {
-    UI_DEBUG.store(state.ui_debug, std::sync::atomic::Ordering::Relaxed);
     // border widths: constant physical size unless the theme says they
-    // follow the DPI (published every view, like UI_DEBUG)
+    // follow the DPI (published every view)
     crate::theme::set_border_scale(
         crate::theme::get().border_follow_dpi,
         state.scale_dpi(),
@@ -233,27 +232,25 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
     let min_ribbon_w = state.ribbon.sacrifice().0 * mult;
     let mut root = column![];
     if state.self_border {
-        root = root.push(dbg("titlebar", crate::border::titlebar(state, skin)));
+        root = root.push(crate::border::titlebar(state, skin));
     }
     // sacrifice the ribbon entirely when the window is resized too small
     if content_w >= min_ribbon_w {
-        root = root.push(dbg("ribbon", crate::ribbon::view(state)));
+        root = root.push(crate::ribbon::view(state));
     }
-    root = root.push(dbg("address_bar", crate::navigation::address_bar(state, skin)));
+    root = root.push(crate::navigation::address_bar(state, skin));
     // sacrifice the navigation pane when the window gets too narrow;
     // the widths come from the model (yaml sacrifice rules + the
     // splitter-dragged widths)
     let (nav_w, side_w) = state.layout_widths();
     if nav_w > 0.0 {
-        let nav = dbg("nav_pane", crate::nav_pane::nav_pane(state, skin, nav_w));
-        let fv = dbg("file_view", crate::folder::file_view(state, skin, content_w - nav_w - side_w));
+        let nav = crate::nav_pane::nav_pane(state, skin, nav_w);
+        let fv = crate::folder::file_view(state, skin, content_w - nav_w - side_w);
         // nav/folder boundary: 2px colorless – 1px separator – 1px
         // colorless (the separator keeps a constant physical width);
         // the whole strip is the splitter drag target
         let bw = crate::theme::border_w(1.0);
-        let nav_splitter = dbg(
-            "nav_splitter",
-            mouse_area(
+        let nav_splitter = mouse_area(
                 row![
                     spacer(2.0 * bw, skin, false),
                     spacer(bw, skin, true),
@@ -261,40 +258,39 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
                 ]
                 .height(Length::Fill),
             )
-            .on_press(Message::BeginNavSplit)
-            .interaction(iced::mouse::Interaction::ResizingHorizontally)
-            .boxed(),
-        );
+        .on_press(Message::BeginNavSplit)
+        .interaction(iced::mouse::Interaction::ResizingHorizontally)
+        .boxed();
         let mut main: iced::widget::Row<Element<'_, Message>> = row![nav, nav_splitter, fv]
             .height(Length::Fill);
         // side pane right of the folder view (Preview / Details),
         // resizable via the splitter on its left edge; it hides before
         // the folder view gets too narrow (yaml sacrifice.pane_below)
         if side_w > 0.0 {
-            main = main.push(dbg("pane_splitter", pane_splitter(Message::BeginPaneSplit, skin)));
+            main = main.push(pane_splitter(Message::BeginPaneSplit, skin));
             // 1px grey theme separator hugging the pane's left edge
             main = main.push(spacer(crate::theme::border_w(1.0), skin, true));
-            main = main.push(dbg("side_pane", crate::pane::view(state, skin, side_w)));
+            main = main.push(crate::pane::view(state, skin, side_w));
         }
-        root = root.push(dbg("main_row", main.boxed()));
+        root = root.push(main.boxed());
     } else {
         // the nav-gap spacer belongs to the folder view: it shows even
         // with the nav pane hidden
-        let fv = dbg("file_view", crate::folder::file_view(state, skin, content_w - side_w));
+        let fv = crate::folder::file_view(state, skin, content_w - side_w);
         let mut main: iced::widget::Row<Element<'_, Message>> = row![
             spacer(state.ribbon.nav_gap(), skin, false),
             container(fv).width(Length::Fill).height(Length::Fill)
         ]
         .height(Length::Fill);
         if side_w > 0.0 {
-            main = main.push(dbg("pane_splitter", pane_splitter(Message::BeginPaneSplit, skin)));
+            main = main.push(pane_splitter(Message::BeginPaneSplit, skin));
             // 1px grey theme separator hugging the pane's left edge
             main = main.push(spacer(crate::theme::border_w(1.0), skin, true));
-            main = main.push(dbg("side_pane", crate::pane::view(state, skin, side_w)));
+            main = main.push(crate::pane::view(state, skin, side_w));
         }
-        root = root.push(dbg("main_row", main.boxed()));
+        root = root.push(main.boxed());
     }
-    root = root.push(dbg("statusbar", crate::status::statusbar(state, skin)));
+    root = root.push(crate::status::statusbar(state, skin));
     let framed: Element<Message> = if state.self_border {
         // Win8: two-tone frame — deep 1px outer edge (#368BE9), light fill
         // (#6BADF6); total insets unchanged (2/6/6/6). Win10: 1px dark.
@@ -343,8 +339,8 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
     };
     if state.self_border {
         let grab = if state.frame_style == crate::model::FrameStyle::Win8 { 8.0 } else { 5.0 };
-        let mut s: iced::widget::Stack<Element<'_, Message>> = stack![dbg("frame", framed), dbg("resize_ring", crate::border::resize_frame(grab)),
-                           dbg("captions", crate::border::caption_overlay(state, skin))];
+        let mut s: iced::widget::Stack<Element<'_, Message>> = stack![framed, crate::border::resize_frame(grab),
+                           crate::border::caption_overlay(state, skin)];
         // splitter drag: hold the resize cursor window-wide while dragging
         // (the pointer leaves the small splitter target mid-drag)
         if state.bar_split || state.pane_split || state.nav_split {
@@ -356,10 +352,10 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
         }
         // drag icon badge + cursor caption above the content, below the menu
         if let Some(el) = drag_icon_badge(state, skin) {
-            s = s.push(dbg("drag_icon_badge", el));
+            s = s.push(el);
         }
         if let Some(el) = drag_caption(state, skin) {
-            s = s.push(dbg("drag_caption", el));
+            s = s.push(el);
         }
         // context menu above everything (SPEC/MENU_SPEC.MD): in-window
         // by default, overlay layer with menu.yaml layout.popup
@@ -369,7 +365,7 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
             } else {
                 crate::menu::layer(open, &state.menu_cfg, skin)
             };
-            s = s.push(dbg("menu", el));
+            s = s.push(el);
         }
         s.boxed()
     } else {
@@ -387,15 +383,15 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
             if let Some(c) = drag_caption(state, skin) {
                 s = s.push(c);
             }
-            return s.push(dbg("menu", el)).boxed();
+            return s.push(el).boxed();
         }
         let badge = drag_icon_badge(state, skin);
         match (drag_caption(state, skin), badge) {
             (Some(c), Some(b)) => {
-                stack![framed, dbg("drag_icon_badge", b), dbg("drag_caption", c)].boxed()
+                stack![framed, b, c].boxed()
             }
-            (Some(c), None) => stack![framed, dbg("drag_caption", c)].boxed(),
-            (None, Some(b)) => stack![framed, dbg("drag_icon_badge", b)].boxed(),
+            (Some(c), None) => stack![framed, c].boxed(),
+            (None, Some(b)) => stack![framed, b].boxed(),
             (None, None) => framed,
         }
     }

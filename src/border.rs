@@ -7,7 +7,7 @@ use iced::widget::{button, container, mouse_area, row, stack, text, Space};
 use iced::{Color, Element, Length};
 
 use crate::model::{Explorer, Message};
-use crate::ui_common::{bg, dbg, elide, icon, skin};
+use crate::ui_common::{bg, elide, icon, skin};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ResizeDir {
@@ -473,7 +473,7 @@ pub(crate) fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Messag
             .center_y(Length::Fill),
     ];
     if qat_visible {
-        head = head.push(dbg("titlebar_qat", titlebar_qat(state, skin)));
+        head = head.push(titlebar_qat(state, skin));
     }
     let base = container(
         row![
@@ -490,5 +490,5 @@ pub(crate) fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Messag
     .width(Length::Fill)
     .height(Length::Fixed(TITLEBAR_H))
     .style(bg(skin.accent));
-    stack![base, dbg("ctx_blocks", contextual_blocks(state))].boxed()
+    stack![base, contextual_blocks(state)].boxed()
 }

@@ -29,7 +29,6 @@ make dist               # stripped + upxed binary in dist/
 
 # flags (after --):
 make run ARGS="--render cpu"   # force CPU renderer (--render gpu is strict)
-make run ARGS="--ui-debug"     # outline every UI element
 make run ARGS="--dpi=125"      # absolute content scale (percent of 96 dpi)
 make run ARGS="--size=900x560" # window size in logical px
 make run ARGS="/usr/bin"       # initial folder (default $HOME)
