@@ -1,10 +1,11 @@
 //! Ribbon images (`IUIImage`).
 //!
 //! Named icons resolve through the **explorer icon registry** (`src/icon.rs`:
-//! Win8 PNG assets + skin-colored builtin SVG generators — the same icons
-//! the rest of the app uses), falling back to the ribbon's own builtin SVG
-//! glyph set (`src/ribbon/icons.rs`) for chrome glyphs like the orb.
-//! Inline SVG data and `file:` references work as before.
+//! Win8 PNG assets + colorful skin-aware SVG templates — the same icons
+//! the rest of the app uses), falling back to the ribbon's own chrome
+//! glyphs (`src/ribbon/icons.rs`: keytip chevron, blank placeholder)
+//! for names the registry intentionally does not know. Inline SVG data
+//! and `file:` references work as before.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
