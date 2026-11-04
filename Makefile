@@ -25,11 +25,6 @@ export CARGO_HOME=$(TMPROOT)/cargo
 export RUSTUP_HOME=$(TMPROOT)/rustup
 export PATH := $(TMPROOT)/cargo/bin:$(PATH)
 
-# Program icon source: 48/libraries.png preferred, else the largest
-# */libraries.png (glob order is size order)
-APP_ICON     := assets/app-icon.png
-APP_ICON_SRC := $(or $(wildcard assets/icons/48/libraries.png),$(lastword $(sort $(wildcard assets/icons/*/libraries.png))))
-
 .PHONY: all build check run test dist clean fmt size setup-toolchain bloat tree clippy clippy-json
 
 
@@ -49,10 +44,6 @@ all: build
 setup-env:
 	@ln -sf $(CARGO_TARGET_DIR) target
 	@mkdir -p $(CARGO_HOME) $(RUSTUP_HOME)
-	@# program icon: the proper assets/icons/*/libraries.png (48px
-	@# preferred, else the largest) is copied to the canonical name the
-	@# code embeds — the source never names a size-specific file
-	@cp $(APP_ICON_SRC) $(APP_ICON)
 	@if ! rustup toolchain list --no-self-update 2>/dev/null | grep -q "$(TOOLCHAIN)"; then \
 		echo "==> Installing Rust toolchain '$(TOOLCHAIN)'..."; \
 		n=1; while [ $$n -le 3 ]; do \

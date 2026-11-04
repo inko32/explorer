@@ -2,14 +2,14 @@
 //!
 //! `assets/icons.yaml` is the theme selector AND the internal-name
 //! registry: `theme:` picks the active icon pack (`explorer` = the
-//! embedded Win8 PNG pack, or a system theme name such as `breeze`);
+//! embedded all-SVG pack, or a system theme name such as `breeze`);
 //! `themes.*.icons` map the app's internal names to pack entries —
-//! `file:` (embedded PNG, breeze-style `<size>/<name>.png` layout under
-//! assets/icons/), `svg: builtin` (skin-colored template, one file per
-//! icon in assets/svgs/), or `icon:` (freedesktop icon-theme name,
-//! resolved by src/icon_theme.rs with the Inherits chain). A user
-//! override at ~/.config/explorer/icons.yaml replaces `theme:` and any
-//! entry.
+//! `svg: builtin` (skin-colored template, one file per icon in
+//! assets/icons/svgs/), `file:` (reserved raster-asset slot), or
+//! `icon:` (freedesktop icon-theme name, resolved by
+//! src/icon_theme.rs with the Inherits chain, whatever the theme
+//! ships — SVG or PNG). A user override at
+//! ~/.config/explorer/icons.yaml replaces `theme:` and any entry.
 //!
 //! The active pack stands alone — there is NO fallback between packs:
 //! an icon that is unavailable (no entry, theme lookup miss, missing
@@ -66,10 +66,6 @@ struct Icons {
     explorer: HashMap<String, IconDef>,
     /// defs of the system themes (e.g. "breeze").
     system: HashMap<String, HashMap<String, IconDef>>,
-    /// explorer `file:` name → sorted (size, decoded handle) - handles
-    /// are cached: decoding 245 PNGs on every view rebuild made dropdown
-    /// menus blink.
-    pngs: HashMap<String, Vec<(u32, iced::widget::image::Handle)>>,
 }
 
 static ICONS: OnceLock<Icons> = OnceLock::new();
@@ -110,290 +106,12 @@ fn load() -> Icons {
         .map(|(name, t)| (name, t.icons))
         .collect();
 
-    // preload png variants (decode once, reuse the handles forever)
-    let mut pngs: HashMap<String, Vec<(u32, iced::widget::image::Handle)>> = HashMap::new();
-    for (name, def) in &explorer {
-        let Some(file) = &def.file else { continue };
-        let mut variants = Vec::new();
-        for size in [16u32, 20, 24, 32, 40, 48, 64] {
-            if let Some(bytes) = asset_bytes(file, size) {
-                variants.push((size, iced::widget::image::Handle::from_bytes(bytes)));
-            }
-        }
-        if !variants.is_empty() {
-            pngs.insert(name.clone(), variants);
-        }
-    }
-
     Icons {
         default_theme: file.theme,
         explorer,
         system,
-        pngs,
     }
 }
-
-macro_rules! embedded_pngs {
-    ($($name:literal),* $(,)?) => {
-        fn asset_bytes(file: &str, size: u32) -> Option<&'static [u8]> {
-            // breeze-style layout: assets/icons/<size>/<file>.png
-            let path = format!("{size}/{file}.png");
-            Some(match path.as_str() {
-                $( $name => include_bytes!(concat!("../assets/icons/", $name)), )*
-                _ => return None,
-            })
-        }
-    };
-}
-
-// Keep in sync with files present in assets/icons/.
-embedded_pngs!(
-    "16/audio.png",
-    "16/computer.png",
-    "16/copy.png",
-    "16/copy_to.png",
-    "16/cut.png",
-    "16/delete.png",
-    "16/disc.png",
-    "16/easy_access.png",
-    "16/edit.png",
-    "16/email.png",
-    "16/exe.png",
-    "16/file_image.png",
-    "16/file.png",
-    "16/folder_new.png",
-    "16/folder.png",
-    "16/history.png",
-    "16/invert_sel.png",
-    "16/libraries.png",
-    "16/move_to.png",
-    "16/new_item.png",
-    "16/paste.png",
-    "16/paste_shortcut.png",
-    "16/png.png",
-    "16/properties.png",
-    "16/select_all.png",
-    "16/select_none.png",
-    "16/share.png",
-    "16/star.png",
-    "16/text.png",
-    "16/video.png",
-    "16/view_details.png",
-    "16/view_large.png",
-    "16/view_list.png",
-    "16/view_tiles.png",
-    "16/zip.png",
-    "20/audio.png",
-    "20/computer.png",
-    "20/copy.png",
-    "20/copy_to.png",
-    "20/cut.png",
-    "20/delete.png",
-    "20/disc.png",
-    "20/easy_access.png",
-    "20/edit.png",
-    "20/email.png",
-    "20/exe.png",
-    "20/file_image.png",
-    "20/file.png",
-    "20/folder_new.png",
-    "20/folder.png",
-    "20/history.png",
-    "20/invert_sel.png",
-    "20/libraries.png",
-    "20/move_to.png",
-    "20/new_item.png",
-    "20/paste.png",
-    "20/paste_shortcut.png",
-    "20/png.png",
-    "20/properties.png",
-    "20/select_all.png",
-    "20/select_none.png",
-    "20/share.png",
-    "20/star.png",
-    "20/text.png",
-    "20/video.png",
-    "20/view_details.png",
-    "20/view_large.png",
-    "20/view_list.png",
-    "20/view_tiles.png",
-    "20/zip.png",
-    "24/audio.png",
-    "24/computer.png",
-    "24/copy.png",
-    "24/copy_to.png",
-    "24/cut.png",
-    "24/delete.png",
-    "24/disc.png",
-    "24/easy_access.png",
-    "24/edit.png",
-    "24/email.png",
-    "24/exe.png",
-    "24/file_image.png",
-    "24/file.png",
-    "24/folder_new.png",
-    "24/folder.png",
-    "24/history.png",
-    "24/invert_sel.png",
-    "24/libraries.png",
-    "24/move_to.png",
-    "24/new_item.png",
-    "24/paste.png",
-    "24/paste_shortcut.png",
-    "24/png.png",
-    "24/properties.png",
-    "24/select_all.png",
-    "24/select_none.png",
-    "24/share.png",
-    "24/star.png",
-    "24/text.png",
-    "24/video.png",
-    "24/view_details.png",
-    "24/view_large.png",
-    "24/view_list.png",
-    "24/view_tiles.png",
-    "24/zip.png",
-    "32/audio.png",
-    "32/computer.png",
-    "32/copy.png",
-    "32/copy_to.png",
-    "32/cut.png",
-    "32/delete.png",
-    "32/disc.png",
-    "32/easy_access.png",
-    "32/edit.png",
-    "32/email.png",
-    "32/exe.png",
-    "32/file_image.png",
-    "32/file.png",
-    "32/folder_new.png",
-    "32/folder.png",
-    "32/history.png",
-    "32/invert_sel.png",
-    "32/libraries.png",
-    "32/move_to.png",
-    "32/new_item.png",
-    "32/paste.png",
-    "32/paste_shortcut.png",
-    "32/png.png",
-    "32/properties.png",
-    "32/select_all.png",
-    "32/select_none.png",
-    "32/share.png",
-    "32/star.png",
-    "32/text.png",
-    "32/video.png",
-    "32/view_details.png",
-    "32/view_large.png",
-    "32/view_list.png",
-    "32/view_tiles.png",
-    "32/zip.png",
-    "40/audio.png",
-    "40/computer.png",
-    "40/copy.png",
-    "40/copy_to.png",
-    "40/cut.png",
-    "40/delete.png",
-    "40/disc.png",
-    "40/easy_access.png",
-    "40/edit.png",
-    "40/email.png",
-    "40/exe.png",
-    "40/file_image.png",
-    "40/file.png",
-    "40/folder_new.png",
-    "40/folder.png",
-    "40/history.png",
-    "40/invert_sel.png",
-    "40/libraries.png",
-    "40/move_to.png",
-    "40/new_item.png",
-    "40/paste.png",
-    "40/paste_shortcut.png",
-    "40/png.png",
-    "40/properties.png",
-    "40/select_all.png",
-    "40/select_none.png",
-    "40/share.png",
-    "40/star.png",
-    "40/text.png",
-    "40/video.png",
-    "40/view_details.png",
-    "40/view_large.png",
-    "40/view_list.png",
-    "40/view_tiles.png",
-    "40/zip.png",
-    "48/audio.png",
-    "48/computer.png",
-    "48/copy.png",
-    "48/copy_to.png",
-    "48/cut.png",
-    "48/delete.png",
-    "48/disc.png",
-    "48/easy_access.png",
-    "48/edit.png",
-    "48/email.png",
-    "48/exe.png",
-    "48/file_image.png",
-    "48/file.png",
-    "48/folder_new.png",
-    "48/folder.png",
-    "48/history.png",
-    "48/invert_sel.png",
-    "48/libraries.png",
-    "48/move_to.png",
-    "48/new_item.png",
-    "48/paste.png",
-    "48/paste_shortcut.png",
-    "48/png.png",
-    "48/properties.png",
-    "48/select_all.png",
-    "48/select_none.png",
-    "48/share.png",
-    "48/star.png",
-    "48/text.png",
-    "48/video.png",
-    "48/view_details.png",
-    "48/view_large.png",
-    "48/view_list.png",
-    "48/view_tiles.png",
-    "48/zip.png",
-    "64/audio.png",
-    "64/computer.png",
-    "64/copy.png",
-    "64/copy_to.png",
-    "64/cut.png",
-    "64/delete.png",
-    "64/disc.png",
-    "64/easy_access.png",
-    "64/edit.png",
-    "64/email.png",
-    "64/exe.png",
-    "64/file_image.png",
-    "64/file.png",
-    "64/folder_new.png",
-    "64/folder.png",
-    "64/history.png",
-    "64/invert_sel.png",
-    "64/libraries.png",
-    "64/move_to.png",
-    "64/new_item.png",
-    "64/paste.png",
-    "64/paste_shortcut.png",
-    "64/png.png",
-    "64/properties.png",
-    "64/select_all.png",
-    "64/select_none.png",
-    "64/share.png",
-    "64/star.png",
-    "64/text.png",
-    "64/video.png",
-    "64/view_details.png",
-    "64/view_large.png",
-    "64/view_list.png",
-    "64/view_tiles.png",
-    "64/zip.png",
-);
 
 fn icons() -> &'static Icons {
     ICONS.get_or_init(load)
@@ -470,16 +188,6 @@ fn resolve(name: &str, size: u32, skin: &Skin) -> Option<Source> {
             return Some(src);
         }
         return Some(Source::Missing);
-    }
-    if let Some(variants) = icons.pngs.get(name) {
-        // nearest variant >= requested, else the largest available
-        let handle = variants
-            .iter()
-            .find(|(s, _)| *s >= size)
-            .or(variants.last())
-            .map(|(_, h)| h.clone())
-            .unwrap();
-        return Some(Source::Png(handle));
     }
     if def.svg.is_some() || def.file.is_none() {
         return Some(match crate::icons::builtin_svg(name, skin) {
@@ -595,9 +303,8 @@ mod tests {
     #[test]
     fn embedded_registry_loads_both_themes() {
         let icons = icons();
-        // explorer pack: PNG variants decoded from the breeze-style dirs
-        assert!(icons.pngs.contains_key("folder"));
-        assert_eq!(icons.pngs["folder"].len(), 7, "16..64 variants");
+        // explorer pack: all-SVG template map
+        assert!(icons.explorer.contains_key("folder"));
         // system theme map is present for the breeze switch
         assert!(icons.system.contains_key("breeze"));
         assert!(icons.system["breeze"].contains_key("paste"));
@@ -606,8 +313,8 @@ mod tests {
     #[test]
     fn resolution_switches_with_the_theme() {
         let skin = crate::ui_common::skin::light();
-        // embedded pack serves PNG handles
-        assert!(matches!(handle("folder", 16, &skin), Some(IconHandle::Png(_))));
+        // embedded pack serves SVG templates
+        assert!(matches!(handle("folder", 16, &skin), Some(IconHandle::Svg(_))));
         // unknown names miss entirely (the ribbon keeps its own glyphs)
         assert!(handle("definitely_unknown_icon", 16, &skin).is_none());
 
@@ -621,7 +328,7 @@ mod tests {
         // and it switches back
         set_system(false);
         assert!(!system_active());
-        assert!(matches!(handle("folder", 16, &skin), Some(IconHandle::Png(_))));
+        assert!(matches!(handle("folder", 16, &skin), Some(IconHandle::Svg(_))));
     }
 
     #[test]

@@ -1,0 +1,5 @@
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'>
+<path d='M2.5 4.5h7l2 2v7h-9z' fill='#DCE9F7' stroke='#2A6DB5' stroke-width='0.9' transform='translate(1.5 -1)'/>
+<path d='M4 1h5l3 3v11H4z' fill='{bg}' stroke='{fg}' stroke-width='1' transform='translate(-1.5 0.5)'/>
+<path d='M5.5 7.5h4M5.5 9.5h4M5.5 11.5h2.5' stroke='#2A6DB5' stroke-width='0.8' transform='translate(-1.5 0.5)'/>
+</svg>

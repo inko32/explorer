@@ -1,0 +1,6 @@
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'>
+<path d='M3 1h5l3 3v9H3z' fill='{bg}' stroke='{fg}' stroke-width='1'/>
+<path d='M8 1v3h3' fill='none' stroke='{fg}' stroke-width='1'/>
+<circle cx='11' cy='11' r='3.2' fill='#1F9E3E'/>
+<path d='M9.6 11l1.1 1.1 2-2.3' fill='none' stroke='#ffffff' stroke-width='1'/>
+</svg>

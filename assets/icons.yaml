@@ -5,16 +5,15 @@
 # theme at runtime.
 #
 # Entry kinds (a pack entry is exactly one of):
-#   file: <name>   raster asset of the pack (embedded PNG, breeze-style
-#                  <size>/<name>.png under assets/icons/; nearest size
-#                  variant >= the request wins). The kind stays open to
-#                  other raster formats.
 #   svg: builtin   skin-colored SVG template, one file per icon in
-#                  assets/svgs/ ({fg} {bg} {subtle} {folder}
+#                  assets/icons/svgs/ ({fg} {bg} {subtle} {folder}
 #                  {folder_edge} {hover} {title} tokens). Templates may
 #                  keep design colors literal. The value slot is
 #                  reserved for future per-icon asset paths, so any SVG
 #                  file can join the pack without a format change.
+#   file: <name>   raster asset slot (reserved; no raster assets ship
+#                  today — the pack is all-SVG). Kept so a pack can
+#                  take PNG/WebP/... later without a format change.
 #   icon: <name>   freedesktop icon-theme name for a SYSTEM pack
 #                  (freedesktop lookup, e.g. /usr/share/icons/breeze
 #                  with its Inherits chain); resolves to whatever the
@@ -41,41 +40,41 @@ themes:
       # === UI icons (non-mime) =====================================
       # --- ribbon command icons: every `image:` name of ribbon.yaml
       # Clipboard
-      paste:          { file: paste }
-      cut:            { file: cut }
-      copy:           { file: copy }
+      paste:          { svg: builtin }
+      cut:            { svg: builtin }
+      copy:           { svg: builtin }
       copy_path:      { svg: builtin }
-      paste_shortcut: { file: paste_shortcut }
+      paste_shortcut: { svg: builtin }
       paste_special:  { svg: builtin }
-      move_to:        { file: move_to }
-      copy_to:        { file: copy_to }
-      delete:         { file: delete }
+      move_to:        { svg: builtin }
+      copy_to:        { svg: builtin }
+      delete:         { svg: builtin }
       rename:         { svg: builtin }
       # Organize
       undo:           { svg: builtin }
       redo:           { svg: builtin }
-      new_folder:     { file: folder_new }
-      new_item:       { file: new_item }
+      new_folder:     { svg: builtin }
+      new_item:       { svg: builtin }
       new:            { svg: builtin }
-      easy_access:    { file: easy_access }
-      properties:     { file: properties }
+      easy_access:    { svg: builtin }
+      properties:     { svg: builtin }
       open:           { svg: builtin }
-      edit:           { file: edit }
-      history:        { file: history }
+      edit:           { svg: builtin }
+      history:        { svg: builtin }
       # Select
-      select_all:     { file: select_all }
-      select_none:    { file: select_none }
-      invert_sel:     { file: invert_sel }
+      select_all:     { svg: builtin }
+      select_none:    { svg: builtin }
+      invert_sel:     { svg: builtin }
       # Share / find
-      share:          { file: share }
-      email:          { file: email }
+      share:          { svg: builtin }
+      email:          { svg: builtin }
       pin:            { svg: builtin }
       find:           { svg: builtin }
       # View
-      view_details:   { file: view_details }
-      view_large:     { file: view_large }
-      view_list:      { file: view_list }
-      view_tiles:     { file: view_tiles }
+      view_details:   { svg: builtin }
+      view_large:     { svg: builtin }
+      view_list:      { svg: builtin }
+      view_tiles:     { svg: builtin }
       sort_by:        { svg: builtin }
       nav_pane:       { svg: builtin }
       preview_pane:   { svg: builtin }
@@ -99,9 +98,9 @@ themes:
       music:          { svg: builtin }
       videos:         { svg: builtin }
       recent:         { svg: builtin }
-      star:           { file: star }
-      computer:       { file: computer }
-      libraries:      { file: libraries }
+      star:           { svg: builtin }
+      computer:       { svg: builtin }
+      libraries:      { svg: builtin }
       network:        { svg: builtin }
       drive:          { svg: builtin }
       # --- window / navigation chrome (title bar, address bar)
@@ -119,17 +118,17 @@ themes:
       close:          { svg: builtin }
 
       # === items (mime) — refined later ============================
-      folder:         { file: folder }
-      file:           { file: file }
-      file_image:     { file: file_image }
-      text:           { file: text }
-      zip:            { file: zip }
-      archive:        { file: zip }
-      audio:          { file: audio }
-      video:          { file: video }
-      exe:            { file: exe }
-      disc:           { file: disc }
-      png:            { file: png }
+      folder:         { svg: builtin }
+      file:           { svg: builtin }
+      file_image:     { svg: builtin }
+      text:           { svg: builtin }
+      zip:            { svg: builtin }
+      archive:        { svg: builtin }
+      audio:          { svg: builtin }
+      video:          { svg: builtin }
+      exe:            { svg: builtin }
+      disc:           { svg: builtin }
+      png:            { svg: builtin }
 
   # freedesktop names as shipped by /usr/share/icons/breeze — verified
   # against the theme; unmapped internal names fall back to explorer.
