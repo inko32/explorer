@@ -1,6 +1,0 @@
-<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'>
-<rect x='1.5' y='2' width='13' height='9' fill='{bg}' stroke='{fg}' stroke-width='1'/>
-<rect x='6.5' y='11.5' width='3' height='2' fill='{bg}' stroke='{fg}' stroke-width='1'/>
-<rect x='4.5' y='13.5' width='7' height='1.2' fill='{fg}'/>
-<rect x='2.5' y='3' width='11' height='7' fill='{hover}'/>
-</svg>

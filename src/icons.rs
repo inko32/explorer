@@ -1,6 +1,6 @@
 //! Builtin theme-colored SVG icon templates — the `svg: builtin` entries
 //! of the explorer pack in icons.yaml. Every template is a file under
-//! `assets/svgs/<name>.svg` holding `{token}` placeholders that are
+//! `assets/icons/svgs/<name>.svg` holding `{token}` placeholders that are
 //! substituted from the active skin at render time:
 //!
 //!   {fg}          icon glyph color (skin.text)
@@ -26,7 +26,7 @@ macro_rules! svg_templates {
     ($($name:literal => $file:literal),* $(,)?) => {
         fn template(name: &str) -> Option<&'static str> {
             Some(match name {
-                $( $name => include_str!(concat!("../assets/svgs/", $file)), )*
+                $( $name => include_str!(concat!("../assets/icons/svgs/", $file)), )*
                 _ => return None,
             })
         }
@@ -75,6 +75,45 @@ svg_templates!(
     "paste_special" => "paste_special.svg",
     "terminal" => "terminal.svg",
     "extract" => "extract.svg",
+    // clipboard / organize commands
+    "paste" => "paste.svg",
+    "cut" => "cut.svg",
+    "copy" => "copy.svg",
+    "paste_shortcut" => "paste_shortcut.svg",
+    "move_to" => "move_to.svg",
+    "copy_to" => "copy_to.svg",
+    "delete" => "delete.svg",
+    "new_folder" => "new_folder.svg",
+    "new_item" => "new_item.svg",
+    "easy_access" => "easy_access.svg",
+    "properties" => "properties.svg",
+    "edit" => "edit.svg",
+    "history" => "history.svg",
+    "select_all" => "select_all.svg",
+    "select_none" => "select_none.svg",
+    "invert_sel" => "invert_sel.svg",
+    "share" => "share.svg",
+    "email" => "email.svg",
+    // view modes
+    "view_details" => "view_details.svg",
+    "view_large" => "view_large.svg",
+    "view_list" => "view_list.svg",
+    "view_tiles" => "view_tiles.svg",
+    // favorites / This PC
+    "star" => "star.svg",
+    "computer" => "computer.svg",
+    "libraries" => "libraries.svg",
+    // items (mime)
+    "folder" => "folder.svg",
+    "file" => "file.svg",
+    "file_image" => "file_image.svg",
+    "text" => "text.svg",
+    "zip" => "zip.svg",
+    "audio" => "audio.svg",
+    "video" => "video.svg",
+    "exe" => "exe.svg",
+    "disc" => "disc.svg",
+    "png" => "png.svg",
 );
 
 /// Render a builtin template with the skin colors baked in; `None` when
@@ -119,6 +158,14 @@ mod tests {
             "redo", "help", "close", "gear", "open", "copy_path", "rename",
             "new", "save", "print", "exit", "find", "pin", "paste_special",
             "terminal", "extract",
+            "paste", "cut", "copy", "paste_shortcut", "move_to", "copy_to",
+            "delete", "new_folder", "new_item", "easy_access", "properties",
+            "edit", "history", "select_all", "select_none", "invert_sel",
+            "share", "email",
+            "view_details", "view_large", "view_list", "view_tiles",
+            "star", "computer", "libraries",
+            "folder", "file", "file_image", "text", "zip", "audio", "video",
+            "exe", "disc", "png",
         ] {
             let handle = builtin_svg(name, &skin)
                 .unwrap_or_else(|| panic!("template {name} must exist"));

@@ -45,7 +45,7 @@ All runtime configuration is YAML, overridable per-user under
 - `assets/folder-view.yaml` — the 48-step zoom scale + layout geometry
 - `assets/menu.yaml`        — context menus, file types, open handlers
 - `assets/fonts.yaml`       — font sizes (all 12px at 100% dpi) + family fallback list
-- `assets/icons.yaml`       — icon registry (PNG sets / builtin SVG)
+- `assets/icons.yaml`       — icon registry (SVG templates / freedesktop names)
 
 ## Docs
 
