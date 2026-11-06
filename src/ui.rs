@@ -231,7 +231,15 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
     // (layout_widths); only the ribbon sacrifice stays here
     let min_ribbon_w = state.ribbon.sacrifice().0 * mult;
     let mut root = column![];
-    if state.self_border {
+    // Win8.1 (not maximized) draws the title bar INSIDE the frame layer
+    // (its accent runs flush to the outer border, before the inner
+    // outline) — the frame branch adds it there instead of here. The
+    // maximized frame reports zero insets, so the title bar is plain
+    // content there like every other style.
+    let win81_framed = state.self_border
+        && state.frame_style == crate::model::FrameStyle::Win81
+        && !state.maximized;
+    if state.self_border && !win81_framed {
         root = root.push(crate::border::titlebar(state, skin));
     }
     // sacrifice the ribbon entirely when the window is resized too small
@@ -292,10 +300,10 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
     }
     root = root.push(crate::status::statusbar(state, skin));
     let framed: Element<Message> = if state.self_border {
-        // Win8: two-tone frame — deep 1px outer edge (#368BE9), light fill
-        // (#6BADF6); total insets unchanged (2/6/6/6). Win10: 1px dark.
-        if state.frame_style == crate::model::FrameStyle::Win8 {
-            container(
+        match state.frame_style {
+            // Win8: two-tone frame — deep 1px outer edge (#368BE9), light
+            // fill (#6BADF6); total insets unchanged (2/6/6/6).
+            crate::model::FrameStyle::Win8 => container(
                 container(root)
                     .width(Length::Fill)
                     .height(Length::Fill)
@@ -317,9 +325,9 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
                 background: Some(skin.accent_dark.into()),
                 ..Default::default()
             })
-            .boxed()
-        } else {
-            container(root)
+            .boxed(),
+            // Win10: 1px dark.
+            crate::model::FrameStyle::Win10 => container(root)
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .padding(iced::Padding {
@@ -332,13 +340,122 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
                     background: Some(crate::border::frame_color(state, skin).into()),
                     ..Default::default()
                 })
+                .boxed(),
+            // Win8.1 (SPEC/win8_border.md): 1px outer outline + 6px border
+            // + 1px inner outline per side; the top inner outline is the
+            // 1px row directly below the 29px title bar. The 1px outlines
+            // keep a constant physical width (never DPI-scaled).
+            crate::model::FrameStyle::Win81 => {
+                let outline_w = crate::theme::border_w(1.0);
+                use crate::border::win81 as w81;
+                // a solid strip positioned inside the window (frame-level
+                // details: the top inner outline, the maximized
+                // title-bar extensions)
+                let strip = |y: f32,
+                             h: f32,
+                             l: f32,
+                             r: f32,
+                             c: iced::Color|
+                -> Element<'static, Message> {
+                    container(
+                        container(Space::new().width(Length::Fill))
+                            .width(Length::Fill)
+                            .height(Length::Fixed(h))
+                            .style(move |_: &iced::Theme| container::Style {
+                                background: Some(c.into()),
+                                ..Default::default()
+                            }),
+                    )
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .padding(iced::Padding {
+                        top: y,
+                        right: r,
+                        left: l,
+                        ..Default::default()
+                    })
+                    .boxed()
+                };
+                let framed: Element<Message> = if state.maximized {
+                    // maximized: zero insets (see frame_insets_pub) — the
+                    // frame is gone entirely (outer outline, 6px side/
+                    // bottom border, side inner outlines all omitted) and
+                    // the content extends to the window edges; only the
+                    // 1px inner outline under the title bar remains,
+                    // drawn as a full-width strip below
+                    container(root).width(Length::Fill).height(Length::Fill).boxed()
+                } else {
+                    // inner outline: 1px dark, starting BELOW the 29px
+                    // title bar (the title bar's accent runs flush to the
+                    // border on the sides — no outline splits it); sides +
+                    // bottom only — the top segment is the row below the
+                    // title bar, drawn as a strip overlay
+                    let inner = container(root)
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .padding(iced::Padding {
+                            top: 0.0,
+                            right: outline_w,
+                            bottom: outline_w,
+                            left: outline_w,
+                        })
+                        .style(move |_: &iced::Theme| container::Style {
+                            background: Some(w81::OUTLINE.into()),
+                            ..Default::default()
+                        });
+                    // the title bar sits OUTSIDE the inner outline,
+                    // between the two side borders; the 6px border fill
+                    // is DPI-scaled (like the Win8 sizing border)
+                    let titled = column![crate::border::titlebar(state, skin), inner];
+                    let border = container(titled)
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .padding(iced::Padding {
+                            top: 0.0,
+                            right: 6.0,
+                            bottom: 6.0,
+                            left: 6.0,
+                        })
+                        .style(move |_: &iced::Theme| container::Style {
+                            background: Some(w81::ACCENT.into()),
+                            ..Default::default()
+                        });
+                    container(border)
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .padding(outline_w)
+                        .style(move |_: &iced::Theme| container::Style {
+                            background: Some(w81::OUTLINE.into()),
+                            ..Default::default()
+                        })
+                        .boxed()
+                };
+                // the top inner outline: the 1px row directly below the
+                // 29px title bar. Not maximized: it spans the content
+                // (between the side inner outlines); maximized: zero
+                // insets put the title bar at y=0 and the line spans the
+                // full window width.
+                let (line_y, line_l, line_r) = if state.maximized {
+                    (29.0, 0.0, 0.0)
+                } else {
+                    (ft + 29.0, fl, fr)
+                };
+                stack![
+                    framed,
+                    strip(line_y, outline_w, line_l, line_r, w81::OUTLINE),
+                ]
                 .boxed()
+            }
         }
     } else {
         root.boxed()
     };
     if state.self_border {
-        let grab = if state.frame_style == crate::model::FrameStyle::Win8 { 8.0 } else { 5.0 };
+        let grab = match state.frame_style {
+            // Win8/Win8.1 have the thick sizing border
+            crate::model::FrameStyle::Win8 | crate::model::FrameStyle::Win81 => 8.0,
+            crate::model::FrameStyle::Win10 => 5.0,
+        };
         let mut s: iced::widget::Stack<Element<'_, Message>> = stack![framed, crate::border::resize_frame(grab),
                            crate::border::caption_overlay(state, skin)];
         // splitter drag: hold the resize cursor window-wide while dragging

@@ -11,7 +11,7 @@ DIST      ?= $(CURDIR)/dist
 BIN       := explorer
 # COMPRESS=0 keeps the dist binary unstripped and uncompressed (for
 # size/symbol analysis); default applies strip + upx.
-COMPRESS  ?= 1
+COMPRESS  ?= 0
 
 
 TOOLCHAIN   ?= stable

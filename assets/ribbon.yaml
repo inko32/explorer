@@ -175,6 +175,7 @@ commands:
   cmdToggleDark: 74
   cmdToggleBorder: 75
   cmdToggleFrame: 76
+  cmdToggleFrame81: 309
   cmdToggleRainbow: 79
   cmdToggleGrayDisabled: 307
   cmdIconPack: 308
@@ -348,7 +349,8 @@ size_definitions:
                  cmdShowAllFolders, cmdGroupBy, cmdAddColumns, cmdSizeColumns,
                  cmdToggleCheckboxes, cmdToggleExtensions, cmdToggleHidden,
                  cmdShowTreeExpander, cmdToggleDark, cmdToggleBorder,
-                 cmdToggleFrame, cmdChangeFolderOptions, cmdReadOnly,
+                 cmdToggleFrame, cmdToggleFrame81, cmdChangeFolderOptions,
+                 cmdReadOnly,
                  cmdBitlocker, cmdBitlockerOn, cmdBitlockerManage, cmdBitlockerPin,
                  cmdOptimize, cmdCleanup, cmdFormat, cmdAutoPlay, cmdEject,
                  cmdFinishBurning, cmdEraseDisc, cmdRotateLeft, cmdRotateRight,
@@ -710,7 +712,8 @@ tabs:
               - { command: cmdChangeFolderOptions, image: gear, label: Change folder and search options }
           - { type: toggle_button, command: cmdToggleDark, size: small, image: gear, label: Dark mode, keytip: "DK", tooltip: "Switch between light and dark mode" }
           - { type: toggle_button, command: cmdToggleBorder, size: small, image: gear, label: Custom border, tooltip: "Use the custom window border" }
-          - { type: toggle_button, command: cmdToggleFrame, size: small, image: gear, label: Win8 frame, tooltip: "Switch between Win8 and Win10 frame styles" }
+          - { type: toggle_button, command: cmdToggleFrame, size: small, image: gear, label: Win8 frame, tooltip: "Cycle the window frame style (Win8, Win10, Win8.1)" }
+          - { type: toggle_button, command: cmdToggleFrame81, size: small, image: gear, label: Win8.1 frame, tooltip: "Use the Windows 8.1 frame (1px outer outline + 6px border + 1px inner outline)" }
           - { type: toggle_button, command: cmdToggleRainbow, size: small, image: gear, label: Rainbow, tooltip: "Paint the folder view backdrop with a rainbow gradient" }
           - { type: toggle_button, command: cmdToggleGrayDisabled, size: small, image: gear, label: Gray disabled, tooltip: "Unavailable buttons are gray-scaled and faded instead of only faded" }
           - { type: toggle_button, command: cmdIconPack, size: small, image: star, label: Breeze icons, keytip: "BZ", tooltip: "Use the system Breeze icon theme instead of the embedded icon pack (names resolve via icons.yaml)" }
