@@ -208,8 +208,20 @@ pub enum Message {
     BlockPress(usize),
     /// Begin a compositor-driven edge resize (custom border mode).
     StartResize(crate::border::ResizeDir),
-    /// Switch between the Win8 (double) and Win10 (1px) window borders.
+    /// Caption-button hover tracking: bit 0 = minimize, 1 = maximize.
+    /// The Win8.1 min/max glyphs swap black/white on hover, which the
+    /// button style can't do to an svg.
+    CaptionHover(u8, bool),
+    /// The real maximized state reported by the windowing system.
+    /// Resizes can come from a compositor-side maximize/unmaximize the
+    /// app never commanded, so the local toggle flag is synced from
+    /// this instead of trusted blindly.
+    MaximizedState(bool),
+    /// Cycle the window frame style (Win8 → Win10 → Win8.1).
     ToggleFrameStyle,
+    /// View → Options toggle: switch directly to the Win8.1 frame (and
+    /// back to the Win8 frame when pressed again).
+    ToggleFrame81,
     /// TEMP: paint the folder-view backdrop rectangle with a rainbow
     /// gradient (View-tab ribbon toggle).
     ToggleRainbow,
@@ -237,6 +249,9 @@ pub enum FrameStyle {
     Win8,
     /// Win10: single 1px border
     Win10,
+    /// Win8.1: 1px outer outline + 6px border + 1px inner outline
+    /// (SPEC/win8_border.md; the 1px outlines are never DPI-scaled)
+    Win81,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

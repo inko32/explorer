@@ -147,6 +147,8 @@ pub mod cmd {
     pub const TOGGLE_DARK: u32 = 74;
     pub const TOGGLE_BORDER: u32 = 75;
     pub const TOGGLE_FRAME: u32 = 76;
+    /// View → Options: the Win8.1 (double outline) frame style.
+    pub const TOGGLE_FRAME_81: u32 = 309;
     pub const TOGGLE_GRAY_DISABLED: u32 = 307;
     /// View → Options: use the system Breeze icon theme instead of the
     /// embedded explorer pack.
@@ -471,6 +473,7 @@ pub struct Snapshot {
     pub dark: bool,
     pub self_border: bool,
     pub win8_frame: bool,
+    pub win81_frame: bool,
     /// TEMP: rainbow backdrop toggle state.
     pub rainbow: bool,
     /// Disabled buttons/icons get the gray-scaled-faded style.
@@ -499,6 +502,7 @@ impl Explorer {
             dark: self.dark,
             self_border: self.self_border,
             win8_frame: self.frame_style == crate::model::FrameStyle::Win8,
+            win81_frame: self.frame_style == crate::model::FrameStyle::Win81,
             rainbow: self.rainbow,
             disabled_gray: self.disabled_gray,
             breeze_icons: self.breeze_icons,
@@ -610,6 +614,7 @@ impl CommandHandler for ExplorerHandler {
             cmd::TOGGLE_DARK => out.push(Message::ToggleDark),
             cmd::TOGGLE_BORDER => out.push(Message::ToggleSelfBorder),
             cmd::TOGGLE_FRAME => out.push(Message::ToggleFrameStyle),
+            cmd::TOGGLE_FRAME_81 => out.push(Message::ToggleFrame81),
             cmd::TOGGLE_GRAY_DISABLED => out.push(Message::ToggleGrayDisabled),
             cmd::TOGGLE_ICON_PACK => out.push(Message::ToggleIconPack),
             cmd::TOGGLE_RAINBOW => out.push(Message::ToggleRainbow),
@@ -669,6 +674,7 @@ impl CommandHandler for ExplorerHandler {
                     cmd::TOGGLE_DARK => snap.dark,
                     cmd::TOGGLE_BORDER => snap.self_border,
                     cmd::TOGGLE_FRAME => snap.win8_frame,
+                    cmd::TOGGLE_FRAME_81 => snap.win81_frame,
                     cmd::TOGGLE_GRAY_DISABLED => snap.disabled_gray,
                     cmd::TOGGLE_ICON_PACK => snap.breeze_icons,
                     cmd::TOGGLE_RAINBOW => snap.rainbow,
@@ -749,6 +755,7 @@ fn command_name(command: u32) -> String {
         cmd::TOGGLE_DARK => "Dark mode",
         cmd::TOGGLE_BORDER => "Custom window border",
         cmd::TOGGLE_FRAME => "Windows 8 frame style",
+        cmd::TOGGLE_FRAME_81 => "Windows 8.1 frame style",
         cmd::TOGGLE_GRAY_DISABLED => "Gray out unavailable buttons",
         cmd::TOGGLE_ICON_PACK => "Breeze icon theme",
         cmd::TOGGLE_RAINBOW => "Rainbow pane backdrop",

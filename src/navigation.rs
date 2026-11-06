@@ -404,7 +404,7 @@ pub(crate) fn bar_rect(state: &Explorer) -> iced::Rectangle {
         (content_w - 12.0 - (x - band_x)).max(0.0)
     };
     let title_h = if state.self_border {
-        crate::border::TITLEBAR_H
+        crate::border::titlebar_h(state.frame_style)
     } else {
         0.0
     };

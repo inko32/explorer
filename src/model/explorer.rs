@@ -105,6 +105,9 @@ pub struct Explorer {
     /// editable full path (SPEC/Address_bar.md).
     pub(crate) address_edit: Option<String>,
     pub maximized: bool,
+    /// Caption-button hover bits (bit 0 = minimize, 1 = maximize); only
+    /// the Win8.1 frame uses them (glyph color swap on hover).
+    pub cap_hover: u8,
     /// Ctrl held (drives Ctrl+scroll view zoom over the file view).
     pub ctrl_held: bool,
     /// Shift held (Shift+click range selection).
@@ -268,6 +271,7 @@ impl Explorer {
             bar_listing: None,
             address_edit: None,
             maximized: false,
+            cap_hover: 0,
             ctrl_held: false,
             shift_held: false,
             sel_anchor: None,
@@ -432,9 +436,9 @@ impl Explorer {
     /// selector shows "just below the address bar, not like a menu").
     fn bar_anchor(&self) -> (f32, f32) {
         let (ft, fr, _, fl) =
-            crate::border::frame_insets_pub(self.self_border, self.frame_style);
+            crate::border::frame_insets_pub(self.self_border, self.frame_style, self.maximized);
         let title_h = if self.self_border {
-            crate::border::TITLEBAR_H
+            crate::border::titlebar_h(self.frame_style)
         } else {
             0.0
         };
@@ -582,7 +586,7 @@ impl Explorer {
     /// shrinks below `nav_resize_below` and hides below `nav_below`.
     /// ui.rs lays out with exactly these widths.
     pub(crate) fn layout_widths(&self) -> (f32, f32) {
-        let (_, fr, _, fl) = crate::border::frame_insets_pub(self.self_border, self.frame_style);
+        let (_, fr, _, fl) = crate::border::frame_insets_pub(self.self_border, self.frame_style, self.maximized);
         let content_w = self.win_w - fl - fr;
         let mult = self.dpi_multiplier();
         let (_, min_nav_w, nav_resize_below, _) = self.ribbon.sacrifice();
@@ -610,7 +614,7 @@ impl Explorer {
     /// the main row. The model needs it for the §9 scroll anchor (grid
     /// columns depend on the width).
     pub(crate) fn file_pane_width(&self) -> f32 {
-        let (_, fr, _, fl) = crate::border::frame_insets_pub(self.self_border, self.frame_style);
+        let (_, fr, _, fl) = crate::border::frame_insets_pub(self.self_border, self.frame_style, self.maximized);
         let content_w = self.win_w - fl - fr;
         let (nav_w, side_w) = self.layout_widths();
         // nav visible: the 4px boundary strip (2px colorless, 1px
@@ -1370,7 +1374,15 @@ impl Explorer {
             Message::ToggleFrameStyle => {
                 self.frame_style = match self.frame_style {
                     FrameStyle::Win8 => FrameStyle::Win10,
-                    FrameStyle::Win10 => FrameStyle::Win8,
+                    FrameStyle::Win10 => FrameStyle::Win81,
+                    FrameStyle::Win81 => FrameStyle::Win8,
+                };
+                iced::Task::none()
+            }
+            Message::ToggleFrame81 => {
+                self.frame_style = match self.frame_style {
+                    FrameStyle::Win81 => FrameStyle::Win8,
+                    _ => FrameStyle::Win81,
                 };
                 iced::Task::none()
             }
@@ -1392,6 +1404,25 @@ impl Explorer {
                         self.system_scale, self.dpi_target
                     );
                 }
+                // a resize can be the windowing system maximizing or
+                // restoring the window (compositor keybind/snap) — sync
+                // the real state instead of trusting the toggle flag
+                if let Some(id) = self.window {
+                    return iced::window::is_maximized(id).map(Message::MaximizedState);
+                }
+                iced::Task::none()
+            }
+            Message::MaximizedState(max) => {
+                self.maximized = max;
+                iced::Task::none()
+            }
+            Message::CaptionHover(bit, hovered) => {
+                let mask = 1u8 << bit;
+                self.cap_hover = if hovered {
+                    self.cap_hover | mask
+                } else {
+                    self.cap_hover & !mask
+                };
                 iced::Task::none()
             }
             Message::ToggleSelfBorder => {
@@ -1707,7 +1738,7 @@ impl Explorer {
             }
             Message::BarSplitMove(x) => {
                 let (_, fr, _, fl) =
-                    crate::border::frame_insets_pub(self.self_border, self.frame_style);
+                    crate::border::frame_insets_pub(self.self_border, self.frame_style, self.maximized);
                 let content_w = (self.win_w - fl - fr).max(320.0);
                 // search right edge sits at content_w - 12 (band padding);
                 // the splitter (12px) hugs the search left edge, so its
@@ -1720,14 +1751,14 @@ impl Explorer {
             Message::PaneSplitMove(x) => {
                 // the pane's right edge is the content area's right edge
                 let (_, fr, _, _) =
-                    crate::border::frame_insets_pub(self.self_border, self.frame_style);
+                    crate::border::frame_insets_pub(self.self_border, self.frame_style, self.maximized);
                 let content_w = (self.win_w - fr).max(160.0);
                 self.pane_width = crate::pane::clamped(content_w - x, content_w);
                 iced::Task::none()
             }
             Message::NavSplitMove(x) => {
                 let (_, fr, _, fl) =
-                    crate::border::frame_insets_pub(self.self_border, self.frame_style);
+                    crate::border::frame_insets_pub(self.self_border, self.frame_style, self.maximized);
                 let content_w = self.win_w - fl - fr;
                 self.nav_width = (x - fl).clamp(MIN_NAV_W, (content_w * 0.5).max(MIN_NAV_W));
                 iced::Task::none()

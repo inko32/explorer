@@ -84,8 +84,16 @@ pub(crate) fn resize_zone(
 /// sides+bottom (the classic sizing border); Win10: 1px all around.
 /// The internal content is inset by exactly these amounts - the "virtual
 /// window" shrinks, the frame never covers content.
-/// Frame insets without an Explorer (model-side splitter math).
-pub fn frame_insets_pub(self_border: bool, style: crate::model::FrameStyle) -> (f32, f32, f32, f32) {
+/// The frame's published insets (top, right, bottom, left) — the border
+/// module's message to the internal layout: the available-space origin
+/// and size for every non-frame widget (model splitter math, view layout,
+/// menu anchors). Maximizer-aware: the maximized frame draws fewer
+/// borders, so the available space grows.
+pub fn frame_insets_pub(
+    self_border: bool,
+    style: crate::model::FrameStyle,
+    maximized: bool,
+) -> (f32, f32, f32, f32) {
     if !self_border {
         return (0.0, 0.0, 0.0, 0.0);
     }
@@ -98,17 +106,33 @@ pub fn frame_insets_pub(self_border: bool, style: crate::model::FrameStyle) -> (
         // follows the DPI
         crate::model::FrameStyle::Win8 => (w(1.0), 6.0, 6.0, 6.0),
         crate::model::FrameStyle::Win10 => (w(1.0), w(1.0), w(1.0), w(1.0)),
+        // Win8.1 (SPEC/win8_border.md): per side 1px outer outline +
+        // 6px border + 1px inner outline. The 1px outlines keep a
+        // constant physical width (never DPI-scaled, like every 1px
+        // border in the app); the 6px border follows the DPI. The top
+        // holds only the outer outline — the 29px title bar and the
+        // top inner outline are content-level rows.
+        crate::model::FrameStyle::Win81 if !maximized => {
+            (w(1.0), 6.0 + 2.0 * w(1.0), 6.0 + 2.0 * w(1.0), 6.0 + 2.0 * w(1.0))
+        }
+        // maximized: the outer outline, the 6px side/bottom border and
+        // the side inner outlines are omitted — the available space
+        // extends to the window edges on all four sides; only the 1px
+        // inner outline under the 29px title bar remains (drawn at the
+        // content level, not part of the insets)
+        crate::model::FrameStyle::Win81 => (0.0, 0.0, 0.0, 0.0),
     }
 }
 
 pub(crate) fn frame_insets(state: &Explorer) -> (f32, f32, f32, f32) {
-    frame_insets_pub(state.self_border, state.frame_style)
+    frame_insets_pub(state.self_border, state.frame_style, state.maximized)
 }
 
 pub(crate) fn frame_color(state: &Explorer, skin: skin::Skin) -> Color {
     match state.frame_style {
         crate::model::FrameStyle::Win8 => skin.accent,
         crate::model::FrameStyle::Win10 => skin.accent_dark,
+        crate::model::FrameStyle::Win81 => skin.accent,
     }
 }
 
@@ -166,14 +190,63 @@ static CAPTION_GLYPHS: [CaptionGlyph; 3] = [
     },
 ];
 
+/// Win8.1 frame colors (SPEC/win8_border.md "colour for example").
+/// Hard-coded for now; the theme token set will own them later.
+pub(crate) mod win81 {
+    use iced::Color;
+    /// window accent (border fill, title bar)
+    pub const ACCENT: Color = Color::from_rgb8(0x5a, 0x83, 0xbb);
+    /// darkened accent (the two 1px outlines)
+    pub const OUTLINE: Color = Color::from_rgb8(0x45, 0x64, 0x8f);
+    /// close button background at rest / hovered
+    pub const CLOSE_IDLE: Color = Color::from_rgb8(0xc7, 0x50, 0x50);
+    pub const CLOSE_HOVER: Color = Color::from_rgb8(0xe0, 0x43, 0x43);
+    /// minimize/maximize glyph: black at rest, white on hover
+    pub const GLYPH_IDLE: Color = Color::from_rgb8(0x00, 0x00, 0x00);
+    pub const GLYPH_HOVER: Color = Color::from_rgb8(0xff, 0xff, 0xff);
+    /// minimize/maximize hover background (slight-emphasized accent)
+    pub const HOVER_BG: Color = Color::from_rgb8(0x36, 0x65, 0xb3);
+}
+
+/// Win8.1 caption glyphs (SPEC/win8_border.md): proper stroke paths in a
+/// viewBox spanning the WHOLE button area (25x20 / 45x20), so the glyphs
+/// keep the exact centering the spec measures (e.g. 8+8+9 = 25px for the
+/// minimize glyph). `{glyph}` = the minimize/maximize fill color (black at
+/// rest, white on hover — the close glyph is always white per the spec).
+static CAPTION_GLYPHS_81: [&str; 4] = [
+    // minimize: solid 8x2 bar (the bottom two rows of the 8x8 glyph)
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 25 20'>\
+     <rect x='8.5' y='12' width='8' height='2' fill='{glyph}'/></svg>",
+    // maximize (normal): 10x8 outline — 2px top bar, 1px sides/bottom,
+    // one even-odd path (outer rect minus the hollow interior)
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 25 20'>\
+     <path fill='{glyph}' fill-rule='evenodd' d='M8 6 H18 V14 H8 Z M9 8 H17 V13 H9 Z'/></svg>",
+    // close: 8x7 X, 2px strokes with square caps (solid connecting
+    // squares at the corners, no gaps)
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 45 20'>\
+     <line x1='18.5' y1='6.5' x2='26.5' y2='13.5' stroke='#ffffff' stroke-width='2' stroke-linecap='square'/>\
+     <line x1='26.5' y1='6.5' x2='18.5' y2='13.5' stroke='#ffffff' stroke-width='2' stroke-linecap='square'/></svg>",
+    // maximize (maximized window): 10x10 restore glyph — the back window
+    // as one L-shaped path (top bar + right column), the front window as
+    // an even-odd outline
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 25 20'>\
+     <path fill='{glyph}' d='M9.5 5 H18.5 V15 H17.5 V6 H9.5 Z'/>\
+     <path fill='{glyph}' fill-rule='evenodd' d='M7.5 7 H15.5 V15 H7.5 Z M8.5 9 H14.5 V14 H8.5 Z'/></svg>",
+];
+
 /// Render a caption glyph for the frame style: `{title}` takes the
-/// title-bar text color (Win8); Win10 templates have no tokens.
-fn caption_svg(template: &'static str, skin: skin::Skin) -> iced::widget::svg::Handle {
-    let doc = if template.contains("{title}") {
-        template.replace("{title}", &crate::icons::hex(skin.title_text))
-    } else {
-        template.to_string()
-    };
+/// title-bar text color (Win8); `{glyph}` takes the button's glyph color
+/// (Win8.1 min/max: black at rest, white on hover). Templates without
+/// tokens (Win10, the Win8.1 close X) are white as authored.
+fn caption_svg(
+    template: &'static str,
+    skin: skin::Skin,
+    glyph: Color,
+) -> iced::widget::svg::Handle {
+    let mut doc = template.replace("{glyph}", &crate::icons::hex(glyph));
+    if doc.contains("{title}") {
+        doc = doc.replace("{title}", &crate::icons::hex(skin.title_text));
+    }
     iced::widget::svg::Handle::from_memory(doc.into_bytes())
 }
 
@@ -186,9 +259,22 @@ pub(crate) fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'st
     // buttons hang below the top frame (y=2), height 21 = 69% of the 30px
     // title bar; adjacent, no gaps; min/max w = 1.33x h, close w = 2.24x h;
     // glyph baseline at ~70% of the button height.
+    let outline = crate::theme::border_w(1.0);
     let (mw, cw, h, glyph, y, right_pad) = match state.frame_style {
         crate::model::FrameStyle::Win8 => (28.0, 47.0, 21.0, 13.0, 1.0, 6.0),
         crate::model::FrameStyle::Win10 => (46.0, 46.0, 29.0, 15.0, 1.0, 1.0),
+        // SPEC/win8_border.md (measured at 100% dpi): 20px buttons just
+        // below the 1px outer outline; 6px in front of the right inner
+        // outline; 25/25/45 widths with 1px (never DPI-scaled) gaps.
+        // The Win8.1 SVGs span the whole button area (their viewBox
+        // bakes in the exact glyph centering).
+        // maximized: the outer outline is omitted (buttons shift up to
+        // y=0) and the buttons shift right 3px (half the side width),
+        // leaving 3px + the 1px outline in front of them
+        crate::model::FrameStyle::Win81 if state.maximized => {
+            (25.0, 45.0, 20.0, 20.0, 0.0, 3.0 + outline)
+        }
+        crate::model::FrameStyle::Win81 => (25.0, 45.0, 20.0, 20.0, outline, 6.0 + outline),
     };
     let glyphs: [&'static str; 3] = match state.frame_style {
         crate::model::FrameStyle::Win8 => [
@@ -201,36 +287,59 @@ pub(crate) fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'st
             CAPTION_GLYPHS[1].win10,
             CAPTION_GLYPHS[2].win10,
         ],
-    };
-    // Win8: buttons are opaque at rest (titlebar blue / close red) so the
-    // frame's top edge never shows as a line above/through them
-    let rest_bg: Option<Color> = match state.frame_style {
-        crate::model::FrameStyle::Win8 => Some(skin.accent),
-        crate::model::FrameStyle::Win10 => None,
+        crate::model::FrameStyle::Win81 => [
+            CAPTION_GLYPHS_81[0],
+            // the maximize button shows the restore glyph on a
+            // maximized window (SPEC/win8_border.md)
+            if state.maximized {
+                CAPTION_GLYPHS_81[3]
+            } else {
+                CAPTION_GLYPHS_81[1]
+            },
+            CAPTION_GLYPHS_81[2],
+        ],
     };
     // glyph bottoms share one baseline at ~70% of the button height
+    let style = state.frame_style;
     let one = move |glyph_tpl: &'static str,
                     w: f32,
                     msg: Message,
                     hover_bg: Color,
-                    solid: bool|
+                    close_hover: Color,
+                    close_pressed: Color,
+                    solid: bool,
+                    glyph_color: Color,
+                    hover_bit: Option<u8>|
           -> Element<'static, Message> {
-        // Win8 keeps the close button red even at rest; Win10 shows it
-        // like the other caption buttons (accent bar showing through)
-        // and only turns red on hover/press.
-        let solid_rest = solid && rest_bg.is_some();
-        let rest = if solid_rest { Some(skin.close_idle) } else { rest_bg };
+        // at-rest background: Win8 buttons are opaque (titlebar blue /
+        // close red) so the frame's top edge never shows through them;
+        // Win10 shows the accent bar through; the Win8.1 close button is
+        // red at rest per the spec's color example
+        let rest: Option<Color> = match (style, solid) {
+            (crate::model::FrameStyle::Win8, true) => Some(skin.close_idle),
+            (crate::model::FrameStyle::Win8, false) => Some(skin.accent),
+            (crate::model::FrameStyle::Win10, _) => None,
+            (crate::model::FrameStyle::Win81, true) => Some(win81::CLOSE_IDLE),
+            (crate::model::FrameStyle::Win81, false) => None,
+        };
         let blend_white = |c: Color, a: f32| Color {
             r: c.r + (1.0 - c.r) * a,
             g: c.g + (1.0 - c.g) * a,
             b: c.b + (1.0 - c.b) * a,
             a: 1.0,
         };
-        button(
+        // Win8.1: the svg covers the whole button; otherwise a centered
+        // square glyph box
+        let (gw, gh) = if style == crate::model::FrameStyle::Win81 {
+            (w, h)
+        } else {
+            (glyph, glyph)
+        };
+        let btn = button(
             container(
-                iced::widget::svg(caption_svg(glyph_tpl, skin))
-                    .width(Length::Fixed(glyph))
-                    .height(Length::Fixed(glyph)),
+                iced::widget::svg(caption_svg(glyph_tpl, skin, glyph_color))
+                    .width(Length::Fixed(gw))
+                    .height(Length::Fixed(gh)),
             )
             .width(Length::Fixed(w))
             .height(Length::Fixed(h))
@@ -242,8 +351,8 @@ pub(crate) fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'st
         .padding(0)
         .style(move |_t, status| button::Style {
             background: match (solid, status) {
-                (true, button::Status::Hovered) => Some(skin.close_hover.into()),
-                (true, button::Status::Pressed) => Some(skin.close_pressed.into()),
+                (true, button::Status::Hovered) => Some(close_hover.into()),
+                (true, button::Status::Pressed) => Some(close_pressed.into()),
                 (true, _) => rest.map(Into::into),
                 (false, button::Status::Hovered) => Some(match rest {
                     Some(c) => blend_white(c, 0.18).into(),
@@ -261,16 +370,119 @@ pub(crate) fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'st
             snap: true,
         })
         .on_press(msg)
-        .boxed()
+        .boxed();
+        // Win8.1 min/max: the glyph turns white on hover, which the
+        // button style can't do to an svg — track enter/exit explicitly
+        match hover_bit {
+            Some(bit) => mouse_area(btn)
+                .on_enter(Message::CaptionHover(bit, true))
+                .on_exit(Message::CaptionHover(bit, false))
+                .boxed(),
+            None => btn,
+        }
     };
     let ghost = skin.glass_ghost;
-    container(
+    let captions = if style == crate::model::FrameStyle::Win81 {
+        // 1px gaps between the buttons, never DPI-scaled; the min/max
+        // glyphs are black at rest and white on hover (SPEC color example)
+        let min_glyph = if state.cap_hover & 1 != 0 {
+            win81::GLYPH_HOVER
+        } else {
+            win81::GLYPH_IDLE
+        };
+        let max_glyph = if state.cap_hover & 2 != 0 {
+            win81::GLYPH_HOVER
+        } else {
+            win81::GLYPH_IDLE
+        };
         row![
-            one(glyphs[0], mw, Message::Minimize, ghost, false),
-            one(glyphs[1], mw, Message::Maximize, ghost, false),
-            one(glyphs[2], cw, Message::Close, skin.close_hover, true),
+            one(
+                glyphs[0],
+                mw,
+                Message::Minimize,
+                win81::HOVER_BG,
+                win81::CLOSE_HOVER,
+                win81::CLOSE_HOVER,
+                false,
+                min_glyph,
+                Some(0)
+            ),
+            Space::new()
+                .width(Length::Fixed(outline))
+                .height(Length::Fixed(h)),
+            one(
+                glyphs[1],
+                mw,
+                Message::Maximize,
+                win81::HOVER_BG,
+                win81::CLOSE_HOVER,
+                win81::CLOSE_HOVER,
+                false,
+                max_glyph,
+                Some(1)
+            ),
+            Space::new()
+                .width(Length::Fixed(outline))
+                .height(Length::Fixed(h)),
+            one(
+                glyphs[2],
+                cw,
+                Message::Close,
+                win81::CLOSE_HOVER,
+                win81::CLOSE_HOVER,
+                win81::CLOSE_HOVER,
+                true,
+                Color::WHITE,
+                None
+            ),
         ]
-        .height(Length::Fixed(h)),
+        .height(Length::Fixed(h))
+    } else {
+        // the Win8 glyphs take the title-bar text color; Win10 white
+        let mm_glyph = if style == crate::model::FrameStyle::Win8 {
+            skin.title_text
+        } else {
+            Color::WHITE
+        };
+        row![
+            one(
+                glyphs[0],
+                mw,
+                Message::Minimize,
+                ghost,
+                skin.close_hover,
+                skin.close_pressed,
+                false,
+                mm_glyph,
+                None
+            ),
+            one(
+                glyphs[1],
+                mw,
+                Message::Maximize,
+                ghost,
+                skin.close_hover,
+                skin.close_pressed,
+                false,
+                mm_glyph,
+                None
+            ),
+            one(
+                glyphs[2],
+                cw,
+                Message::Close,
+                skin.close_hover,
+                skin.close_hover,
+                skin.close_pressed,
+                true,
+                Color::WHITE,
+                None
+            ),
+        ]
+        .height(Length::Fixed(h))
+    };
+    container(
+        captions,
     )
     .width(Length::Fill)
     .height(Length::Fill)
@@ -311,6 +523,26 @@ pub(crate) fn resize_frame(margin: f32) -> Element<'static, Message> {
 /// plain drag band: window icon, centered title, caption space.
 pub(crate) const TITLEBAR_H: f32 = 30.0;
 
+/// Height of the title-bar WIDGET. Win8.1 draws a 29px bar
+/// (SPEC/win8_border.md, measured at 100% dpi); the 1px inner outline
+/// beneath it is a frame-level row, not part of the bar.
+fn bar_h(style: crate::model::FrameStyle) -> f32 {
+    match style {
+        crate::model::FrameStyle::Win81 => 29.0,
+        _ => TITLEBAR_H,
+    }
+}
+
+/// Height the model reserves below the frame's top inset for the title
+/// bar: the bar plus, for the Win8.1 frame, the 1px inner-outline row
+/// under it (kept at a constant physical width, never DPI-scaled).
+pub(crate) fn titlebar_h(style: crate::model::FrameStyle) -> f32 {
+    match style {
+        crate::model::FrameStyle::Win81 => 29.0 + crate::theme::border_w(1.0),
+        _ => TITLEBAR_H,
+    }
+}
+
 /// Contextual tab-set blocks (Win8): a pastel accent block per visible
 /// contextual set, bottom-aligned in the title bar, positioned exactly
 /// above its ribbon tabs (geometry published by the ribbon widget).
@@ -321,7 +553,8 @@ fn contextual_blocks(state: &Explorer) -> Element<'static, Message> {
         return Space::new().width(Length::Fixed(0.0)).height(Length::Fixed(0.0)).boxed();
     }
     let selected = state.ribbon.framework().view().selected_tab();
-    let mut r: iced::widget::Row<Element<'_, Message>> = row![].height(Length::Fixed(TITLEBAR_H));
+    let bar_h = bar_h(state.frame_style);
+    let mut r: iced::widget::Row<Element<'_, Message>> = row![].height(Length::Fixed(bar_h));
     let mut prev_end = 0.0f32;
     for b in state.ribbon.contextual_blocks() {
         // the block spans exactly its tab run on the strip below
@@ -359,7 +592,7 @@ fn contextual_blocks(state: &Explorer) -> Element<'static, Message> {
         });
         let block = container(solid)
             .width(Length::Fixed(bw))
-            .height(Length::Fixed(TITLEBAR_H))
+            .height(Length::Fixed(bar_h))
             .align_y(iced::Alignment::End);
         r = r.push(
             mouse_area(block).on_press(Message::BlockPress(b.first_tab)).boxed(),
@@ -421,9 +654,25 @@ fn titlebar_qat(state: &Explorer, skin: skin::Skin) -> Element<'static, Message>
 
 pub(crate) fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     let icon_zone_w: f32 = 28.0; // window icon zone at the bar's left
-    let captions_w = match state.frame_style {
-        crate::model::FrameStyle::Win8 => 28.0 + 28.0 + 47.0 + 6.0,
-        crate::model::FrameStyle::Win10 => 46.0 * 3.0,
+    let bar_h = bar_h(state.frame_style);
+    // maximized Win8.1: the 6px side border is omitted, so the bar's
+    // left-aligned content shifts left by those 6px (only the 1px
+    // outline position stays) and the caption buttons shift right by
+    // 3px (half the side width) — the reserved captions zone grows 3px
+    let (left_pad, captions_w) = match state.frame_style {
+        crate::model::FrameStyle::Win8 => (0.0, 28.0 + 28.0 + 47.0 + 6.0),
+        crate::model::FrameStyle::Win10 => (0.0, 46.0 * 3.0),
+        // 25 + 1 + 25 + 1 + 45 buttons, then 6px + the 1px inner
+        // outline in front of the right border (1px widths never
+        // DPI-scaled)
+        crate::model::FrameStyle::Win81 => {
+            let base = 25.0 * 2.0 + 45.0 + 6.0 + 3.0 * crate::theme::border_w(1.0);
+            if state.maximized {
+                (crate::theme::border_w(1.0), base + 3.0)
+            } else {
+                (0.0, base)
+            }
+        }
     };
     let (_, fr, _, fl) = frame_insets(state);
     let content_w = (state.win_w - fr - fl).max(240.0);
@@ -475,20 +724,52 @@ pub(crate) fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Messag
     if qat_visible {
         head = head.push(titlebar_qat(state, skin));
     }
+    // the Win8.1 title bar takes the spec's accent color example
+    // (hard-coded in `win81`; later a theme token)
+    let bar_bg = match state.frame_style {
+        crate::model::FrameStyle::Win81 => win81::ACCENT,
+        _ => skin.accent,
+    };
     let base = container(
         row![
+            Space::new().width(Length::Fixed(left_pad)),
             head,
             Space::new().width(Length::Fixed((title_left - head_w).max(0.0))),
             drag_title,
-            mouse_area(Space::new().width(Length::Fill).height(Length::Fixed(TITLEBAR_H)))
+            mouse_area(Space::new().width(Length::Fill).height(Length::Fixed(bar_h)))
                 .on_press(Message::TitlebarPress)
                 .on_double_click(Message::TitlebarDoubleClick),
             Space::new().width(Length::Fixed(captions_w)),
         ]
-        .height(Length::Fixed(TITLEBAR_H)),
+        .height(Length::Fixed(bar_h)),
     )
     .width(Length::Fill)
-    .height(Length::Fixed(TITLEBAR_H))
-    .style(bg(skin.accent));
+    .height(Length::Fixed(bar_h))
+    .style(bg(bar_bg));
     stack![base, contextual_blocks(state)].boxed()
+}
+
+#[cfg(test)]
+mod tests {
+    // Every caption glyph template must be valid SVG once its color
+    // tokens are substituted — a document usvg can't parse renders as
+    // nothing (blank caption buttons).
+    #[test]
+    fn caption_glyph_templates_parse() {
+        use super::{CAPTION_GLYPHS, CAPTION_GLYPHS_81};
+        let opt = resvg::usvg::Options::default();
+        let check = |t: &str| {
+            let doc = t.replace("{glyph}", "#000000").replace("{title}", "#000000");
+            let tree = resvg::usvg::Tree::from_str(&doc, &opt)
+                .unwrap_or_else(|e| panic!("caption glyph failed to parse: {e}\n{doc}"));
+            assert!(tree.size().width() > 0.0 && tree.size().height() > 0.0);
+        };
+        for t in CAPTION_GLYPHS_81 {
+            check(t);
+        }
+        for g in CAPTION_GLYPHS.iter() {
+            check(g.win8);
+            check(g.win10);
+        }
+    }
 }
