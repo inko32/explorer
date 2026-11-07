@@ -11,4 +11,30 @@
 # through them. 1.0 = fully opaque border. Below 1.0 the window must be
 # created transparent (winit only accepts that at window creation, so
 # main.rs decides from this value at startup).
-border_opacity: 1.0
+border_opacity: 0.9
+
+# All colors are #RRGGBB (a trailing alpha pair #RRGGBBAA also parses).
+# Defaults are the SPEC/win8_border.md "colour for example" set; every
+# key falls back to its default, so a partial override file works.
+
+# window accent: border fill + title bar
+window_accent: "#5a83bb"
+# darkened accent: the two 1px outlines
+outline: "#45648f"
+
+# close button (red at rest per the spec's color example)
+close_idle: "#c75050"      # background at rest
+close_hover: "#e04343"     # background on hover
+close_pressed: "#e04343"   # background on click
+close_glyph: "#ffffff"     # the X glyph (always white per the spec)
+
+# minimize / maximize buttons (their area is transparent at rest)
+glyph_idle: "#000000"      # glyph at rest
+glyph_hover: "#ffffff"     # glyph on hover
+hover_bg: "#3665b3"        # hover background (slight-emphasized accent)
+hover_pressed: "#3665b3b3" # on click: hover_bg at ~70% alpha
+
+# title-bar caption text size (px at 100% dpi). The Win8.1 title bar
+# is taller chrome than the Win8/Win10 bars, so its title reads better
+# two points up from the shared fonts.yaml titlebar.title (12).
+title_size: 14.0
