@@ -438,7 +438,7 @@ impl Explorer {
         let (ft, fr, _, fl) =
             crate::border::frame_insets_pub(self.self_border, self.frame_style, self.maximized);
         let title_h = if self.self_border {
-            crate::border::titlebar_h(self.frame_style)
+            crate::border::titlebar_h(self.frame_style, self.maximized)
         } else {
             0.0
         };
