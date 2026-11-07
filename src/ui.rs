@@ -497,7 +497,12 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
             crate::model::FrameStyle::Win8 | crate::model::FrameStyle::Win81 => 8.0,
             crate::model::FrameStyle::Win10 => 5.0,
         };
-        let mut s: iced::widget::Stack<Element<'_, Message>> = stack![framed, crate::border::resize_frame(grab),
+        // a maximized Win8.1 window can't be edge-resized: omit the
+        // top resize zones (dead resize cursor over the caption
+        // corner) — the corner belongs to the close button instead
+        let top_zones = !(state.maximized
+            && state.frame_style == crate::model::FrameStyle::Win81);
+        let mut s: iced::widget::Stack<Element<'_, Message>> = stack![framed, crate::border::resize_frame(grab, top_zones),
                            crate::border::caption_overlay(state, skin)];
         // splitter drag: hold the resize cursor window-wide while dragging
         // (the pointer leaves the small splitter target mid-drag)

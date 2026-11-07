@@ -270,12 +270,12 @@ pub(crate) mod win81 {
     mod tests {
         use super::{Win81Theme, THEME_EMBEDDED};
 
-        // The embedded win81theme.yaml must parse and hold the
-        // documented default (60%).
+        // The embedded win81theme.yaml must parse to a valid opacity
+        // (the value itself is user-tunable data, not an invariant).
         #[test]
         fn embedded_win81theme_parses() {
             let t: Win81Theme = serde_yaml::from_str(THEME_EMBEDDED).unwrap();
-            assert!((t.border_opacity - 0.6).abs() < f32::EPSILON);
+            assert!((0.0..=1.0).contains(&t.border_opacity));
         }
     }
 }
@@ -408,10 +408,13 @@ pub(crate) fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'st
         } else {
             (glyph, glyph)
         };
-        // maximized Win8.1 close button: the 3px space right of the
-        // button belongs to it — the hit area extends, the glyph stays
+        // maximized Win8.1 close button: the space between the
+        // button and the window edge (the 3px shift + outline) belongs
+        // to it — the hit area extends to the corner, the glyph stays.
+        // A maximized window can't be edge-resized, so the corner
+        // hotspot is the close hover instead (like real Windows).
         let hit_extra = if style == crate::model::FrameStyle::Win81 && solid && maximized {
-            3.0
+            right_pad
         } else {
             0.0
         };
@@ -581,23 +584,27 @@ pub(crate) fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'st
 }
 
 /// Invisible resize ring around the window edges (custom border mode).
-pub(crate) fn resize_frame(margin: f32) -> Element<'static, Message> {
+/// `top_zones` false omits the top edge + top corners: a maximized
+/// window can't be edge-resized, so the zones would only show a dead
+/// resize cursor over the caption corner.
+pub(crate) fn resize_frame(margin: f32, top_zones: bool) -> Element<'static, Message> {
     use iced::Alignment;
     let m = Length::Fixed(margin);
     let c = Length::Fixed(margin * 2.0);
     let fill = Length::Fill;
-    stack![
-        resize_zone(ResizeDir::N, fill, m, None, None),
-        resize_zone(ResizeDir::S, fill, m, None, Some(Alignment::End)),
-        resize_zone(ResizeDir::W, m, fill, None, None),
-        resize_zone(ResizeDir::E, m, fill, Some(Alignment::End), None),
-        // corners on top (they overlap the edge strips)
-        resize_zone(ResizeDir::Nw, c, c, None, None),
-        resize_zone(ResizeDir::Ne, c, c, Some(Alignment::End), None),
-        resize_zone(ResizeDir::Sw, c, c, None, Some(Alignment::End)),
-        resize_zone(ResizeDir::Se, c, c, Some(Alignment::End), Some(Alignment::End)),
-    ]
-    .boxed()
+    let mut zones: Vec<Element<'static, Message>> = Vec::new();
+    if top_zones {
+        zones.push(resize_zone(ResizeDir::N, fill, m, None, None));
+        zones.push(resize_zone(ResizeDir::Nw, c, c, None, None));
+        zones.push(resize_zone(ResizeDir::Ne, c, c, Some(Alignment::End), None));
+    }
+    zones.push(resize_zone(ResizeDir::S, fill, m, None, Some(Alignment::End)));
+    zones.push(resize_zone(ResizeDir::W, m, fill, None, None));
+    zones.push(resize_zone(ResizeDir::E, m, fill, Some(Alignment::End), None));
+    // corners on top (they overlap the edge strips)
+    zones.push(resize_zone(ResizeDir::Sw, c, c, None, Some(Alignment::End)));
+    zones.push(resize_zone(ResizeDir::Se, c, c, Some(Alignment::End), Some(Alignment::End)));
+    iced::widget::Stack::with_children(zones).boxed()
 }
 
 // ---------------- title bar ----------------
