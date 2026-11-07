@@ -206,6 +206,78 @@ pub(crate) mod win81 {
     pub const GLYPH_HOVER: Color = Color::from_rgb8(0xff, 0xff, 0xff);
     /// minimize/maximize hover background (slight-emphasized accent)
     pub const HOVER_BG: Color = Color::from_rgb8(0x36, 0x65, 0xb3);
+
+    // ---- border opacity (win81theme.yaml) ----
+    //
+    // The frame accent fill, the title bar and the outlines take this
+    // alpha so the content behind the window shows through them (the
+    // window itself is created transparent at startup when the opacity
+    // is below 1.0 — winit only accepts transparency at window
+    // creation). User override at ~/.config/explorer/win81theme.yaml,
+    // the embedded copy is the fallback (same pattern as theme.yaml).
+    // The caption buttons stay opaque — they must stay readable.
+
+    const THEME_EMBEDDED: &str = include_str!("../assets/win81theme.yaml");
+
+    #[derive(serde::Deserialize)]
+    struct Win81Theme {
+        /// 0.0-1.0; the embedded default is 0.6 (60%).
+        #[serde(default = "default_opacity")]
+        border_opacity: f32,
+    }
+
+    fn default_opacity() -> f32 {
+        0.6
+    }
+
+    /// Border opacity, win81theme.yaml `border_opacity` (0.0-1.0).
+    pub fn opacity() -> f32 {
+        static THEME: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+        *THEME.get_or_init(load_opacity)
+    }
+
+    fn load_opacity() -> f32 {
+        let user = std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .map(|h| h.join(".config/explorer/win81theme.yaml"));
+        if let Some(p) = user
+            && let Ok(text) = std::fs::read_to_string(&p)
+        {
+            match serde_yaml::from_str::<Win81Theme>(&text) {
+                Ok(t) => return t.border_opacity.clamp(0.0, 1.0),
+                Err(e) => eprintln!("win81theme: ignoring {}: {e}", p.display()),
+            }
+        }
+        serde_yaml::from_str::<Win81Theme>(THEME_EMBEDDED)
+            .expect("embedded assets/win81theme.yaml must parse")
+            .border_opacity
+            .clamp(0.0, 1.0)
+    }
+
+    /// The frame accent (border fill, title bar) with the configured
+    /// border opacity.
+    pub fn accent() -> Color {
+        Color { a: opacity(), ..ACCENT }
+    }
+
+    /// The outline color (the two 1px outlines) with the configured
+    /// border opacity.
+    pub fn outline() -> Color {
+        Color { a: opacity(), ..OUTLINE }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::{Win81Theme, THEME_EMBEDDED};
+
+        // The embedded win81theme.yaml must parse and hold the
+        // documented default (60%).
+        #[test]
+        fn embedded_win81theme_parses() {
+            let t: Win81Theme = serde_yaml::from_str(THEME_EMBEDDED).unwrap();
+            assert!((t.border_opacity - 0.6).abs() < f32::EPSILON);
+        }
+    }
 }
 
 /// Win8.1 caption glyphs (SPEC/win8_border.md): proper stroke paths in a
@@ -752,7 +824,7 @@ pub(crate) fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Messag
     // the Win8.1 title bar takes the spec's accent color example
     // (hard-coded in `win81`; later a theme token)
     let bar_bg = match state.frame_style {
-        crate::model::FrameStyle::Win81 => win81::ACCENT,
+        crate::model::FrameStyle::Win81 => win81::accent(),
         _ => skin.accent,
     };
     let base = container(
@@ -797,4 +869,5 @@ mod tests {
             check(g.win10);
         }
     }
+
 }

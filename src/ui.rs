@@ -400,7 +400,7 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
                             left: outline_w,
                         })
                         .style(move |_: &iced::Theme| container::Style {
-                            background: Some(w81::OUTLINE.into()),
+                            background: Some(w81::outline().into()),
                             ..Default::default()
                         });
                     // the title bar sits OUTSIDE the inner outline,
@@ -417,7 +417,7 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
                             left: 6.0,
                         })
                         .style(move |_: &iced::Theme| container::Style {
-                            background: Some(w81::ACCENT.into()),
+                            background: Some(w81::accent().into()),
                             ..Default::default()
                         });
                     container(border)
@@ -425,7 +425,7 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
                         .height(Length::Fill)
                         .padding(outline_w)
                         .style(move |_: &iced::Theme| container::Style {
-                            background: Some(w81::OUTLINE.into()),
+                            background: Some(w81::outline().into()),
                             ..Default::default()
                         })
                         .boxed()
@@ -443,7 +443,7 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
                 };
                 stack![
                     framed,
-                    strip(line_y, outline_w, line_l, line_r, w81::OUTLINE),
+                    strip(line_y, outline_w, line_l, line_r, w81::outline()),
                 ]
                 .boxed()
             }

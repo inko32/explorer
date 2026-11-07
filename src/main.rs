@@ -114,6 +114,14 @@ fn main() -> iced::Result {
         decorations: false, // border module draws our frame
         resizable: true,
         visible: true,
+        // The Win8.1 frame can be translucent (win81theme.yaml
+        // border_opacity): the frame accent/outlines draw with alpha
+        // and the content behind the window shows through them. The
+        // frame style is a runtime toggle, but winit only accepts
+        // transparency at window creation — create the window
+        // transparent whenever the configured opacity needs it. Every
+        // frame style still draws opaque fills over the whole window.
+        transparent: crate::border::win81::opacity() < 1.0,
         // the program icon: the pack's libraries template
         // (assets/icons/svgs/libraries.svg) rasterized at startup.
         // Note: winit 0.30 ignores window icons on Wayland (no

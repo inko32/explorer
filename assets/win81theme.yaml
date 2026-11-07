@@ -1,0 +1,14 @@
+# Win8.1 frame chrome — the border module's theme (frame colors live in
+# src/border.rs::win81; this file owns the values that must be tunable
+# without a rebuild).
+#
+# Parsed at startup; a complete copy at ~/.config/explorer/win81theme.yaml
+# overrides the embedded one (same override pattern as theme.yaml); a
+# broken override is reported on stderr and the embedded theme is used.
+#
+# border_opacity: 0.0-1.0 — the frame accent fill, the title bar and the
+# outlines take this alpha, so the content behind the window shows
+# through them. 1.0 = fully opaque border. Below 1.0 the window must be
+# created transparent (winit only accepts that at window creation, so
+# main.rs decides from this value at startup).
+border_opacity: 0.6
