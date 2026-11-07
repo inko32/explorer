@@ -463,10 +463,15 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
                         vstrip(state.win_w - o, o, o, o, w81::outline()),
                         strip(0.0, o, 0.0, 0.0, w81::outline()),
                         strip(h - o, o, 0.0, 0.0, w81::outline()),
-                        // accent fill: sides (beside the title bar and
-                        // below) + bottom
-                        vstrip(o, side, ft, o + side, w81::accent()),
-                        vstrip(state.win_w - o - side, side, ft, o + side, w81::accent()),
+                        // accent fill, beside the title bar: flush to
+                        // the bar — it also covers the inner outline's
+                        // column (y ft..bar_bottom)
+                        vstrip(o, side + o, ft, h - bar_bottom, w81::accent()),
+                        vstrip(state.win_w - o - side - o, side + o, ft, h - bar_bottom, w81::accent()),
+                        // accent fill below the title bar: the inner
+                        // outline takes its column back
+                        vstrip(o, side, bar_bottom, o + side, w81::accent()),
+                        vstrip(state.win_w - o - side, side, bar_bottom, o + side, w81::accent()),
                         strip(h - o - side, side, o, o, w81::accent()),
                         // inner outline: sides below the title bar + bottom
                         vstrip(o + side, o, bar_bottom, fb - o, w81::outline()),
