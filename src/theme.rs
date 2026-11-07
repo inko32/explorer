@@ -247,7 +247,7 @@ fn load() -> Theme {
 }
 
 /// Packed sRGB hex color: `#RRGGBB` or `#RRGGBBAA` (leading `#` optional).
-struct Hex(Color);
+pub(crate) struct Hex(pub(crate) Color);
 
 impl<'de> Deserialize<'de> for Hex {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
