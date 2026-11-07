@@ -165,6 +165,9 @@ pub struct Explorer {
     pub viewport_h: f32,
     /// Measured window width (resize events) for title-bar layout.
     pub win_w: f32,
+    /// Measured window height (resize events) for the frame strip
+    /// layout (the Win8.1 frame tiles its bottom strips by y).
+    pub win_h: f32,
     /// Inline rename: (row index, text buffer).
     pub renaming: Option<(usize, String)>,
     /// Context menu configuration (assets/menu.yaml) + the open menu.
@@ -298,6 +301,7 @@ impl Explorer {
             scroll_y: 0.0,
             viewport_h: 600.0,
             win_w: 1152.0,
+            win_h: 720.0,
             renaming: None,
             menu_cfg: crate::menu::MenuCfg::load(),
             menu: None,
@@ -1398,6 +1402,7 @@ impl Explorer {
             }
             Message::WindowResized(w, h) => {
                 self.win_w = w;
+                self.win_h = h;
                 if std::env::var_os("EXPLORER_DEBUG").is_some() {
                     eprintln!(
                         "WindowResized: logical {w}x{h}, system_scale={}, dpi={:?}",
