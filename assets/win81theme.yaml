@@ -11,4 +11,4 @@
 # through them. 1.0 = fully opaque border. Below 1.0 the window must be
 # created transparent (winit only accepts that at window creation, so
 # main.rs decides from this value at startup).
-border_opacity: 0.6
+border_opacity: 1.0
