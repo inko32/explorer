@@ -120,6 +120,10 @@ pub struct Explorer {
     /// start a window drag, or the in-flight move scrambles the placement of
     /// the subsequent maximize).
     last_title_press: Option<std::time::Instant>,
+    /// Contextual-block press pending click-vs-drag resolution: released
+    /// in place activates the tab; moving past the threshold drags the
+    /// window instead (without activating).
+    block_press: Option<(usize, iced::Point)>,
     /// Self-rendered window border/title bar (off = native decorations).
     pub self_border: bool,
     /// Win8 double border vs Win10 1px border.
@@ -280,6 +284,7 @@ impl Explorer {
             sel_anchor: None,
             marquee: None,
             last_title_press: None,
+            block_press: None,
             self_border: true,
             frame_style: FrameStyle::Win8,
             clipboard: None,
@@ -1305,10 +1310,10 @@ impl Explorer {
             // ribbon custom command (model/ribbon.rs)
             Message::RunShell(script) => self.run_shell(script),
             Message::BlockPress(tab) => {
-                self.ribbon.framework().view().select_tab(tab);
-                if let Some(id) = self.window {
-                    return iced::window::drag(id);
-                }
+                // defer: a release in place activates the tab, travel
+                // past the threshold drags the window (resolved in the
+                // Event handling below)
+                self.block_press = Some((tab, self.cursor));
                 iced::Task::none()
             }
             Message::StartResize(dir) => {
@@ -1593,6 +1598,29 @@ impl Explorer {
                         iced::Event::Mouse(MEvent::ButtonReleased(MButton::Left)) => {
                             self.nav_split = false;
                             return iced::Task::none();
+                        }
+                        _ => {}
+                    }
+                }
+                // contextual block press: release activates the tab,
+                // travel past the threshold becomes a window drag
+                if let Some((tab, at)) = self.block_press {
+                    use iced::mouse::{Button as MButton, Event as MEvent};
+                    match &e {
+                        iced::Event::Mouse(MEvent::CursorMoved { position }) => {
+                            let d = ((position.x - at.x).powi(2)
+                                + (position.y - at.y).powi(2))
+                            .sqrt();
+                            if d >= crate::dnd::DRAG_THRESHOLD * self.dpi_multiplier() {
+                                self.block_press = None;
+                                if let Some(id) = self.window {
+                                    return iced::window::drag(id);
+                                }
+                            }
+                        }
+                        iced::Event::Mouse(MEvent::ButtonReleased(MButton::Left)) => {
+                            self.block_press = None;
+                            self.ribbon.framework().view().select_tab(tab);
                         }
                         _ => {}
                     }
