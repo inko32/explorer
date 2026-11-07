@@ -190,53 +190,110 @@ static CAPTION_GLYPHS: [CaptionGlyph; 3] = [
     },
 ];
 
-/// Win8.1 frame colors (SPEC/win8_border.md "colour for example").
-/// Hard-coded for now; the theme token set will own them later.
+/// Win8.1 frame chrome (colors + border opacity), owned by
+/// win81theme.yaml — a user copy at ~/.config/explorer/win81theme.yaml
+/// overrides the embedded one (same pattern as theme.yaml). The
+/// defaults are the SPEC/win8_border.md "colour for example" set; every
+/// key falls back to its default, so a partial override file works.
 pub(crate) mod win81 {
     use iced::Color;
-    /// window accent (border fill, title bar)
-    pub const ACCENT: Color = Color::from_rgb8(0x5a, 0x83, 0xbb);
-    /// darkened accent (the two 1px outlines)
-    pub const OUTLINE: Color = Color::from_rgb8(0x45, 0x64, 0x8f);
-    /// close button background at rest / hovered
-    pub const CLOSE_IDLE: Color = Color::from_rgb8(0xc7, 0x50, 0x50);
-    pub const CLOSE_HOVER: Color = Color::from_rgb8(0xe0, 0x43, 0x43);
-    /// minimize/maximize glyph: black at rest, white on hover
-    pub const GLYPH_IDLE: Color = Color::from_rgb8(0x00, 0x00, 0x00);
-    pub const GLYPH_HOVER: Color = Color::from_rgb8(0xff, 0xff, 0xff);
-    /// minimize/maximize hover background (slight-emphasized accent)
-    pub const HOVER_BG: Color = Color::from_rgb8(0x36, 0x65, 0xb3);
-
-    // ---- border opacity (win81theme.yaml) ----
-    //
-    // The frame accent fill, the title bar and the outlines take this
-    // alpha so the content behind the window shows through them (the
-    // window itself is created transparent at startup when the opacity
-    // is below 1.0 — winit only accepts transparency at window
-    // creation). User override at ~/.config/explorer/win81theme.yaml,
-    // the embedded copy is the fallback (same pattern as theme.yaml).
-    // The caption buttons stay opaque — they must stay readable.
 
     const THEME_EMBEDDED: &str = include_str!("../assets/win81theme.yaml");
 
     #[derive(serde::Deserialize)]
     struct Win81Theme {
-        /// 0.0-1.0; the embedded default is 0.6 (60%).
+        /// 0.0-1.0; the frame accent fill, the title bar and the
+        /// outlines take this alpha so the content behind the window
+        /// shows through them (the window itself is created transparent
+        /// at startup when the opacity is below 1.0 — winit only
+        /// accepts transparency at window creation). The caption
+        /// buttons stay opaque — they must stay readable.
         #[serde(default = "default_opacity")]
         border_opacity: f32,
+        /// window accent (border fill, title bar)
+        #[serde(default = "default_accent")]
+        window_accent: crate::theme::Hex,
+        /// darkened accent (the two 1px outlines)
+        #[serde(default = "default_outline")]
+        outline: crate::theme::Hex,
+        /// close button background at rest / hovered / pressed
+        #[serde(default = "default_close_idle")]
+        close_idle: crate::theme::Hex,
+        #[serde(default = "default_close_hover")]
+        close_hover: crate::theme::Hex,
+        #[serde(default = "default_close_hover")]
+        close_pressed: crate::theme::Hex,
+        /// close glyph (the X, always white per the spec)
+        #[serde(default = "default_white")]
+        close_glyph: crate::theme::Hex,
+        /// minimize/maximize glyph: black at rest, white on hover
+        #[serde(default = "default_black")]
+        glyph_idle: crate::theme::Hex,
+        #[serde(default = "default_white")]
+        glyph_hover: crate::theme::Hex,
+        /// minimize/maximize hover background (slight-emphasized accent)
+        #[serde(default = "default_hover_bg")]
+        hover_bg: crate::theme::Hex,
+        /// minimize/maximize pressed background (hover_bg at ~70% alpha)
+        #[serde(default = "default_hover_pressed")]
+        hover_pressed: crate::theme::Hex,
+        /// title-bar caption text size (px at 100% dpi)
+        #[serde(default = "default_title_size")]
+        title_size: f32,
     }
 
+    fn hex(v: u32) -> crate::theme::Hex {
+        crate::theme::Hex(Color::from_rgb8(
+            (v >> 16) as u8,
+            (v >> 8) as u8,
+            v as u8,
+        ))
+    }
+
+    // defaults: SPEC/win8_border.md "colour for example"
     fn default_opacity() -> f32 {
-        0.6
+        0.9
+    }
+    fn default_accent() -> crate::theme::Hex {
+        hex(0x5a83bb)
+    }
+    fn default_outline() -> crate::theme::Hex {
+        hex(0x45648f)
+    }
+    fn default_close_idle() -> crate::theme::Hex {
+        hex(0xc75050)
+    }
+    fn default_close_hover() -> crate::theme::Hex {
+        hex(0xe04343)
+    }
+    fn default_white() -> crate::theme::Hex {
+        hex(0xffffff)
+    }
+    fn default_black() -> crate::theme::Hex {
+        hex(0x000000)
+    }
+    fn default_hover_bg() -> crate::theme::Hex {
+        hex(0x3665b3)
+    }
+    fn default_hover_pressed() -> crate::theme::Hex {
+        // the press shade used to be hover_bg at 70% alpha; keep that
+        // derivation for partial overrides that omit the key
+        let mut c = default_hover_bg().0;
+        c.a *= 0.7;
+        crate::theme::Hex(c)
+    }
+    fn default_title_size() -> f32 {
+        // fonts.yaml titlebar.title (12) + 2: the Win8.1 title bar is
+        // taller chrome, so its title reads better two points up
+        14.0
     }
 
-    /// Border opacity, win81theme.yaml `border_opacity` (0.0-1.0).
-    pub fn opacity() -> f32 {
-        static THEME: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
-        *THEME.get_or_init(load_opacity)
+    fn theme() -> &'static Win81Theme {
+        static THEME: std::sync::OnceLock<Win81Theme> = std::sync::OnceLock::new();
+        THEME.get_or_init(load)
     }
 
-    fn load_opacity() -> f32 {
+    fn load() -> Win81Theme {
         let user = std::env::var_os("HOME")
             .map(std::path::PathBuf::from)
             .map(|h| h.join(".config/explorer/win81theme.yaml"));
@@ -244,26 +301,67 @@ pub(crate) mod win81 {
             && let Ok(text) = std::fs::read_to_string(&p)
         {
             match serde_yaml::from_str::<Win81Theme>(&text) {
-                Ok(t) => return t.border_opacity.clamp(0.0, 1.0),
+                Ok(t) => return t,
                 Err(e) => eprintln!("win81theme: ignoring {}: {e}", p.display()),
             }
         }
-        serde_yaml::from_str::<Win81Theme>(THEME_EMBEDDED)
-            .expect("embedded assets/win81theme.yaml must parse")
-            .border_opacity
-            .clamp(0.0, 1.0)
+        serde_yaml::from_str(THEME_EMBEDDED).expect("embedded assets/win81theme.yaml must parse")
+    }
+
+    /// Border opacity, win81theme.yaml `border_opacity` (0.0-1.0).
+    pub fn opacity() -> f32 {
+        theme().border_opacity.clamp(0.0, 1.0)
+    }
+
+    /// Title-bar caption text size (px at 100% dpi), win81theme.yaml
+    /// `title_size`.
+    pub fn title_size() -> f32 {
+        theme().title_size.max(1.0)
+    }
+
+    /// The frame chrome colors from win81theme.yaml (opaque; the frame
+    /// fill/outline accessors below apply the border opacity).
+    pub(crate) struct Colors {
+        pub accent: Color,
+        pub close_idle: Color,
+        pub close_hover: Color,
+        pub close_pressed: Color,
+        pub close_glyph: Color,
+        pub glyph_idle: Color,
+        pub glyph_hover: Color,
+        pub hover_bg: Color,
+        pub hover_pressed: Color,
+    }
+
+    pub(crate) fn colors() -> &'static Colors {
+        static COLORS: std::sync::OnceLock<Colors> = std::sync::OnceLock::new();
+        COLORS.get_or_init(|| {
+            let t = theme();
+            Colors {
+                accent: t.window_accent.0,
+                close_idle: t.close_idle.0,
+                close_hover: t.close_hover.0,
+                close_pressed: t.close_pressed.0,
+                close_glyph: t.close_glyph.0,
+                glyph_idle: t.glyph_idle.0,
+                glyph_hover: t.glyph_hover.0,
+                hover_bg: t.hover_bg.0,
+                hover_pressed: t.hover_pressed.0,
+            }
+        })
     }
 
     /// The frame accent (border fill, title bar) with the configured
     /// border opacity.
     pub fn accent() -> Color {
-        Color { a: opacity(), ..ACCENT }
+        Color { a: opacity(), ..colors().accent }
     }
 
     /// The outline color (the two 1px outlines) with the configured
     /// border opacity.
     pub fn outline() -> Color {
-        Color { a: opacity(), ..OUTLINE }
+        let c = theme().outline.0;
+        Color { a: opacity(), ..c }
     }
 
     #[cfg(test)]
@@ -276,6 +374,24 @@ pub(crate) mod win81 {
         fn embedded_win81theme_parses() {
             let t: Win81Theme = serde_yaml::from_str(THEME_EMBEDDED).unwrap();
             assert!((0.0..=1.0).contains(&t.border_opacity));
+            assert!(t.title_size >= 1.0);
+        }
+
+        // The embedded defaults must stay the SPEC/win8_border.md
+        // "colour for example" set (a user override may change them,
+        // but the shipped theme is the spec's reference).
+        #[test]
+        fn embedded_defaults_match_spec() {
+            use iced::Color;
+            let t: Win81Theme = serde_yaml::from_str(THEME_EMBEDDED).unwrap();
+            assert_eq!(t.window_accent.0, Color::from_rgb8(0x5a, 0x83, 0xbb));
+            assert_eq!(t.outline.0, Color::from_rgb8(0x45, 0x64, 0x8f));
+            assert_eq!(t.close_idle.0, Color::from_rgb8(0xc7, 0x50, 0x50));
+            assert_eq!(t.close_hover.0, Color::from_rgb8(0xe0, 0x43, 0x43));
+            assert_eq!(t.close_glyph.0, Color::WHITE);
+            assert_eq!(t.glyph_idle.0, Color::BLACK);
+            assert_eq!(t.glyph_hover.0, Color::WHITE);
+            assert_eq!(t.hover_bg.0, Color::from_rgb8(0x36, 0x65, 0xb3));
         }
     }
 }
@@ -294,10 +410,11 @@ static CAPTION_GLYPHS_81: [&str; 4] = [
     "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 25 20'>\
      <path fill='{glyph}' fill-rule='evenodd' d='M8 6 H18 V14 H8 Z M9 8 H17 V13 H9 Z'/></svg>",
     // close: 8x7 X, 2px strokes with square caps (solid connecting
-    // squares at the corners, no gaps)
+    // squares at the corners, no gaps); the stroke takes {glyph} (the
+    // close glyph color, white by default)
     "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 45 20'>\
-     <line x1='18.5' y1='6.5' x2='26.5' y2='13.5' stroke='#ffffff' stroke-width='2' stroke-linecap='square'/>\
-     <line x1='26.5' y1='6.5' x2='18.5' y2='13.5' stroke='#ffffff' stroke-width='2' stroke-linecap='square'/></svg>",
+     <line x1='18.5' y1='6.5' x2='26.5' y2='13.5' stroke='{glyph}' stroke-width='2' stroke-linecap='square'/>\
+     <line x1='26.5' y1='6.5' x2='18.5' y2='13.5' stroke='{glyph}' stroke-width='2' stroke-linecap='square'/></svg>",
     // maximize (maximized window): 10x10 restore glyph — the back window
     // as one L-shaped path (top bar + right column), the front window as
     // an even-odd outline
@@ -308,8 +425,9 @@ static CAPTION_GLYPHS_81: [&str; 4] = [
 
 /// Render a caption glyph for the frame style: `{title}` takes the
 /// title-bar text color (Win8); `{glyph}` takes the button's glyph color
-/// (Win8.1 min/max: black at rest, white on hover). Templates without
-/// tokens (Win10, the Win8.1 close X) are white as authored.
+/// (Win8.1 min/max: black at rest, white on hover — the close glyph takes
+/// win81theme.yaml `close_glyph`). Templates without tokens (Win10) are
+/// white as authored.
 fn caption_svg(
     template: &'static str,
     skin: skin::Skin,
@@ -378,6 +496,7 @@ pub(crate) fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'st
                     w: f32,
                     msg: Message,
                     hover_bg: Color,
+                    pressed_bg: Color,
                     close_hover: Color,
                     close_pressed: Color,
                     solid: bool,
@@ -392,7 +511,7 @@ pub(crate) fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'st
             (crate::model::FrameStyle::Win8, true) => Some(skin.close_idle),
             (crate::model::FrameStyle::Win8, false) => Some(skin.accent),
             (crate::model::FrameStyle::Win10, _) => None,
-            (crate::model::FrameStyle::Win81, true) => Some(win81::CLOSE_IDLE),
+            (crate::model::FrameStyle::Win81, true) => Some(win81::colors().close_idle),
             (crate::model::FrameStyle::Win81, false) => None,
         };
         let blend_white = |c: Color, a: f32| Color {
@@ -447,7 +566,7 @@ pub(crate) fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'st
                 }),
                 (false, button::Status::Pressed) => Some(match rest {
                     Some(c) => blend_white(c, 0.32).into(),
-                    None => hover_bg.scale_alpha(0.7).into(),
+                    None => pressed_bg.into(),
                 }),
                 (false, _) => rest.map(Into::into),
             },
@@ -471,25 +590,28 @@ pub(crate) fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'st
     let ghost = skin.glass_ghost;
     let captions = if style == crate::model::FrameStyle::Win81 {
         // 1px gaps between the buttons, never DPI-scaled; the min/max
-        // glyphs are black at rest and white on hover (SPEC color example)
+        // glyphs are black at rest and white on hover (SPEC color
+        // example), all colors from win81theme.yaml
+        let w81c = win81::colors();
         let min_glyph = if state.cap_hover & 1 != 0 {
-            win81::GLYPH_HOVER
+            w81c.glyph_hover
         } else {
-            win81::GLYPH_IDLE
+            w81c.glyph_idle
         };
         let max_glyph = if state.cap_hover & 2 != 0 {
-            win81::GLYPH_HOVER
+            w81c.glyph_hover
         } else {
-            win81::GLYPH_IDLE
+            w81c.glyph_idle
         };
         row![
             one(
                 glyphs[0],
                 mw,
                 Message::Minimize,
-                win81::HOVER_BG,
-                win81::CLOSE_HOVER,
-                win81::CLOSE_HOVER,
+                w81c.hover_bg,
+                w81c.hover_pressed,
+                w81c.close_hover,
+                w81c.close_pressed,
                 false,
                 min_glyph,
                 Some(0)
@@ -501,9 +623,10 @@ pub(crate) fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'st
                 glyphs[1],
                 mw,
                 Message::Maximize,
-                win81::HOVER_BG,
-                win81::CLOSE_HOVER,
-                win81::CLOSE_HOVER,
+                w81c.hover_bg,
+                w81c.hover_pressed,
+                w81c.close_hover,
+                w81c.close_pressed,
                 false,
                 max_glyph,
                 Some(1)
@@ -515,11 +638,12 @@ pub(crate) fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'st
                 glyphs[2],
                 cw,
                 Message::Close,
-                win81::CLOSE_HOVER,
-                win81::CLOSE_HOVER,
-                win81::CLOSE_HOVER,
+                w81c.close_hover,
+                w81c.close_hover,
+                w81c.close_hover,
+                w81c.close_pressed,
                 true,
-                Color::WHITE,
+                w81c.close_glyph,
                 None
             ),
         ]
@@ -537,6 +661,7 @@ pub(crate) fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'st
                 mw,
                 Message::Minimize,
                 ghost,
+                ghost.scale_alpha(0.7),
                 skin.close_hover,
                 skin.close_pressed,
                 false,
@@ -548,6 +673,7 @@ pub(crate) fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'st
                 mw,
                 Message::Maximize,
                 ghost,
+                ghost.scale_alpha(0.7),
                 skin.close_hover,
                 skin.close_pressed,
                 false,
@@ -558,6 +684,7 @@ pub(crate) fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'st
                 glyphs[2],
                 cw,
                 Message::Close,
+                skin.close_hover,
                 skin.close_hover,
                 skin.close_hover,
                 skin.close_pressed,
@@ -802,10 +929,19 @@ pub(crate) fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Messag
         .fold(0.0f32, f32::max);
     let title_left = (blocks_right + 8.0).max(head_w);
     let title_w = (content_w - title_left - captions_w - 16.0).max(60.0);
+    // the Win8.1 bar takes its caption size from win81theme.yaml
+    // (taller chrome — see default_title_size); the 8.75 elision width
+    // is calibrated for the shared 12px title, so scale it with the size
+    let title_size = if state.frame_style == crate::model::FrameStyle::Win81 {
+        win81::title_size()
+    } else {
+        state.fonts.titlebar.title
+    };
+    let char_w = 8.75 * title_size / state.fonts.titlebar.title.max(1.0);
     let drag_title: Element<Message> = mouse_area(
         container(
-            text(elide(&state.title(), title_w, 8.75))
-                .size(state.fonts.titlebar.title)
+            text(elide(&state.title(), title_w, char_w))
+                .size(title_size)
                 .color(skin.title_text)
                 .width(Length::Shrink),
         )
@@ -829,7 +965,7 @@ pub(crate) fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Messag
         head = head.push(titlebar_qat(state, skin));
     }
     // the Win8.1 title bar takes the spec's accent color example
-    // (hard-coded in `win81`; later a theme token)
+    // (win81theme.yaml `window_accent`)
     let bar_bg = match state.frame_style {
         crate::model::FrameStyle::Win81 => win81::accent(),
         _ => skin.accent,
