@@ -953,6 +953,16 @@ pub(crate) fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Messag
     .on_press(Message::TitlebarPress)
     .on_double_click(Message::TitlebarDoubleClick)
     .boxed();
+    // the gap between the QAT head and the title (where the contextual
+    // blocks float) is title-bar too: dragging there moves the window
+    let gap_w = (title_left - head_w).max(0.0);
+    let gap_drag = mouse_area(
+        Space::new()
+            .width(Length::Fixed(gap_w))
+            .height(Length::Fixed(bar_h)),
+    )
+    .on_press(Message::TitlebarPress)
+    .on_double_click(Message::TitlebarDoubleClick);
     let mut head = row![
         // the window icon follows the current folder (16x16)
         container(icon(state.location_icon(), 16.0, skin))
@@ -974,7 +984,7 @@ pub(crate) fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Messag
         row![
             Space::new().width(Length::Fixed(left_pad)),
             head,
-            Space::new().width(Length::Fixed((title_left - head_w).max(0.0))),
+            gap_drag,
             drag_title,
             mouse_area(Space::new().width(Length::Fill).height(Length::Fixed(bar_h)))
                 .on_press(Message::TitlebarPress)
