@@ -376,6 +376,33 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
                     })
                     .boxed()
                 };
+                // the vertical counterpart: a solid bar at x, inset
+                // t/b, width w
+                let vstrip = |x: f32,
+                              w: f32,
+                              t: f32,
+                              b: f32,
+                              c: iced::Color|
+                -> Element<'static, Message> {
+                    container(
+                        container(Space::new().height(Length::Fill))
+                            .width(Length::Fixed(w))
+                            .height(Length::Fill)
+                            .style(move |_: &iced::Theme| container::Style {
+                                background: Some(c.into()),
+                                ..Default::default()
+                            }),
+                    )
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .padding(iced::Padding {
+                        left: x,
+                        top: t,
+                        bottom: b,
+                        ..Default::default()
+                    })
+                    .boxed()
+                };
                 let framed: Element<Message> = if state.maximized {
                     // maximized: zero insets (see frame_insets_pub) — the
                     // frame is gone entirely (outer outline, 6px side/
@@ -385,50 +412,63 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
                     // drawn as a full-width strip below
                     container(root).width(Length::Fill).height(Length::Fill).boxed()
                 } else {
-                    // inner outline: 1px dark, starting BELOW the 29px
-                    // title bar (the title bar's accent runs flush to the
-                    // border on the sides — no outline splits it); sides +
-                    // bottom only — the top segment is the row below the
-                    // title bar, drawn as a strip overlay
-                    let inner = container(root)
+                    // Flattened frame — tiled strips, not nested fills.
+                    // The frame colors are translucent (win81theme.yaml
+                    // border_opacity) and nested container backgrounds
+                    // would compound the alpha: the title bar (accent
+                    // over the accent fill) blended darker than the
+                    // border strips beside it. Here every frame pixel
+                    // is exactly ONE translucent layer over the desktop
+                    // or the opaque content; regions that share a color
+                    // (the accent beside the title bar) are one draw.
+                    let side = 6.0; // sizing border, like the Win8 frame
+                    let o = outline_w;
+                    let h = state.win_h;
+                    // the title bar's bottom edge (= the strip start)
+                    let bar_bottom = ft + crate::border::win81_bar_h(false);
+                    // title bar between the outer outlines; its accent
+                    // IS the side border in its rows
+                    let titled = container(crate::border::titlebar(state, skin))
                         .width(Length::Fill)
                         .height(Length::Fill)
                         .padding(iced::Padding {
-                            top: 0.0,
-                            right: outline_w,
-                            bottom: outline_w,
-                            left: outline_w,
-                        })
-                        .style(move |_: &iced::Theme| container::Style {
-                            background: Some(w81::outline().into()),
+                            top: o,
+                            right: o,
+                            left: o,
                             ..Default::default()
                         });
-                    // the title bar sits OUTSIDE the inner outline,
-                    // between the two side borders; the 6px border fill
-                    // is DPI-scaled (like the Win8 sizing border)
-                    let titled = column![crate::border::titlebar(state, skin), inner];
-                    let border = container(titled)
+                    // content below the title bar + the top inner outline
+                    let body = container(root)
                         .width(Length::Fill)
                         .height(Length::Fill)
                         .padding(iced::Padding {
-                            top: 0.0,
-                            right: 6.0,
-                            bottom: 6.0,
-                            left: 6.0,
-                        })
-                        .style(move |_: &iced::Theme| container::Style {
-                            background: Some(w81::accent().into()),
-                            ..Default::default()
+                            top: ft
+                                + crate::border::titlebar_h(
+                                    crate::model::FrameStyle::Win81,
+                                    false,
+                                ),
+                            right: fr,
+                            bottom: fb,
+                            left: fl,
                         });
-                    container(border)
-                        .width(Length::Fill)
-                        .height(Length::Fill)
-                        .padding(outline_w)
-                        .style(move |_: &iced::Theme| container::Style {
-                            background: Some(w81::outline().into()),
-                            ..Default::default()
-                        })
-                        .boxed()
+                    stack![
+                        titled,
+                        body,
+                        // outer outline: 1px perimeter
+                        vstrip(0.0, o, o, o, w81::outline()),
+                        vstrip(state.win_w - o, o, o, o, w81::outline()),
+                        strip(0.0, o, 0.0, 0.0, w81::outline()),
+                        strip(h - o, o, 0.0, 0.0, w81::outline()),
+                        // accent fill: sides below the title bar + bottom
+                        vstrip(o, side, bar_bottom, o + side, w81::accent()),
+                        vstrip(state.win_w - o - side, side, bar_bottom, o + side, w81::accent()),
+                        strip(h - o - side, side, o, o, w81::accent()),
+                        // inner outline: sides below the title bar + bottom
+                        vstrip(o + side, o, bar_bottom, fb - o, w81::outline()),
+                        vstrip(state.win_w - o - side - o, o, bar_bottom, fb - o, w81::outline()),
+                        strip(h - fb, o, o + side + o, o + side + o, w81::outline()),
+                    ]
+                    .boxed()
                 };
                 // the top inner outline: the 1px row directly below the
                 // title bar (its bottom line rises when maximized —
