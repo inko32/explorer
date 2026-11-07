@@ -426,15 +426,19 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
                     let h = state.win_h;
                     // the title bar's bottom edge (= the strip start)
                     let bar_bottom = ft + crate::border::win81_bar_h(false);
-                    // title bar between the outer outlines; its accent
-                    // IS the side border in its rows
+                    // title bar at the CONTENT origin (inset by the
+                    // frame insets): its contextual blocks position
+                    // themselves above their ribbon tabs, so the bar
+                    // must align with the ribbon. The accent strips
+                    // beside it come from the frame (they start at the
+                    // top, not below the bar).
                     let titled = container(crate::border::titlebar(state, skin))
                         .width(Length::Fill)
                         .height(Length::Fill)
                         .padding(iced::Padding {
-                            top: o,
-                            right: o,
-                            left: o,
+                            top: ft,
+                            right: fr,
+                            left: fl,
                             ..Default::default()
                         });
                     // content below the title bar + the top inner outline
@@ -459,9 +463,10 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
                         vstrip(state.win_w - o, o, o, o, w81::outline()),
                         strip(0.0, o, 0.0, 0.0, w81::outline()),
                         strip(h - o, o, 0.0, 0.0, w81::outline()),
-                        // accent fill: sides below the title bar + bottom
-                        vstrip(o, side, bar_bottom, o + side, w81::accent()),
-                        vstrip(state.win_w - o - side, side, bar_bottom, o + side, w81::accent()),
+                        // accent fill: sides (beside the title bar and
+                        // below) + bottom
+                        vstrip(o, side, ft, o + side, w81::accent()),
+                        vstrip(state.win_w - o - side, side, ft, o + side, w81::accent()),
                         strip(h - o - side, side, o, o, w81::accent()),
                         // inner outline: sides below the title bar + bottom
                         vstrip(o + side, o, bar_bottom, fb - o, w81::outline()),
