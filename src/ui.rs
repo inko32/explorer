@@ -431,14 +431,15 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
                         .boxed()
                 };
                 // the top inner outline: the 1px row directly below the
-                // 29px title bar. Not maximized: it spans the content
-                // (between the side inner outlines); maximized: zero
-                // insets put the title bar at y=0 and the line spans the
-                // full window width.
+                // title bar (its bottom line rises when maximized —
+                // 20px buttons + 3px space instead of 9px). Not
+                // maximized: it spans the content (between the side
+                // inner outlines); maximized: zero insets put the title
+                // bar at y=0 and the line spans the full window width.
                 let (line_y, line_l, line_r) = if state.maximized {
-                    (29.0, 0.0, 0.0)
+                    (crate::border::win81_bar_h(true), 0.0, 0.0)
                 } else {
-                    (ft + 29.0, fl, fr)
+                    (ft + crate::border::win81_bar_h(false), fl, fr)
                 };
                 stack![
                     framed,

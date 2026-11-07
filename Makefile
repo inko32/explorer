@@ -25,7 +25,7 @@ export CARGO_HOME=$(TMPROOT)/cargo
 export RUSTUP_HOME=$(TMPROOT)/rustup
 export PATH := $(TMPROOT)/cargo/bin:$(PATH)
 
-.PHONY: all build check run test dist clean fmt size setup-toolchain bloat tree clippy clippy-json
+.PHONY: all build check run test dist clean fmt size setup-toolchain bloat tree clippy clippy-json saferun%
 
 
 all: build
@@ -165,3 +165,20 @@ fmt: setup-env
 clean:
 	cargo clean || true
 	rm -rf $(TMPROOT) $(DIST)
+
+saferun%:
+	$(eval ARGS := $(subst :, ,$(patsubst saferun%,%,$@)))
+	bwrap	--unshare-all \
+		--dev /dev \
+		--proc /proc \
+		--ro-bind /usr /usr \
+		--ro-bind /lib64 /lib64 \
+		--symlink usr/bin /bin \
+		--symlink usr/lib /lib \
+		--bind /tmp /tmp \
+		--dev-bind /dev/dri /dev/dri \
+		--ro-bind "$$XDG_RUNTIME_DIR/$$WAYLAND_DISPLAY" "$$XDG_RUNTIME_DIR/$$WAYLAND_DISPLAY" \
+		--setenv XDG_RUNTIME_DIR "$$XDG_RUNTIME_DIR" \
+		--setenv WAYLAND_DISPLAY "$$WAYLAND_DISPLAY" \
+		--bind ./dist /tmp/dist \
+		-- /tmp/dist/explorer "$(ARGS)"

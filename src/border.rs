@@ -301,6 +301,7 @@ pub(crate) fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'st
     };
     // glyph bottoms share one baseline at ~70% of the button height
     let style = state.frame_style;
+    let maximized = state.maximized;
     let one = move |glyph_tpl: &'static str,
                     w: f32,
                     msg: Message,
@@ -335,18 +336,29 @@ pub(crate) fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'st
         } else {
             (glyph, glyph)
         };
-        let btn = button(
-            container(
-                iced::widget::svg(caption_svg(glyph_tpl, skin, glyph_color))
-                    .width(Length::Fixed(gw))
-                    .height(Length::Fixed(gh)),
-            )
-            .width(Length::Fixed(w))
-            .height(Length::Fixed(h))
-            .center_x(Length::Fixed(w))
-            .center_y(Length::Fixed(h)),
+        // maximized Win8.1 close button: the 3px space right of the
+        // button belongs to it — the hit area extends, the glyph stays
+        let hit_extra = if style == crate::model::FrameStyle::Win81 && solid && maximized {
+            3.0
+        } else {
+            0.0
+        };
+        let hit_w = w + hit_extra;
+        let mut content = container(
+            iced::widget::svg(caption_svg(glyph_tpl, skin, glyph_color))
+                .width(Length::Fixed(gw))
+                .height(Length::Fixed(gh)),
         )
-        .width(Length::Fixed(w))
+        .width(Length::Fixed(hit_w))
+        .height(Length::Fixed(h))
+        .center_y(Length::Fixed(hit_w));
+        content = if hit_extra > 0.0 {
+            content.align_x(iced::Alignment::Start)
+        } else {
+            content.center_x(Length::Fixed(hit_w))
+        };
+        let btn = button(content)
+        .width(Length::Fixed(hit_w))
         .height(Length::Fixed(h))
         .padding(0)
         .style(move |_t, status| button::Style {
@@ -523,12 +535,23 @@ pub(crate) fn resize_frame(margin: f32) -> Element<'static, Message> {
 /// plain drag band: window icon, centered title, caption space.
 pub(crate) const TITLEBAR_H: f32 = 30.0;
 
-/// Height of the title-bar WIDGET. Win8.1 draws a 29px bar
-/// (SPEC/win8_border.md, measured at 100% dpi); the 1px inner outline
-/// beneath it is a frame-level row, not part of the bar.
-fn bar_h(style: crate::model::FrameStyle) -> f32 {
+/// Height of the Win8.1 title-bar region between the outlines
+/// (SPEC/win8_border.md): 20px caption buttons + the space below them —
+/// 9px normally, 3px maximized (the bar's bottom line rises when the
+/// outer outline is omitted).
+pub(crate) fn win81_bar_h(maximized: bool) -> f32 {
+    if maximized {
+        23.0
+    } else {
+        29.0
+    }
+}
+
+/// Height of the title-bar WIDGET; the 1px inner outline beneath the
+/// Win8.1 bar is a frame-level row, not part of the bar.
+fn bar_h(style: crate::model::FrameStyle, maximized: bool) -> f32 {
     match style {
-        crate::model::FrameStyle::Win81 => 29.0,
+        crate::model::FrameStyle::Win81 => win81_bar_h(maximized),
         _ => TITLEBAR_H,
     }
 }
@@ -536,9 +559,9 @@ fn bar_h(style: crate::model::FrameStyle) -> f32 {
 /// Height the model reserves below the frame's top inset for the title
 /// bar: the bar plus, for the Win8.1 frame, the 1px inner-outline row
 /// under it (kept at a constant physical width, never DPI-scaled).
-pub(crate) fn titlebar_h(style: crate::model::FrameStyle) -> f32 {
+pub(crate) fn titlebar_h(style: crate::model::FrameStyle, maximized: bool) -> f32 {
     match style {
-        crate::model::FrameStyle::Win81 => 29.0 + crate::theme::border_w(1.0),
+        crate::model::FrameStyle::Win81 => win81_bar_h(maximized) + crate::theme::border_w(1.0),
         _ => TITLEBAR_H,
     }
 }
@@ -553,7 +576,7 @@ fn contextual_blocks(state: &Explorer) -> Element<'static, Message> {
         return Space::new().width(Length::Fixed(0.0)).height(Length::Fixed(0.0)).boxed();
     }
     let selected = state.ribbon.framework().view().selected_tab();
-    let bar_h = bar_h(state.frame_style);
+    let bar_h = bar_h(state.frame_style, state.maximized);
     let mut r: iced::widget::Row<Element<'_, Message>> = row![].height(Length::Fixed(bar_h));
     let mut prev_end = 0.0f32;
     for b in state.ribbon.contextual_blocks() {
@@ -575,17 +598,19 @@ fn contextual_blocks(state: &Explorer) -> Element<'static, Message> {
             )
         }
         let label_color = Color::from_rgb(accent.r * 0.6, accent.g * 0.6, accent.b * 0.6);
+        // the 24px block shrinks with the bar when maximized (23px)
+        let block_h = bar_h.min(24.0);
         let solid = container(
             container(
                 text(b.label.clone()).size(state.fonts.titlebar.block).color(label_color).width(Length::Shrink),
             )
             .width(Length::Fixed(bw))
-            .height(Length::Fixed(24.0))
+            .height(Length::Fixed(block_h))
             .center_x(Length::Fixed(bw))
-            .center_y(Length::Fixed(24.0)),
+            .center_y(Length::Fixed(block_h)),
         )
         .width(Length::Fixed(bw))
-        .height(Length::Fixed(24.0))
+        .height(Length::Fixed(block_h))
         .style(move |_| container::Style {
             background: Some(tint(accent, if active { 0.45 } else { 0.62 }).into()),
             ..Default::default()
@@ -654,7 +679,7 @@ fn titlebar_qat(state: &Explorer, skin: skin::Skin) -> Element<'static, Message>
 
 pub(crate) fn titlebar(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     let icon_zone_w: f32 = 28.0; // window icon zone at the bar's left
-    let bar_h = bar_h(state.frame_style);
+    let bar_h = bar_h(state.frame_style, state.maximized);
     // maximized Win8.1: the 6px side border is omitted, so the bar's
     // left-aligned content shifts left by those 6px (only the 1px
     // outline position stays) and the caption buttons shift right by
