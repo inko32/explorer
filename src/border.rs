@@ -772,6 +772,38 @@ pub(crate) fn titlebar_h(style: crate::model::FrameStyle, maximized: bool) -> f3
     }
 }
 
+/// Pastel tint applied to a contextual block accent (shared with the
+/// frame-level tails, see `contextual_extenders`).
+fn tint(c: Color, t: f32) -> Color {
+    Color::from_rgb(
+        c.r + (1.0 - c.r) * t,
+        c.g + (1.0 - c.g) * t,
+        c.b + (1.0 - c.b) * t,
+    )
+}
+
+/// 1px "tails" continuing each visible Win8.1 contextual block over
+/// the inner outline below the title bar: (x, w, color) in window
+/// coordinates, drawn at frame level AFTER the outline so they
+/// override it. Empty when the ribbon is sacrificed (no tabs, no
+/// blocks) or no contextual set is visible.
+pub(crate) fn contextual_extenders(state: &Explorer) -> Vec<(f32, f32, Color)> {
+    let (_, fr, _, fl) = frame_insets(state);
+    if state.win_w - fl - fr < state.ribbon.sacrifice().0 * state.dpi_multiplier() {
+        return Vec::new();
+    }
+    let selected = state.ribbon.framework().view().selected_tab();
+    state
+        .ribbon
+        .contextual_blocks()
+        .iter()
+        .map(|b| {
+            let active = selected >= b.first_tab && selected <= b.last_tab;
+            (fl + b.x, b.w, tint(b.color, if active { 0.45 } else { 0.62 }))
+        })
+        .collect()
+}
+
 /// Contextual tab-set blocks (Win8): a pastel accent block per visible
 /// contextual set, bottom-aligned in the title bar, positioned exactly
 /// above its ribbon tabs (geometry published by the ribbon widget).
@@ -796,16 +828,15 @@ fn contextual_blocks(state: &Explorer) -> Element<'static, Message> {
         prev_end = bx + bw;
         let accent = b.color;
         let active = selected >= b.first_tab && selected <= b.last_tab;
-        fn tint(c: Color, t: f32) -> Color {
-            Color::from_rgb(
-                c.r + (1.0 - c.r) * t,
-                c.g + (1.0 - c.g) * t,
-                c.b + (1.0 - c.b) * t,
-            )
-        }
         let label_color = Color::from_rgb(accent.r * 0.6, accent.g * 0.6, accent.b * 0.6);
-        // the 24px block shrinks with the bar when maximized (23px)
-        let block_h = bar_h.min(24.0);
+        // Win8.1: the 26px block continues 1 physical px below the bar
+        // as a frame-level "tail" over the inner outline (see
+        // contextual_extenders); other frames keep the 24px block.
+        // Both cap at the bar height (maximized Win8.1: 23px).
+        let block_h = bar_h.min(match state.frame_style {
+            crate::model::FrameStyle::Win81 => 26.0,
+            _ => 24.0,
+        });
         let solid = container(
             container(
                 text(b.label.clone()).size(state.fonts.titlebar.block).color(label_color).width(Length::Shrink),

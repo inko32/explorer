@@ -491,11 +491,22 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
                 } else {
                     (ft + crate::border::win81_bar_h(false), fl, fr)
                 };
-                stack![
-                    framed,
+                // the inner outline first, then the frame, then the
+                // Win8.1 contextual blocks' 1px "tails": each block
+                // continues 1 physical px below the bar, overriding the
+                // outline row (drawn last — no Stack size tricks needed).
+                // Tails are a non-maximized detail: maximized blocks
+                // fill the 23px bar (their spec height doesn't fit).
+                let mut layers: Vec<Element<'_, Message>> = vec![
                     strip(line_y, outline_w, line_l, line_r, w81::outline()),
-                ]
-                .boxed()
+                    framed,
+                ];
+                if !state.maximized {
+                    for (x, w, c) in crate::border::contextual_extenders(state) {
+                        layers.push(strip(line_y, outline_w, x, state.win_w - x - w, c));
+                    }
+                }
+                iced::widget::Stack::with_children(layers).boxed()
             }
         }
     } else {
