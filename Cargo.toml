@@ -28,5 +28,6 @@ fontdb = "0.24"  # system font probing for the fonts.yaml fallback list (already
 opt-level = 2
 debug = false
 strip = "symbols"
+panic = "abort"
 # codegen-units = 1
 # lto = true
