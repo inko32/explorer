@@ -70,6 +70,17 @@ pub enum Message {
     /// The address bar right-list was clicked: open the location
     /// selector (the history, anchored below the address bar).
     SelectorMenu,
+    /// Clicked the search box: make it editable (the hint text becomes
+    /// a text input).
+    SearchEditStart,
+    /// Search box buffer change.
+    SearchInput(String),
+    /// Enter / the magnifier button in the search box: run the search
+    /// (shows a placeholder text in the folder pane for now).
+    SearchSubmit,
+    /// Escape / click-away: leave search edit mode (the submitted
+    /// query text stays in the box).
+    CancelSearch,
     Navigate(PathBuf),
     /// Nav-pane row clicked: marks the nav pane as the active pane,
     /// then navigates (SPEC/Unfocused_Window.md §1).

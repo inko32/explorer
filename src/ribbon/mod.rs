@@ -360,6 +360,9 @@ pub struct Context {
     pub has_archive: bool,
     pub has_image: bool,
     pub has_selection: bool,
+    /// The search box is being edited or holds a submitted query —
+    /// drives the Search Tools contextual tab.
+    pub searching: bool,
 }
 
 #[cfg(test)]
@@ -687,9 +690,10 @@ impl CommandHandler for ExplorerHandler {
                     cmd::CTX_DRIVE => snap.ctx.is_drive,
                     cmd::CTX_PICTURE => snap.ctx.has_image,
                     cmd::CTX_ARCHIVE => snap.ctx.inside_archive || snap.ctx.has_archive,
+                    cmd::CTX_SEARCH => snap.ctx.searching,
                     // contextual tabs not yet driven by the explorer
                     // context stay hidden until their detector is wired
-                    cmd::CTX_SEARCH | cmd::CTX_VIDEO | cmd::CTX_MUSIC
+                    cmd::CTX_VIDEO | cmd::CTX_MUSIC
                     | cmd::CTX_COMPRESSED | cmd::CTX_APPLICATION
                     | cmd::CTX_DISC_IMAGE | cmd::CTX_NETWORK
                     | cmd::CTX_COMPUTER => false,
@@ -794,6 +798,7 @@ enum CtxTab {
     Drive,
     Picture,
     Archive,
+    Search,
 }
 
 struct TabInfo {
@@ -806,6 +811,9 @@ pub struct Ribbon {
     framework: RibbonFramework,
     shared: Rc<RefCell<Shared>>,
     tabs: Vec<TabInfo>,
+    /// The Search Tools auto-activation already fired for the current
+    /// search session (re-armed when the search context disappears).
+    search_shown: bool,
 }
 
 impl Ribbon {
@@ -843,6 +851,7 @@ impl Ribbon {
                     Some(crate::ribbon::spec::CommandRef::Id(cmd::CTX_DRIVE)) => CtxTab::Drive,
                     Some(crate::ribbon::spec::CommandRef::Id(cmd::CTX_PICTURE)) => CtxTab::Picture,
                     Some(crate::ribbon::spec::CommandRef::Id(cmd::CTX_ARCHIVE)) => CtxTab::Archive,
+                    Some(crate::ribbon::spec::CommandRef::Id(cmd::CTX_SEARCH)) => CtxTab::Search,
                     _ => CtxTab::Main,
                 };
                 TabInfo {
@@ -855,6 +864,7 @@ impl Ribbon {
             framework,
             shared,
             tabs,
+            search_shown: false,
         }
     }
 
@@ -908,16 +918,23 @@ impl Ribbon {
             CtxTab::Drive => ctx.is_drive,
             CtxTab::Picture => ctx.has_image,
             CtxTab::Archive => ctx.inside_archive || ctx.has_archive,
+            CtxTab::Search => ctx.searching,
         };
-        let activates = |k: CtxTab| match k {
-            CtxTab::Drive => ctx.is_drive,
-            CtxTab::Picture => ctx.has_image,
-            CtxTab::Archive => ctx.inside_archive,
-            CtxTab::Main => false,
-        };
-        let _ = activates;
         let view = self.framework.view();
         let selected = view.selected_tab();
+        // typing in the search box (or a submitted search) jumps to the
+        // Search Tools tab once per search session; the re-arm below
+        // lets a later search re-activate it
+        if ctx.searching && !self.search_shown {
+            self.search_shown = true;
+            if let Some(pos) = self.tabs.iter().position(|t| t.ctx == CtxTab::Search) {
+                view.select_tab(pos);
+                return;
+            }
+        }
+        if !ctx.searching {
+            self.search_shown = false;
+        }
         // never jump to a contextual tab on selection changes; only fall
         // back to Home when the active tab's context disappears
         if let Some(kind) = self.tabs.get(selected).map(|t| t.ctx)
