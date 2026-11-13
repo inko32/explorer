@@ -529,6 +529,15 @@ fn tab_strip(
 
     let mut x = (ctx.text_w("File", 12.5) + 26.0) * 8.0 / 7.0;
     let visible = visible_tabs(ctx);
+    // Contextual tabs sit triple the normal gap apart (and away from
+    // normal tabs) so the colored set reads as a group on the strip.
+    let gap_before = |pos: usize| {
+        if spec.tabs[visible[pos]].contextual.is_some() {
+            tab_gap * 3.0
+        } else {
+            tab_gap
+        }
+    };
     // Pre-scan: base tab widths, then widen the last tab of each
     // contextual run so the whole run is at least as wide as its
     // title-bar block caption (block = run, see
@@ -552,8 +561,10 @@ fn tab_strip(
                 j += 1;
             }
             if let Some(name) = &name {
-                let run_w: f32 =
-                    ws[i..=j].iter().sum::<f32>() + tab_gap * (j - i) as f32;
+                let run_w: f32 = ws[i..=j]
+                    .iter()
+                    .sum::<f32>()
+                    + (i + 1..=j).map(|k| gap_before(k)).sum::<f32>();
                 let target = ctx.text_w(name, 12.0) + 6.0;
                 if run_w < target {
                     ws[j] += target - run_w;
@@ -723,7 +734,11 @@ fn tab_strip(
                 Size::new(w, STRIP_H),
             ),
         });
-        x += w + tab_gap;
+        x += w + if pos + 1 < visible.len() {
+            gap_before(pos + 1)
+        } else {
+            tab_gap
+        };
     }
     let _ = finish_contextual(ctx, scene, strip_y, contextual_run.take());
 
