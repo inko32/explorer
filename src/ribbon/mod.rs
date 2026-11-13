@@ -1214,7 +1214,9 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
             state.focused,
         ))
         .fonts(state.fonts.clone())
-        .responsive(state.focused || !ignore_when_unfocused)
+        // a rubber-band drag in the folder pane owns the pointer: the
+        // ribbon goes inert (no hover feedback/tooltips) until it ends
+        .responsive((state.focused || !ignore_when_unfocused) && state.marquee.is_none())
         .on_event(Message::Ribbon)
         .boxed()
 }
