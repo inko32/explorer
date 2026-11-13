@@ -93,6 +93,14 @@ pub struct Popup {
     pub parent: Option<Box<Popup>>,
 }
 
+/// Armed by a release on a tab (see `State::last_tab_click`).
+pub struct TabClickArm {
+    pub tab: usize,
+    /// Whether `tab` was the selected tab when the click began.
+    pub was_selected: bool,
+    pub at: Instant,
+}
+
 /// Close the current popup, restoring its parent panel (if any).
 pub fn close_popup(state: &mut State) {
     if let Some(p) = state.popup.take() {
@@ -142,8 +150,19 @@ pub struct State {
     pub hover: Option<Target>,
     pub pressed: Option<Target>,
     pub hover_since: Option<Instant>,
-    /// Last mouse press on a tab strip tab (double-click detection).
-    pub last_tab_press: Option<Instant>,
+    /// Armed by a release on a tab. A press on the SAME tab within
+    /// the double-click window (no other interaction between) is a
+    /// double-click.
+    pub last_tab_click: Option<TabClickArm>,
+    /// Selected tab when the current tab press began (a release arms
+    /// the double-click detector with it, so "was the clicked tab
+    /// already active" is judged at click time, not after the first
+    /// click switched to it).
+    pub cur_tab_press_selected: usize,
+    /// Set by a tab double-click toggle: the toggle's own trailing
+    /// click (press + release) must not re-arm the detector, else the
+    /// second half of the double-click toggles straight back.
+    pub suppress_tab_arm: bool,
     pub hover_pos: Point,
     /// Tooltip currently displayed (command id).
     pub tooltip: Option<u32>,
@@ -196,7 +215,9 @@ impl Default for State {
             hover: None,
             pressed: None,
             hover_since: None,
-            last_tab_press: None,
+            last_tab_click: None,
+            cur_tab_press_selected: 0,
+            suppress_tab_arm: false,
             hover_pos: Point::ORIGIN,
             tooltip: None,
             tooltip_anchor: None,

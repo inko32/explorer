@@ -39,10 +39,14 @@ use layout::Ctx;
 use scene::{Cmd, Fill, Scene};
 use state::Target::*;
 
+
 /// Hover dwell time before a tooltip appears.
 const TOOLTIP_DELAY: Duration = Duration::from_millis(600);
-/// Two tab releases within this window count as a double-click.
-const DOUBLE_CLICK: Duration = Duration::from_millis(500);
+/// Two clicks on the same tab within this window count as a
+/// double-click. Generous on purpose: a physical double-click on a
+/// stiff mouse button (press, hold, release, press) can approach a
+/// second.
+const TAB_DOUBLE: Duration = Duration::from_millis(1500);
 
 /// The ribbon widget.
 impl<'a, Message, Th, Renderer> iced::advanced::widget::Meta for Ribbon<'a, Message, Th, Renderer> {}
@@ -330,33 +334,73 @@ where
             let hit = state.scene.as_ref().and_then(|s| s.hit(local).cloned());
             if let Some(node) = &hit {
                 if let Some(t) = &node.target {
-                    // Double-clicking any tab toggles the ribbon minimize
-                    // state — same path as the minimize switch. Detected
-                    // on press (not release): while a minimized tab's
-                    // popup is open, the overlay sees the release first
-                    // and consumes `state.pressed`, so release-based
-                    // detection never fires.
-                    if matches!(t, Target::Tab(_)) {
-                        let now = Instant::now();
-                        if state
-                            .last_tab_press
-                            .is_some_and(|t| t.elapsed() <= DOUBLE_CLICK)
+                    if let Target::Tab(i) = t {
+                        // Double-click detection: two clicks on the
+                        // SAME tab inside TAB_DOUBLE with no other
+                        // interaction between. A window is unavoidable —
+                        // a double-click and two spaced single clicks
+                        // are structurally identical — but generous: a
+                        // physical double-click on a stiff mouse button
+                        // can span nearly a second.
+                        if let Some(arm) = state.last_tab_click.take()
+                            && arm.tab == *i
+                            && arm.at.elapsed() <= TAB_DOUBLE
                         {
-                            state.last_tab_press = None;
-                            activate(
-                                fw,
-                                theme,
-                                state,
-                                &Target::Minimize,
-                                translate_rect(node.rect, origin),
-                                origin,
-                                shell,
-                                on_event.as_deref(),
-                            );
-                            shell.capture_event();
-                            return;
+                            let view = fw.view();
+                            if view.minimized() {
+                                // double-click while minimized: switch
+                                // to the clicked tab, then restore
+                                view.select_tab(*i);
+                                if let Ok(spec) = fw.spec() {
+                                    let id = spec
+                                        .tabs
+                                        .get(*i)
+                                        .map(|t| t.id.clone())
+                                        .unwrap_or_default();
+                                    publish(
+                                        shell,
+                                        on_event.as_deref(),
+                                        RibbonEvent::TabActivated { tab: id },
+                                    );
+                                }
+                                fw.view_log(
+                                    EventType::TabActivated,
+                                    EventLocation::Ribbon,
+                                    0,
+                                );
+                            }
+                            if view.minimized() || arm.was_selected {
+                                // minimized: any tab's double-click
+                                // restores; maximized: only the ACTIVE
+                                // tab's double-click minimizes. The
+                                // trailing click of THIS double-click
+                                // must not toggle back.
+                                state.suppress_tab_arm = true;
+                                activate(
+                                    fw,
+                                    theme,
+                                    state,
+                                    &Target::Minimize,
+                                    translate_rect(node.rect, origin),
+                                    origin,
+                                    shell,
+                                    on_event.as_deref(),
+                                );
+                                shell.capture_event();
+                                return;
+                            }
+                            // maximized, previously-inactive tab: the
+                            // first click already switched to it — the
+                            // second click is just "switch" again
                         }
-                        state.last_tab_press = Some(now);
+                        // remember the selection for the release's
+                        // double-click arming (a first click on an
+                        // inactive tab must not minimize on the second)
+                        state.cur_tab_press_selected = fw.view().selected_tab();
+                    } else {
+                        // a press on anything else breaks the
+                        // consecutive-same-tab pair
+                        state.last_tab_click = None;
                     }
                     state.pressed = Some(t.clone());
                     shell.invalidate_layout();
@@ -411,6 +455,24 @@ where
                     shell,
                     on_event.as_deref(),
                 );
+                match t {
+                    Target::Tab(i) if !state.suppress_tab_arm => {
+                        // arm the double-click detector: the next press
+                        // on this same tab within TAB_DOUBLE (with no
+                        // other interaction between) is a double-click
+                        state.last_tab_click = Some(state::TabClickArm {
+                            tab: *i,
+                            was_selected: state.cur_tab_press_selected == *i,
+                            at: Instant::now(),
+                        });
+                    }
+                    _ => {
+                        // trailing release of a double-click toggle (or
+                        // any non-tab release): keep the detector
+                        // disarmed
+                        state.suppress_tab_arm = false;
+                    }
+                }
                 shell.capture_event();
             }
         };
@@ -441,6 +503,7 @@ where
                 state.pressed = None;
             }
             iced::Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
+                state.last_tab_click = None;
                 let Some(position) = cursor.position() else {
                     return;
                 };
@@ -845,6 +908,8 @@ fn handle_keyboard<Message>(
     mapper: Option<&dyn Fn(RibbonEvent) -> Message>,
 ) {
     use keyboard::key::{Key, Named};
+    // typing breaks a consecutive-same-tab pair
+    state.last_tab_click = None;
     match key {
         Key::Named(Named::Alt) | Key::Named(Named::F10) => {
             state.keytips = !state.keytips;
