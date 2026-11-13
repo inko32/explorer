@@ -175,6 +175,8 @@ pub struct Explorer {
     pub(crate) col_drag: Option<ColDrag>,
     /// Hovered Details column header (index into `detail_cfg.columns`).
     pub(crate) col_hovered: Option<usize>,
+    /// Details column header held pressed (drives the 75% blue tint).
+    pub(crate) col_pressed: Option<usize>,
     pub sort: SortBy,
     /// Sort direction (true = ascending).
     pub sort_asc: bool,
@@ -326,6 +328,7 @@ impl Explorer {
             details_col_on,
             col_drag: None,
             col_hovered: None,
+            col_pressed: None,
             sort: SortBy::Name,
             sort_asc: true,
             show_hidden: false,
@@ -1698,6 +1701,17 @@ impl Explorer {
                         }
                         _ => {}
                     }
+                }
+                // the column header's 75% press tint ends on release
+                if self.col_pressed.is_some()
+                    && matches!(
+                        &e,
+                        iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                            iced::mouse::Button::Left
+                        ))
+                    )
+                {
+                    self.col_pressed = None;
                 }
                 if let iced::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(m)) = &e {
                     let ctrl = m.control();

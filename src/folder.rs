@@ -745,16 +745,21 @@ fn details_col_w(state: &Explorer, col: usize) -> f32 {
 /// sitting on top of the column title, touching the header's top line.
 /// Drawn as an inline SVG so the hover state can tint it blue (§9).
 fn sort_arrow(ascending: bool, w: f32, h: f32, color: Color) -> Element<'static, Message> {
-    let points = if ascending {
-        "4.5,0.5 8.5,4.5 0.5,4.5" // ▲
+    // a fully transparent color means "hidden" — but hex() drops alpha,
+    // so the polygon is omitted instead (the empty svg keeps the space)
+    let points = if color.a == 0.0 {
+        String::new()
     } else {
-        "0.5,0.5 8.5,0.5 4.5,4.5" // ▼
+        let p = if ascending {
+            "4.5,0.5 8.5,4.5 0.5,4.5" // ▲
+        } else {
+            "0.5,0.5 8.5,0.5 4.5,4.5" // ▼
+        };
+        format!("<polygon points='{p}' fill='{}'/>", crate::icons::hex(color))
     };
     let handle = iced::widget::svg::Handle::from_memory(
         format!(
-            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 9 5'>\
-             <polygon points='{points}' fill='{}'/></svg>",
-            crate::icons::hex(color),
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 9 5'>{points}</svg>",
         )
         .into_bytes(),
     );
@@ -766,10 +771,13 @@ fn sort_arrow(ascending: bool, w: f32, h: f32, color: Color) -> Element<'static,
 
 /// SPEC/detail-view.txt column header. Every visible column is
 /// `16px space + title + fill + 1px line + 15px dropdown button`
-/// (§4/§6), followed by its right-edge resizer (§10/§15). Hover
-/// highlights blue (§9); a click sorts, the dropdown opens the filter
-/// menu, a right-click opens the column menu. The block is as wide as
-/// the columns need — no 100% fill (§7/§10).
+/// (§4/§6), followed by its right-edge resizer (§10/§15). The title
+/// background is fully transparent, 50% blue on hover, 75% while
+/// pressed; the title text is dark blue. The dropdown button and its
+/// separator line are invisible until the column is hovered (they keep
+/// their space). A click sorts, the dropdown opens the filter menu, a
+/// right-click opens the column menu. The block is as wide as the
+/// columns need — no 100% fill (§7/§10).
 fn details_header(state: &Explorer, skin: skin::Skin) -> Element<'static, Message> {
     let d = &state.view_cfg.layouts.details;
     let dc = &state.detail_cfg;
@@ -778,10 +786,20 @@ fn details_header(state: &Explorer, skin: skin::Skin) -> Element<'static, Messag
         let c = &dc.columns[g];
         let w = details_col_w(state, g);
         let hovered = state.col_hovered == Some(g);
-        // §9: hover highlights the title and the dropdown glyph blue
-        let color = if hovered { skin.accent } else { skin.subtle };
-        // §2: the sort arrow sits ON TOP of the title (other columns
-        // reserve the same 5px so the titles stay aligned)
+        let pressed = state.col_pressed == Some(g);
+        // the title text is dark blue; the hover/press tints are the
+        // accent at 50% / 75% over the transparent background
+        let color = skin.accent_dark;
+        let bgc = if pressed {
+            Color { a: 0.75, ..skin.accent }
+        } else if hovered {
+            Color { a: 0.50, ..skin.accent }
+        } else {
+            Color::TRANSPARENT
+        };
+        // §2: the sort arrow sits ON TOP of the title, centered in the
+        // column (other columns reserve the same 5px so the titles
+        // stay aligned)
         let arrow: Element<Message> = if c.sort.is_some() && state.sort == c.sort.unwrap() {
             sort_arrow(state.sort_asc, dc.arrow_w, dc.arrow_h, color)
         } else {
@@ -790,13 +808,19 @@ fn details_header(state: &Explorer, skin: skin::Skin) -> Element<'static, Messag
                 .height(Length::Fixed(dc.arrow_h))
                 .boxed()
         };
-        // §5/§6: the 1px line + the 15px dropdown button at the right
+        // §5/§6: the 1px line + the 15px dropdown button at the right —
+        // invisible until the column is hovered (space is reserved)
         let dropdown = mouse_area(
-            container(sort_arrow(false, dc.arrow_w, dc.arrow_h, color))
-                .width(Length::Fixed(dc.dropdown_w))
-                .height(Length::Fill)
-                .align_x(iced::alignment::Horizontal::Center)
-                .align_y(iced::alignment::Vertical::Center),
+            container(sort_arrow(
+                false,
+                dc.arrow_w,
+                dc.arrow_h,
+                if hovered { color } else { Color::TRANSPARENT },
+            ))
+            .width(Length::Fixed(dc.dropdown_w))
+            .height(Length::Fill)
+            .align_x(iced::alignment::Horizontal::Center)
+            .align_y(iced::alignment::Vertical::Center),
         )
         .on_press(Message::ColumnFilterMenu(g))
         .on_enter(Message::ColumnHoverEnter(g))
@@ -804,11 +828,9 @@ fn details_header(state: &Explorer, skin: skin::Skin) -> Element<'static, Messag
         let cell = container(
             column![
                 container(arrow)
-                    .height(Length::Fixed(dc.arrow_h))
-                    .padding(iced::Padding {
-                        left: dc.text_pad_left,
-                        ..Default::default()
-                    }),
+                    .width(Length::Fill)
+                    .align_x(iced::alignment::Horizontal::Center)
+                    .height(Length::Fixed(dc.arrow_h)),
                 row![
                     container(text(c.label.clone()).size(dc.font_size).color(color))
                         .padding(iced::Padding {
@@ -821,7 +843,9 @@ fn details_header(state: &Explorer, skin: skin::Skin) -> Element<'static, Messag
                             .width(Length::Fixed(crate::theme::border_w(dc.sep_w)))
                             .height(Length::Fill)
                     )
-                    .style(bg(skin.sep)),
+                    // a faint line was almost invisible on the window
+                    // background — use the darker secondary text color
+                    .style(bg(if hovered { skin.subtle } else { Color::TRANSPARENT })),
                     dropdown,
                 ]
                 .height(Length::Fill)
@@ -829,7 +853,11 @@ fn details_header(state: &Explorer, skin: skin::Skin) -> Element<'static, Messag
             ]
             .height(Length::Fixed(d.header_h)),
         )
-        .width(Length::Fixed(w));
+        .width(Length::Fixed(w))
+        .style(move |_t: &iced::Theme| container::Style {
+            background: Some(bgc.into()),
+            ..Default::default()
+        });
         let cell = mouse_area(cell)
             .on_press(Message::ColumnSortClick(g))
             .on_right_press(Message::ColumnSettingsMenu)
@@ -857,12 +885,10 @@ fn details_header(state: &Explorer, skin: skin::Skin) -> Element<'static, Messag
         .on_press(Message::ColumnSplitBegin(g));
         cols = cols.push(resizer.boxed());
     }
+    // the strip background is fully transparent (the titles tint on
+    // hover/press only): the pane backdrop shows through
     container(cols.height(Length::Fixed(d.header_h)).align_y(iced::Alignment::Center))
         .width(Length::Fill)
-        .style(move |_t: &iced::Theme| container::Style {
-            background: Some(skin.col_header_bg.into()),
-            ..Default::default()
-        })
         .boxed()
 }
 
