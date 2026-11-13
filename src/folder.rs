@@ -579,6 +579,24 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
         }
     };
 
+    // a submitted search shows a placeholder line in the folder pane
+    // (real result listing lands later)
+    let body: Element<Message> = if let Some(q) = &state.search_query {
+        column![
+            container(
+                text(format!("Searched for \"{q}\" in {}", state.title()))
+                    .size(cfg.style.font_size)
+                    .color(skin.subtle)
+            )
+            .width(Length::Fill)
+            .padding([4.0, 8.0]),
+            body,
+        ]
+        .boxed()
+    } else {
+        body
+    };
+
     // rubber-band selection rectangle overlay (all layouts)
     let body: Element<Message> = if let Some(m) = &state.marquee {
         let (x0, x1) = (m.x0.min(m.x1), m.x0.max(m.x1));

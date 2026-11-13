@@ -44,6 +44,10 @@ const TRI_HOVER: &str = "#50ACFF";
 /// when edit mode starts).
 pub(crate) const ADDRESS_INPUT_ID: &str = "address-input";
 
+/// Widget id of the search edit field (the model focuses it when edit
+/// mode starts).
+pub(crate) const SEARCH_INPUT_ID: &str = "search-input";
+
 /// 1px logical border at a constant physical width (SPEC/Border_DPI.md).
 fn border1(color: iced::Color) -> iced::Border {
     iced::Border {
@@ -420,6 +424,31 @@ pub(crate) fn bar_rect(state: &Explorer) -> iced::Rectangle {
     iced::Rectangle::new(iced::Point::new(x, y), iced::Size::new(w, BTN))
 }
 
+/// Window-logical rectangle of the search box — the click-away hit
+/// test for search edit mode. Mirrors [`bar_rect`] (the search box
+/// hugs the band's right padding).
+pub(crate) fn search_rect(state: &Explorer) -> iced::Rectangle {
+    let (ft, fr, _, fl) = frame_insets(state);
+    let content_w = (state.win_w - fl - fr).max(320.0);
+    let search_w =
+        (content_w * state.search_share).clamp(120.0, (content_w - 280.0).max(120.0));
+    let title_h = if state.self_border {
+        crate::border::titlebar_h(state.frame_style, state.maximized)
+    } else {
+        0.0
+    };
+    let mult = state.dpi_multiplier();
+    let (min_ribbon_w, _, _, _) = state.ribbon.sacrifice();
+    let ribbon_h = if content_w >= min_ribbon_w * mult {
+        crate::ribbon::widget::layout::ribbon_height(&state.ribbon.framework().view())
+    } else {
+        0.0
+    };
+    let x = fl + content_w - 12.0 - search_w;
+    let y = ft + title_h + ribbon_h + 6.0;
+    iced::Rectangle::new(iced::Point::new(x, y), iced::Size::new(search_w, BTN))
+}
+
 pub(crate) fn address_bar<'a>(
     state: &'a Explorer,
     skin: skin::Skin,
@@ -622,17 +651,63 @@ pub(crate) fn address_bar<'a>(
     });
 
     // ---- search box: same height as the address bar; 9px left, text,
-    // 18px search button (12px magnifier), 5px right ----
-    let search_btn = container(icon("search", 12.0, skin))
+    // 18px search button (12px magnifier), 5px right. Edit mode turns
+    // the hint text into a text input and the border blue (like the
+    // address bar); the buffer survives edit mode (like Win8) ----
+    let search_btn = button(icon("search", 12.0, skin))
         .width(Length::Fixed(RIGHT_LIST))
         .height(Length::Fixed(RIGHT_LIST))
-        .center_x(Length::Fixed(RIGHT_LIST))
-        .center_y(Length::Fixed(RIGHT_LIST));
-    let search = container(
-        row![
-            text(format!("Search {}", state.title()))
+        .padding(0)
+        .style(move |_t, _| button::Style {
+            background: None,
+            text_color: skin.text,
+            border: Default::default(),
+            shadow: Default::default(),
+            snap: true,
+        })
+        .on_press(if state.search_active {
+            Message::SearchSubmit
+        } else {
+            Message::SearchEditStart
+        });
+    let search_field: Element<'a, Message> = if state.search_active {
+        text_input(
+            format!("Search {}", state.title()),
+            &state.search_text,
+        )
+        .id(iced::widget::Id::new(SEARCH_INPUT_ID))
+        .on_input(Message::SearchInput)
+        .on_submit(Message::SearchSubmit)
+        .size(CRUMB_TEXT)
+        .padding(0)
+        .style(move |_t: &iced::Theme, _status: text_input::Status| text_input::Style {
+            background: iced::Color::TRANSPARENT.into(),
+            border: Default::default(),
+            placeholder: skin.disabled,
+            value: skin.text,
+            selection: skin.sel,
+        })
+        .width(Length::Fill)
+        .boxed()
+    } else {
+        // clicking the hint text edits the search box; the buffer (if
+        // any) is shown instead of the hint, like Win8
+        let label = if state.search_text.is_empty() {
+            format!("Search {}", state.title())
+        } else {
+            state.search_text.clone()
+        };
+        mouse_area(
+            text(label)
                 .size(CRUMB_TEXT)
                 .color(skin.disabled),
+        )
+        .on_press(Message::SearchEditStart)
+        .boxed()
+    };
+    let search = container(
+        row![
+            search_field,
             Space::new().width(Length::Fill),
             search_btn,
         ]
@@ -649,7 +724,11 @@ pub(crate) fn address_bar<'a>(
     })
     .style(move |_t: &iced::Theme| container::Style {
         background: Some(skin.window_bg.into()),
-        border: border1(skin.nav_border),
+        border: border1(if state.search_active {
+            skin.accent
+        } else {
+            skin.nav_border
+        }),
         ..Default::default()
     });
 

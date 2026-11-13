@@ -23,6 +23,9 @@ const HISTORY_MAX: usize = 20;
 /// Widget id of the address edit field (focus/selection tasks).
 const ADDRESS_INPUT_ID: &str = "address-input";
 
+/// Widget id of the search edit field (focus task).
+const SEARCH_INPUT_ID: &str = "search-input";
+
 /// Push onto a history stack, dropping the oldest entry past
 /// [`HISTORY_MAX`].
 fn push_history(stack: &mut Vec<PathBuf>, p: PathBuf) {
@@ -102,6 +105,13 @@ pub struct Explorer {
     /// Address edit mode: `Some(buffer)` while the address bar shows an
     /// editable full path (SPEC/Address_bar.md).
     pub(crate) address_edit: Option<String>,
+    /// The search box is editable (clicked / focused).
+    pub(crate) search_active: bool,
+    /// Search box buffer (kept when edit mode ends, like Win8).
+    pub(crate) search_text: String,
+    /// The submitted query — drives the placeholder text in the folder
+    /// pane until real search lands.
+    pub(crate) search_query: Option<String>,
     pub maximized: bool,
     /// Caption-button hover bits (bit 0 = minimize, 1 = maximize); only
     /// the Win8.1 frame uses them (glyph color swap on hover).
@@ -275,6 +285,9 @@ impl Explorer {
             crumb_hover: None,
             bar_listing: None,
             address_edit: None,
+            search_active: false,
+            search_text: String::new(),
+            search_query: None,
             maximized: false,
             cap_hover: 0,
             ctrl_held: false,
@@ -1659,22 +1672,29 @@ impl Explorer {
                 }
                 // address edit mode: a press outside the address bar
                 // discards the edits (a press on the bar keeps them)
-                if self.address_edit.is_some()
-                    && matches!(
-                        e,
-                        iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
-                            iced::mouse::Button::Left
-                        ))
-                    )
-                    && !crate::navigation::bar_rect(self).contains(self.cursor)
-                {
-                    self.address_edit = None;
+                if matches!(
+                    e,
+                    iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
+                        iced::mouse::Button::Left
+                    ))
+                ) {
+                    if self.address_edit.is_some()
+                        && !crate::navigation::bar_rect(self).contains(self.cursor)
+                    {
+                        self.address_edit = None;
+                    }
+                    if self.search_active
+                        && !crate::navigation::search_rect(self).contains(self.cursor)
+                    {
+                        self.search_active = false;
+                    }
                 }
                 if let Some(m) = crate::handle_key(
                     e,
                     self.renaming.is_some(),
                     self.menu.is_some(),
                     self.address_edit.is_some(),
+                    self.search_active,
                 ) {
                     return self.update(m);
                 }
@@ -1768,6 +1788,29 @@ impl Explorer {
             }
             Message::CancelAddressEdit => {
                 self.address_edit = None;
+                iced::Task::none()
+            }
+            Message::SearchEditStart => {
+                if !self.search_active {
+                    self.search_active = true;
+                    let id = iced::widget::Id::new(SEARCH_INPUT_ID);
+                    return iced::widget::operation::focus(id);
+                }
+                iced::Task::none()
+            }
+            Message::SearchInput(s) => {
+                self.search_text = s;
+                iced::Task::none()
+            }
+            Message::SearchSubmit => {
+                let q = self.search_text.trim().to_string();
+                if !q.is_empty() {
+                    self.search_query = Some(q);
+                }
+                iced::Task::none()
+            }
+            Message::CancelSearch => {
+                self.search_active = false;
                 iced::Task::none()
             }
             Message::BarSplitMove(x) => {

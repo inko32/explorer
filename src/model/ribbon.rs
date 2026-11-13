@@ -57,6 +57,7 @@ impl Explorer {
             has_archive: sel_has(&|e: &fs::Entry| fs::archive::is_archive_path(&e.path)),
             has_image,
             has_selection: !self.selected.is_empty(),
+            searching: self.search_active || self.search_query.is_some(),
         }
     }
 

@@ -254,6 +254,7 @@ pub fn handle_key(
     renaming: bool,
     menu_open: bool,
     address_editing: bool,
+    search_editing: bool,
 ) -> Option<Message> {
     use iced::keyboard::{key::Named, Event as KeyEvent, Key};
     let iced::Event::Keyboard(KeyEvent::KeyPressed { key, modifiers, .. }) = event else {
@@ -269,6 +270,11 @@ pub fn handle_key(
     // only Escape (discard) is handled globally
     if address_editing {
         return (key == Key::Named(Named::Escape)).then_some(Message::CancelAddressEdit);
+    }
+    // while the search field is focused the keystrokes belong to it;
+    // only Escape (leave edit mode) is handled globally
+    if search_editing {
+        return (key == Key::Named(Named::Escape)).then_some(Message::CancelSearch);
     }
     // the Menu key (near AltGr) opens the context menu for the selection
     if key == Key::Named(Named::ContextMenu) {
