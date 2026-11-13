@@ -243,6 +243,8 @@ impl Explorer {
             self.sort = key;
             self.sort_asc = true;
         }
+        // the 75% blue tint shows while the header is held pressed
+        self.col_pressed = Some(col);
         self.apply_sort();
         Task::none()
     }
@@ -365,6 +367,16 @@ impl Explorer {
         let (y0, y1) = (m.y0.min(m.y1), m.y0.max(m.y1));
         let pane_w = self.file_pane_width();
         let mut hits = m.base.clone();
+        // a plain click on empty space is a zero-size marquee: it only
+        // releases the selection (a degenerate rect would pass the
+        // strict bounds below because the rows span the full pane width)
+        let dragged = x1 - x0 > 1.0 && y1 - y0 > 1.0;
+        if !dragged {
+            if hits != self.selected {
+                self.selected = hits;
+            }
+            return;
+        }
         if self.view_cfg.family(self.view_index) == vs::Family::IconTop {
             // §8.3 dynamic row heights: one geometry pass, then direct
             // per-item math (item_rect would rebuild the prefix sums
