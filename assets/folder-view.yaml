@@ -70,14 +70,10 @@ layouts:
     row_gap: -1.0           # gap between rows, in border pixels (follows the
                             # border DPI unscale): -1 overlaps rows so adjacent
                             # item borders share one line; raise it for a looser list
-    header_h: 24.0          # column header strip (overlays the scrollable top)
+    header_h: 25.0          # column header strip (SPEC/detail-view.txt §1);
+                            # the header metrics live in details-view.yaml
+    files_gap: 6.0          # SPEC/detail-view.txt §12: space below the title bar
     icon: 16.0
-    icon_cell_w: 26.0       # icon column slot
-    cell_padding_v: 2.0     # text cell vertical padding
-    cell_padding_h: 4.0
-    col_widths: [170.0, 140.0, 90.0]  # Date modified / Type / Size; Name takes the rest
-    col_min: 40.0           # column drag clamp
-    col_max: 600.0
   list:                     # index 3: name-only columns flowing top to bottom
     index: 3
     row_h: 24.0

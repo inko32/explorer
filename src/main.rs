@@ -9,6 +9,7 @@ mod commands;
 // executables, favorites), not yet wired in the UI.
 #[allow(dead_code)]
 mod dnd;
+mod details_view;
 mod folder;
 mod fonts;
 mod fs;
