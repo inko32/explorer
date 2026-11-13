@@ -19,6 +19,11 @@ border_follow_dpi: 0
 # loses focus (SPEC/Unfocused_Window.md). 0 = close instantly. Kept as
 # a general animation token; future fades should reuse it.
 fade_ms: 300
+
+# Double-click window (ms): title-bar maximize, ribbon tab minimize
+# toggle, file open — one app-wide value (the OS setting is not
+# exposed cross-platform).
+double_click_ms: 400
 #
 # Token names follow SPEC/File_Operation_UI_Spec.md §2 where a mapping
 # exists (commented per group); app-specific chrome keeps its own names.

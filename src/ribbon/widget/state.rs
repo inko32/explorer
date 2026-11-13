@@ -149,6 +149,10 @@ pub struct State {
     pub scene: Option<crate::ribbon::widget::scene::Scene>,
     pub hover: Option<Target>,
     pub pressed: Option<Target>,
+    /// Set when a press closes a tab's own minimized popup: the
+    /// matching release is a pure dismiss and must not reactivate the
+    /// tab (which would reopen the popup it just closed).
+    pub dismiss_tab_on_release: Option<usize>,
     pub hover_since: Option<Instant>,
     /// Armed by a release on a tab. A press on the SAME tab within
     /// the double-click window (no other interaction between) is a
@@ -213,6 +217,7 @@ impl Default for State {
             hover_since: None,
             last_tab_click: None,
             cur_tab_press_selected: 0,
+            dismiss_tab_on_release: None,
             hover_pos: Point::ORIGIN,
             tooltip: None,
             tooltip_anchor: None,

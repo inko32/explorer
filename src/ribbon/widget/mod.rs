@@ -42,12 +42,6 @@ use state::Target::*;
 
 /// Hover dwell time before a tooltip appears.
 const TOOLTIP_DELAY: Duration = Duration::from_millis(600);
-/// Two clicks on the same tab within this window count as a
-/// double-click. Generous on purpose: a physical double-click on a
-/// stiff mouse button (press, hold, release, press) can approach a
-/// second.
-const TAB_DOUBLE: Duration = Duration::from_millis(1500);
-
 /// The ribbon widget.
 impl<'a, Message, Th, Renderer> iced::advanced::widget::Meta for Ribbon<'a, Message, Th, Renderer> {}
 
@@ -276,6 +270,19 @@ where
         let fw = self.fw;
         let theme = &self.theme;
         let on_event = &self.on_event;
+
+        // Minimized ribbon: tab tooltips don't exist — release the
+        // hover-dwell arming (and a tooltip already showing) carried
+        // over from the expanded ribbon, else it would pop over the
+        // collapsed strip
+        if fw.view().minimized()
+            && (state.tooltip.is_some() || state.hover_since.is_some())
+        {
+            state.tooltip = None;
+            state.tooltip_anchor = None;
+            state.hover_since = None;
+            shell.request_redraw();
+        }
         let move_to = |state: &mut State, position: Point, shell: &mut Shell<'_, Message>| {
             state.hover_pos = position;
             let local = Point::new(position.x - origin.x, position.y - origin.y);
@@ -295,8 +302,10 @@ where
                 shell.invalidate_layout();
                 shell.request_redraw();
             }
-            // tooltip
-            if let Some(node) = &hit
+            // tooltip (minimized strip shows none — the dwell
+            // arming below is released at minimize time)
+            if !fw.view().minimized()
+                && let Some(node) = &hit
                 && let (Some(tip), Some(since)) = (node.tip, state.hover_since)
                 && since.elapsed() > TOOLTIP_DELAY
                 && state.tooltip.is_none()
@@ -321,10 +330,18 @@ where
             state.keytips = false;
             state.keytip_buffer.clear();
             // close popups on click-away (the overlay passes through)
+            let mut closed_min_tab = None;
             if let Some((pop_origin, pop_size)) = state.popup_bounds {
                 let r = Rectangle::new(pop_origin, pop_size);
                 if pop_size.width > 0.0 && r.contains(position) {
                     return; // overlay handles it
+                }
+                // a minimized tab's own popup: a press on that same tab
+                // is a dismiss — the release must not reopen it
+                if let Some(p) = &state.popup
+                    && let PopupKind::MinimizedTab(i) = &p.kind
+                {
+                    closed_min_tab = Some(*i);
                 }
                 close_all_popups(state);
                 state.popup_bounds = None;
@@ -332,19 +349,40 @@ where
             }
             let local = Point::new(position.x - origin.x, position.y - origin.y);
             let hit = state.scene.as_ref().and_then(|s| s.hit(local).cloned());
+            // A press can land with no preceding move at this position
+            // (an open popup captures the moves), leaving `hover` frozen
+            // on the tab clicked before the popup — sync it so that tab
+            // doesn't keep its hover fill
+            let press_hover = hit.as_ref().and_then(|n| n.target.clone());
+            if state.hover != press_hover {
+                state.hover = press_hover.clone();
+                state.hover_since = Some(Instant::now());
+                state.tooltip = None;
+                state.tooltip_anchor = None;
+                // the hover fill is baked into the scene at layout time
+                shell.invalidate_layout();
+                shell.request_redraw();
+            }
+            if let Some(i) = closed_min_tab
+                && let Some(Target::Tab(t)) = &press_hover
+                && *t == i
+            {
+                state.dismiss_tab_on_release = Some(i);
+            }
             if let Some(node) = &hit {
                 if let Some(t) = &node.target {
                     if let Target::Tab(i) = t {
                         // Double-click detection: two clicks on the
-                        // SAME tab inside TAB_DOUBLE with no other
-                        // interaction between. A window is unavoidable —
-                        // a double-click and two spaced single clicks
-                        // are structurally identical — but generous: a
-                        // physical double-click on a stiff mouse button
+                        // SAME tab inside the theme's double-click
+                        // window with no other interaction between.
+                        // A window is unavoidable — a double-click and
+                        // two spaced single clicks are structurally
+                        // identical.
                         // can span nearly a second.
                         if let Some(arm) = state.last_tab_click.take()
                             && arm.tab == *i
-                            && arm.at.elapsed() <= TAB_DOUBLE
+                            && arm.at.elapsed()
+                                <= Duration::from_millis(crate::theme::double_click_ms())
                         {
                             let view = fw.view();
                             if view.minimized() {
@@ -442,7 +480,17 @@ where
             let local = Point::new(position.x - origin.x, position.y - origin.y);
             let hit = state.scene.as_ref().and_then(|s| s.hit(local).cloned());
             let pressed = state.pressed.take();
-            if let (Some(node), Some(t)) = (&hit, &pressed)
+            // a press that closed this tab's own minimized popup turns
+            // the release into a pure dismiss: reactivating would
+            // reopen the popup it just closed (and must not count
+            // toward a double-click either)
+            let dismiss_tab = state.dismiss_tab_on_release.take();
+            let dismissed = matches!(
+                (dismiss_tab, &pressed),
+                (Some(i), Some(Target::Tab(t))) if *t == i
+            );
+            if !dismissed
+                && let (Some(node), Some(t)) = (&hit, &pressed)
                 && node.target.as_ref() == Some(t)
             {
                 let anchor = translate_rect(node.rect, origin);
@@ -458,14 +506,17 @@ where
                 );
                 if let Target::Tab(i) = t {
                     // arm the double-click detector: the next press
-                    // on this same tab within TAB_DOUBLE (with no
-                    // other interaction between) is a double-click
+                    // on this same tab within the double-click window
+                    // (with no other interaction between) is a
+                    // double-click
                     state.last_tab_click = Some(state::TabClickArm {
                         tab: *i,
                         was_selected: state.cur_tab_press_selected == *i,
                         at: Instant::now(),
                     });
                 }
+                shell.capture_event();
+            } else if dismissed {
                 shell.capture_event();
             }
         };
@@ -546,7 +597,7 @@ where
             // needed).
             iced::Event::Window(iced::window::Event::RedrawRequested(_)) => {
                 let Some(since) = state.hover_since else { return };
-                if state.tooltip.is_some() || state.popup.is_some() {
+                if state.tooltip.is_some() || state.popup.is_some() || fw.view().minimized() {
                     return;
                 }
                 if since.elapsed() < TOOLTIP_DELAY {

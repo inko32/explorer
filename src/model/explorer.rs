@@ -12,8 +12,6 @@ use super::folder::ColDrag;
 use super::message::{ClipMode, FrameStyle, Message, NavSection, Pane, SortBy};
 use super::nav::NavTree;
 
-pub(crate) const DOUBLE_CLICK_MS: u128 = 400;
-
 /// Default address/search split: the search box takes 180 of the
 /// 1152px reference content width.
 const DEFAULT_SEARCH_SHARE: f32 = 180.0 / 1152.0;
@@ -1059,7 +1057,10 @@ impl Explorer {
                 let now = std::time::Instant::now();
                 let is_second = self
                     .last_title_press
-                    .map(|t| now.duration_since(t).as_millis() < DOUBLE_CLICK_MS)
+                    .map(|t| {
+                        now.duration_since(t).as_millis()
+                            < u128::from(crate::theme::double_click_ms())
+                    })
                     .unwrap_or(false);
                 self.last_title_press = Some(now);
                 if is_second {

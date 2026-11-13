@@ -1513,13 +1513,25 @@ where
 
     fn mouse_interaction(
         &self,
-        _cursor: mouse::Cursor,
+        cursor: mouse::Cursor,
         _renderer: &Renderer,
     ) -> mouse::Interaction {
         if self.tooltip {
-            mouse::Interaction::None
-        } else {
-            mouse::Interaction::Pointer
+            return mouse::Interaction::None;
+        }
+        // Claim the pointer ONLY over the popup content itself. While a
+        // popup is open, iced levitates the base-tree cursor wherever
+        // the overlay reports an interaction — reporting it window-wide
+        // froze the ribbon's tracked hover position (the overlay also
+        // captures every CursorMoved), so a click-away press fell back
+        // to that stale position, "hit" the tab that opened the popup,
+        // and matched its fresh double-click arm: any click anywhere
+        // toggled the ribbon and was swallowed. Outside the content the
+        // base tree keeps a live cursor and correct hit tests.
+        let bounds = Rectangle::new(self.origin, self.scene.size);
+        match cursor.position() {
+            Some(position) if bounds.contains(position) => mouse::Interaction::Pointer,
+            _ => mouse::Interaction::None,
         }
     }
 }
@@ -1569,6 +1581,14 @@ impl<'a, Message, Th, Renderer> RibbonOverlay<'a, Message, Th, Renderer> {
     ) {
         if !bounds.contains(position) {
             // click-away: close and let the base widget handle it
+            if let Some(p) = &self.state.popup
+                && let PopupKind::MinimizedTab(i) = &p.kind
+            {
+                // a minimized tab's own popup: when the press lands on
+                // that same tab, the base widget's release must not
+                // reactivate it (it would reopen what this click closes)
+                self.state.dismiss_tab_on_release = Some(*i);
+            }
             close_all_popups(self.state);
             self.state.previewed = None;
             shell.request_redraw();
