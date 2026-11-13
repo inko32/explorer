@@ -41,6 +41,8 @@ use state::Target::*;
 
 /// Hover dwell time before a tooltip appears.
 const TOOLTIP_DELAY: Duration = Duration::from_millis(600);
+/// Two tab releases within this window count as a double-click.
+const DOUBLE_CLICK: Duration = Duration::from_millis(500);
 
 /// The ribbon widget.
 impl<'a, Message, Th, Renderer> iced::advanced::widget::Meta for Ribbon<'a, Message, Th, Renderer> {}
@@ -328,6 +330,34 @@ where
             let hit = state.scene.as_ref().and_then(|s| s.hit(local).cloned());
             if let Some(node) = &hit {
                 if let Some(t) = &node.target {
+                    // Double-clicking any tab toggles the ribbon minimize
+                    // state — same path as the minimize switch. Detected
+                    // on press (not release): while a minimized tab's
+                    // popup is open, the overlay sees the release first
+                    // and consumes `state.pressed`, so release-based
+                    // detection never fires.
+                    if matches!(t, Target::Tab(_)) {
+                        let now = Instant::now();
+                        if state
+                            .last_tab_press
+                            .is_some_and(|t| t.elapsed() <= DOUBLE_CLICK)
+                        {
+                            state.last_tab_press = None;
+                            activate(
+                                fw,
+                                theme,
+                                state,
+                                &Target::Minimize,
+                                translate_rect(node.rect, origin),
+                                origin,
+                                shell,
+                                on_event.as_deref(),
+                            );
+                            shell.capture_event();
+                            return;
+                        }
+                        state.last_tab_press = Some(now);
+                    }
                     state.pressed = Some(t.clone());
                     shell.invalidate_layout();
                     shell.request_redraw();
@@ -1116,7 +1146,10 @@ pub(crate) fn activate<Message>(
                 open_popup(
                     state,
                     PopupKind::MinimizedTab(*i),
-                    Point::new(origin.x, anchor.y + anchor.height - 2.0),
+                    Point::new(
+                        origin.x,
+                        anchor.y + anchor.height - popup::MINIMIZED_POPUP_OVERLAP,
+                    ),
                     width,
                 );
             }
