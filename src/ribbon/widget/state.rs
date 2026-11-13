@@ -159,10 +159,6 @@ pub struct State {
     /// already active" is judged at click time, not after the first
     /// click switched to it).
     pub cur_tab_press_selected: usize,
-    /// Set by a tab double-click toggle: the toggle's own trailing
-    /// click (press + release) must not re-arm the detector, else the
-    /// second half of the double-click toggles straight back.
-    pub suppress_tab_arm: bool,
     pub hover_pos: Point,
     /// Tooltip currently displayed (command id).
     pub tooltip: Option<u32>,
@@ -217,7 +213,6 @@ impl Default for State {
             hover_since: None,
             last_tab_click: None,
             cur_tab_press_selected: 0,
-            suppress_tab_arm: false,
             hover_pos: Point::ORIGIN,
             tooltip: None,
             tooltip_anchor: None,
