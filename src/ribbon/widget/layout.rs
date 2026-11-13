@@ -1053,7 +1053,7 @@ fn qat_row(ctx: &Ctx, scene: &mut Scene, y: f32, width: f32) {
 // body / groups
 
 fn body(ctx: &Ctx, scene: &mut Scene, y: f32, width: f32) {
-    tab_content(ctx, scene, y, width, active_tab(ctx), true);
+    tab_content(ctx, scene, y, width, active_tab(ctx));
 }
 
 // ---------------------------------------------------------------------------
@@ -1451,16 +1451,16 @@ pub fn place_groups(
     )
 }
 
-/// Draw the tab body background + groups. Used by the widget body and by
-/// the minimized-tab popup (`allow_overflow == false` sizes the popup so
-/// everything fits).
+/// Draw the tab body background + groups, cascading the layout to fit
+/// `width` (`plan_groups`): used by the widget body and by the
+/// minimized-tab popup, which is exactly window-wide and follows the
+/// same window-too-narrow cascade.
 pub fn tab_content(
     ctx: &Ctx,
     scene: &mut Scene,
     y: f32,
     width: f32,
     tab_idx: usize,
-    allow_overflow: bool,
 ) {
     let bh = body_h(ctx);
     // body background
@@ -1481,24 +1481,7 @@ pub fn tab_content(
     );
     let content_y = y + 4.0;
     let tab = &ctx.spec().tabs[tab_idx];
-    let (placed, hidden) = if allow_overflow {
-        plan_groups(ctx, width, tab_idx)
-    } else {
-        (
-            tab.groups
-                .iter()
-                .enumerate()
-                .map(|(gi, g)| GroupPlan {
-                    gi,
-                    scale: ControlScale::Declared,
-                    caption_cols: 0,
-                    popup: false,
-                    w: measure_group(ctx, g),
-                })
-                .collect::<Vec<_>>(),
-            Vec::new(),
-        )
-    };
+    let (placed, hidden) = plan_groups(ctx, width, tab_idx);
     let mut x = 4.0 * gap(ctx);
     for plan in placed.iter() {
         build_group(
@@ -1527,15 +1510,13 @@ pub fn tab_content(
             0.0,
         );
     }
-    if allow_overflow {
-        if hidden.is_empty() {
-            ctx.state.overflow_hidden.take();
-        } else {
-            ctx.state.overflow_hidden.replace(Some(hidden.clone()));
-            ctx.state.overflow_tab.replace(Some(tab_idx));
-        }
+    if hidden.is_empty() {
+        ctx.state.overflow_hidden.take();
+    } else {
+        ctx.state.overflow_hidden.replace(Some(hidden.clone()));
+        ctx.state.overflow_tab.replace(Some(tab_idx));
     }
-    if !hidden.is_empty() && allow_overflow {
+    if !hidden.is_empty() {
         let rect = Rectangle::new(
             Point::new(width - 24.0, y + body_h(ctx) / 2.0 - 9.0),
             Size::new(18.0, 18.0),
