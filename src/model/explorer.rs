@@ -999,6 +999,12 @@ impl Explorer {
             // folder-view selection gesture (model/folder.rs)
             Message::Select(i) => self.select_press(i),
             Message::MarqueeBegin { x, y } => {
+                // the drag owns the pointer until MarqueeEnd: drop the
+                // hover chrome (folder items, details column headers)
+                // and let the hover handlers below ignore updates, so
+                // only the rubber band reacts to the cursor
+                self.hovered = None;
+                self.col_hovered = None;
                 self.marquee = Some(Marquee {
                     x0: x,
                     y0: y,
@@ -1032,8 +1038,9 @@ impl Explorer {
             Message::Hover(h) => {
                 // an open menu is modal for hover only: the items under
                 // it must not highlight while it is hovered (clicks and
-                // right-clicks still reach them as usual)
-                if self.menu.is_none() {
+                // right-clicks still reach them as usual). The same
+                // holds while a rubber-band drag owns the pointer.
+                if self.menu.is_none() && self.marquee.is_none() {
                     // TODO(perf): render_hz hover throttle (performance.yaml)
                     // was here — disabled, see the input_hz note
                     self.hovered = h;
@@ -1041,19 +1048,21 @@ impl Explorer {
                 iced::Task::none()
             }
             Message::HoverExit(i) => {
-                if self.menu.is_none() && self.hovered == Some(i) {
+                if self.menu.is_none() && self.marquee.is_none() && self.hovered == Some(i) {
                     self.hovered = None;
                 }
                 iced::Task::none()
             }
             Message::NavHover(h) => {
-                if self.menu.is_none() {
+                if self.menu.is_none() && self.marquee.is_none() {
                     self.nav_hover = h;
                 }
                 iced::Task::none()
             }
             Message::NavHoverExit(p) => {
-                if self.menu.is_none() && self.nav_hover.as_ref().is_some_and(|(h, _)| h == &p) {
+                if self.menu.is_none() && self.marquee.is_none()
+                    && self.nav_hover.as_ref().is_some_and(|(h, _)| h == &p)
+                {
                     self.nav_hover = None;
                 }
                 iced::Task::none()
@@ -1229,7 +1238,8 @@ impl Explorer {
             }
             Message::MenuPick(i) => self.menu_dispatch(i),
             Message::MenuHover(h) => {
-                if let Some(m) = &mut self.menu
+                if self.marquee.is_none()
+                    && let Some(m) = &mut self.menu
                     && m.hover != h
                 {
                     m.hover = h;
@@ -1321,13 +1331,14 @@ impl Explorer {
                 iced::Task::none()
             }
             Message::ColumnHoverEnter(col) => {
-                if self.col_hovered != Some(col) {
+                // no column hover while the rubber band owns the pointer
+                if self.marquee.is_none() && self.col_hovered != Some(col) {
                     self.col_hovered = Some(col);
                 }
                 iced::Task::none()
             }
             Message::ColumnHoverExit(col) => {
-                if self.col_hovered == Some(col) {
+                if self.marquee.is_none() && self.col_hovered == Some(col) {
                     self.col_hovered = None;
                 }
                 iced::Task::none()
@@ -1490,12 +1501,15 @@ impl Explorer {
                 iced::Task::none()
             }
             Message::CaptionHover(bit, hovered) => {
-                let mask = 1u8 << bit;
-                self.cap_hover = if hovered {
-                    self.cap_hover | mask
-                } else {
-                    self.cap_hover & !mask
-                };
+                // no caption hover while the rubber band owns the pointer
+                if self.marquee.is_none() {
+                    let mask = 1u8 << bit;
+                    self.cap_hover = if hovered {
+                        self.cap_hover | mask
+                    } else {
+                        self.cap_hover & !mask
+                    };
+                }
                 iced::Task::none()
             }
             Message::ToggleSelfBorder => {
@@ -1772,20 +1786,28 @@ impl Explorer {
                 self.nav_split = true;
                 iced::Task::none()
             }
+            // the rubber band owns the pointer during the drag: no
+            // hover chrome on the splitter, nav lists, or breadcrumbs
             Message::SplitterHover(h) => {
-                self.splitter_hover = h;
+                if self.marquee.is_none() {
+                    self.splitter_hover = h;
+                }
                 iced::Task::none()
             }
             Message::BackListHover(h) => {
-                self.back_list_hover = h;
+                if self.marquee.is_none() {
+                    self.back_list_hover = h;
+                }
                 iced::Task::none()
             }
             Message::RightListHover(h) => {
-                self.right_list_hover = h;
+                if self.marquee.is_none() {
+                    self.right_list_hover = h;
+                }
                 iced::Task::none()
             }
             Message::CrumbHoverEnter { group, arrow } => {
-                if self.crumb_hover != Some((group, arrow)) {
+                if self.marquee.is_none() && self.crumb_hover != Some((group, arrow)) {
                     self.crumb_hover = Some((group, arrow));
                 }
                 iced::Task::none()
@@ -1793,7 +1815,7 @@ impl Explorer {
             Message::CrumbHoverExit { group, arrow } => {
                 // moving into the neighboring member fires its enter
                 // first; only clear when this member is still hovered
-                if self.crumb_hover == Some((group, arrow)) {
+                if self.marquee.is_none() && self.crumb_hover == Some((group, arrow)) {
                     self.crumb_hover = None;
                 }
                 iced::Task::none()

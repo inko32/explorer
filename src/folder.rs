@@ -155,6 +155,9 @@ struct MarqueeZone<'a> {
     content: Element<'a, Message>,
     scroll_x: f32,
     scroll_y: f32,
+    /// Pane-local y the rubber band may not cross upward (the Details
+    /// header strip overlaying the pane top); 0 in every other layout.
+    top: f32,
 }
 
 #[derive(Default)]
@@ -246,22 +249,25 @@ impl<'a> Widget<Message, iced::Theme, iced::Renderer> for MarqueeZone<'a> {
                     && let Some(p) = cursor.position()
                 {
                     zone.dragging = true;
-                    let o = layout.bounds().position();
+                    let b = layout.bounds();
+                    let o = b.position();
                     shell.publish(Message::MarqueeBegin {
-                        x: p.x - o.x + self.scroll_x,
-                        y: p.y - o.y + self.scroll_y,
+                        x: (p.x - o.x).clamp(0.0, b.width) + self.scroll_x,
+                        y: (p.y - o.y).clamp(self.top, b.height) + self.scroll_y,
                     });
                     shell.capture_event();
                 }
             }
             iced::Event::Mouse(mouse::Event::CursorMoved { position }) if zone.dragging => {
                 // the rectangle follows the pointer but stops at the
-                // pane's edge (no growth beyond it, no freeze)
+                // pane's edge (no growth beyond it, no freeze); in
+                // Details it additionally stops at the header's lower
+                // border (top inset)
                 let b = layout.bounds();
                 let o = b.position();
                 shell.publish(Message::MarqueeMove {
                     x: (position.x - o.x).clamp(0.0, b.width) + self.scroll_x,
-                    y: (position.y - o.y).clamp(0.0, b.height) + self.scroll_y,
+                    y: (position.y - o.y).clamp(self.top, b.height) + self.scroll_y,
                 });
                 shell.capture_event();
             }
@@ -636,11 +642,21 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
     // right-click on empty space (items capture their own first) opens
     // the background menu (SPEC/MENU_SPEC.MD)
     let area = crate::menu::on_right_free(area, Message::ContextBackground);
-    // a left press on empty space starts the rubber-band selection
+    // a left press on empty space starts the rubber-band selection.
+    // In Details the header strip overlays the pane top (the content
+    // reserves that strip with a spacer): the rubber band must never
+    // cover the header, so its top edge clamps to the strip's bottom.
+    let top = if family == vs::Family::Details {
+        let d = &state.view_cfg.layouts.details;
+        d.header_h + d.files_gap
+    } else {
+        0.0
+    };
     let area: Element<Message> = MarqueeZone {
         content: area,
         scroll_x: state.scroll_x,
         scroll_y: state.scroll_y,
+        top,
     }.boxed();
     // the empty area of the current directory is a drop target
     // (SPEC/DRAGGING.md §4.2; the item zones above outrank it by §6
