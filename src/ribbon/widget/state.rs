@@ -142,6 +142,8 @@ pub struct State {
     pub hover: Option<Target>,
     pub pressed: Option<Target>,
     pub hover_since: Option<Instant>,
+    /// Last mouse press on a tab strip tab (double-click detection).
+    pub last_tab_press: Option<Instant>,
     pub hover_pos: Point,
     /// Tooltip currently displayed (command id).
     pub tooltip: Option<u32>,
@@ -194,6 +196,7 @@ impl Default for State {
             hover: None,
             pressed: None,
             hover_since: None,
+            last_tab_press: None,
             hover_pos: Point::ORIGIN,
             tooltip: None,
             tooltip_anchor: None,

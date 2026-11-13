@@ -1206,9 +1206,43 @@ fn qat_menu_scene(ctx: &Ctx) -> Scene {
 // ---------------------------------------------------------------------------
 // minimized tab body
 
+/// Vertical overlap of the minimized-tab popup with the tab strip
+/// bottom (the popup origin sits this many px above the strip's
+/// bottom edge, see the `Tab` handler in widget/mod.rs).
+pub(super) const MINIMIZED_POPUP_OVERLAP: f32 = 2.0;
+
+/// Y position of the connecting hairline in the minimized-tab popup
+/// scene: at the scene's top edge, above the 2px strip overlap.
+const MINIMIZED_TAB_LINE_Y: f32 = 0.0;
+
 fn minimized_tab_scene(ctx: &Ctx, tab: usize, width: f32) -> Scene {
     let mut scene = Scene::new(Size::new(width, super::layout::body_h(ctx)));
     super::layout::tab_content(ctx, &mut scene, 0.0, width, tab, false);
+    // Hairline under the tab strip, connecting the popped-out pane to
+    // the clicked tab: the tab's contextual accent, else the plain
+    // strip line color (same rule as the connected tab outline).
+    let tab_spec = &ctx.spec().tabs[tab];
+    let color = tab_spec
+        .contextual
+        .as_deref()
+        .and_then(theme::ContextualColor::from_name)
+        .or_else(|| {
+            tab_spec
+                .context_color
+                .as_deref()
+                .and_then(theme::ContextualColor::from_name)
+        })
+        .map_or(ctx.theme.tab_line, |c| c.accent());
+    quad(
+        &mut scene,
+        Rectangle::new(
+            Point::new(0.0, MINIMIZED_TAB_LINE_Y),
+            Size::new(width, lw(ctx, 1.0)),
+        ),
+        Fill::Color(color),
+        None,
+        0.0,
+    );
     scene
 }
 
@@ -1553,6 +1587,14 @@ impl<'a, Message, Th, Renderer> RibbonOverlay<'a, Message, Th, Renderer> {
         bounds: Rectangle,
         shell: &mut Shell<'_, Message>,
     ) {
+        // A release outside the overlay is a click-away: leave
+        // `state.pressed` untouched so the base widget can act on it
+        // (a tab-strip click must still select its tab / count toward
+        // a tab double-click — the overlay's press already closed the
+        // popup on the press, it must not also swallow the release).
+        if !bounds.contains(position) {
+            return;
+        }
         let local = Point::new(position.x - origin.x, position.y - origin.y);
         let hit = self.scene.hit(local).and_then(|n| n.target.clone());
         let pressed = self.state.pressed.take();
