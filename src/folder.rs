@@ -643,12 +643,12 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
     // the background menu (SPEC/MENU_SPEC.MD)
     let area = crate::menu::on_right_free(area, Message::ContextBackground);
     // a left press on empty space starts the rubber-band selection.
-    // In Details the header strip overlays the pane top (the content
-    // reserves that strip with a spacer): the rubber band must never
-    // cover the header, so its top edge clamps to the strip's bottom.
+    // In Details the header overlays the pane top (the content reserves
+    // header_h + files_gap with a spacer): the rubber band may cover
+    // the reserved files_gap strip but never the header itself, so its
+    // top edge clamps to the header's lower border.
     let top = if family == vs::Family::Details {
-        let d = &state.view_cfg.layouts.details;
-        d.header_h + d.files_gap
+        state.view_cfg.layouts.details.header_h
     } else {
         0.0
     };
