@@ -1217,7 +1217,11 @@ const MINIMIZED_TAB_LINE_Y: f32 = 0.0;
 
 fn minimized_tab_scene(ctx: &Ctx, tab: usize, width: f32) -> Scene {
     let mut scene = Scene::new(Size::new(width, super::layout::body_h(ctx)));
-    super::layout::tab_content(ctx, &mut scene, 0.0, width, tab, false);
+    // The popup is exactly window-wide; its content follows the same
+    // window-too-narrow cascade as the expanded ribbon body
+    // (`plan_groups`): groups shrink right-to-left and overflow into
+    // the « popup instead of overflowing the window edge.
+    super::layout::tab_content(ctx, &mut scene, 0.0, width, tab);
     // Hairline under the tab strip, connecting the popped-out pane to
     // the clicked tab: the tab's contextual accent, else the plain
     // strip line color (same rule as the connected tab outline).
