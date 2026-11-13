@@ -6,7 +6,7 @@ use iced::Task;
 
 use crate::fs;
 
-use super::explorer::{DOUBLE_CLICK_MS, Explorer};
+use super::explorer::Explorer;
 use super::message::Message;
 
 impl Explorer {
@@ -241,7 +241,8 @@ impl Explorer {
         let now = std::time::Instant::now();
         if let Some((last_i, t)) = self.last_click
             && last_i == i
-            && now.duration_since(t).as_millis() < DOUBLE_CLICK_MS
+            && now.duration_since(t).as_millis()
+                < u128::from(crate::theme::double_click_ms())
         {
             self.last_click = None;
             if let Some(e) = self.entries.get(i)

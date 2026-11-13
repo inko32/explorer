@@ -140,12 +140,23 @@ pub struct Theme {
     /// animation. General animation token; future fades reuse it.
     #[serde(default = "default_fade_ms")]
     pub fade_ms: u32,
+    /// Double-click window (ms): two clicks within this count as one
+    /// double-click (title-bar maximize, ribbon tab minimize toggle,
+    /// file open). The OS double-click time is not exposed
+    /// cross-platform (iced hardcodes 300ms in mouse::Click), so this
+    /// is the single app-wide setting for it.
+    #[serde(default = "default_double_click_ms")]
+    pub double_click_ms: u32,
     pub light: Palette,
     pub dark: Palette,
 }
 
 fn default_fade_ms() -> u32 {
     300
+}
+
+fn default_double_click_ms() -> u32 {
+    400
 }
 
 /// `border_follow_dpi: true/false` or `1/0`.
@@ -219,6 +230,11 @@ pub fn get() -> &'static Theme {
 /// Fade-out duration for overlays (ms), theme.yaml `fade_ms`.
 pub fn fade_ms() -> u32 {
     get().fade_ms
+}
+
+/// Double-click window (ms), theme.yaml `double_click_ms`.
+pub fn double_click_ms() -> u64 {
+    u64::from(get().double_click_ms)
 }
 
 pub fn light() -> Palette {
