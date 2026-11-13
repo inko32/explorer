@@ -56,6 +56,62 @@ impl Explorer {
         });
     }
 
+    /// Right-click a Details column header: the column menu — one
+    /// checkable entry per available column (SPEC/detail-view.txt §9).
+    pub(crate) fn column_settings_menu(&mut self) {
+        let entries = self
+            .detail_cfg
+            .columns
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                let on = self.details_col_on.get(i).copied().unwrap_or(true);
+                crate::menu::Entry::Item(crate::menu::Item::plain(
+                    &format!("col_toggle:{}", c.id),
+                    if on { format!("✓ {}", c.label) } else { c.label.clone() },
+                ))
+            })
+            .collect();
+        self.open_column_menu(entries);
+    }
+
+    /// The Details column dropdown button: its filter menu (§9). The
+    /// sort entries come first; real filtering is not implemented yet.
+    pub(crate) fn column_filter_menu(&mut self, col: usize) {
+        let Some(c) = self.detail_cfg.columns.get(col) else { return };
+        let mut entries = Vec::new();
+        if c.sort.is_some() {
+            entries.push(crate::menu::Entry::Item(crate::menu::Item::plain(
+                &format!("col_sort_asc:{}", c.id),
+                "Sort ascending".into(),
+            )));
+            entries.push(crate::menu::Entry::Item(crate::menu::Item::plain(
+                &format!("col_sort_desc:{}", c.id),
+                "Sort descending".into(),
+            )));
+            entries.push(crate::menu::Entry::Sep);
+        }
+        entries.push(crate::menu::Entry::Item(crate::menu::Item::disabled(
+            "col_filter",
+            "Filter…".into(),
+        )));
+        self.open_column_menu(entries);
+    }
+
+    /// Open a Details column menu at the cursor (like a context menu).
+    fn open_column_menu(&mut self, entries: Vec<crate::menu::Entry>) {
+        // the menu shields the view behind it: drop the live hover
+        self.hovered = None;
+        self.menu = Some(crate::menu::Open {
+            entries,
+            x: self.cursor.x,
+            y: self.cursor.y,
+            hover: None,
+            nav_target: None,
+            bar: None,
+        });
+    }
+
     /// Menu item activated: close the menu, then dispatch (§8: every
     /// command re-validates at execution — the file ops report errors
     /// via the status bar).
@@ -109,6 +165,35 @@ impl Explorer {
                 self.perform_drop(pending.sources, pending.target, action)
             }
             _ if item.id == "drop_cancel" => iced::Task::none(),
+            // Details column menu picks (built in code above, not from
+            // menu.yaml): toggle a column, sort by a column, placeholder
+            _ if item.id.starts_with("col_toggle:") => {
+                let id = &item.id["col_toggle:".len()..];
+                if let Some(i) = self.detail_cfg.columns.iter().position(|c| c.id == id)
+                    && let Some(on) = self.details_col_on.get_mut(i)
+                {
+                    *on = !*on;
+                }
+                iced::Task::none()
+            }
+            _ if item.id.starts_with("col_sort_asc:")
+                || item.id.starts_with("col_sort_desc:") =>
+            {
+                let asc = item.id.starts_with("col_sort_asc:");
+                let id = item.id.rsplit(':').next().unwrap_or("");
+                if let Some(i) = self.detail_cfg.columns.iter().position(|c| c.id == id)
+                    && let Some(key) = self.detail_cfg.columns[i].sort
+                {
+                    self.sort = key;
+                    self.sort_asc = asc;
+                    self.apply_sort();
+                }
+                iced::Task::none()
+            }
+            "col_filter" => {
+                self.status = "Column filtering is not implemented yet".into();
+                iced::Task::none()
+            }
             "open" => {
                 if let Some(p) = open.nav_target {
                     return self.update(Message::Navigate(p));

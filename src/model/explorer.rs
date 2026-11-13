@@ -9,6 +9,7 @@ use crate::fs::{self, FsEvent, Job};
 
 use super::dnd::PressArm;
 use super::folder::ColDrag;
+use super::format::type_label;
 use super::message::{ClipMode, FrameStyle, Message, NavSection, Pane, SortBy};
 use super::nav::NavTree;
 
@@ -160,12 +161,23 @@ pub struct Explorer {
     /// entries (or their order) or the view step change — not on pane
     /// resizes.
     pub it_label_lines: Vec<u8>,
-    /// Details column widths (Date modified / Type / Size); the Name
-    /// column takes the remaining width. Adjustable via header handles.
-    pub details_cols: [f32; 3],
+    /// Details-view column configuration (`assets/details-view.yaml`,
+    /// SPEC/detail-view.txt): the header metrics and the available
+    /// columns.
+    pub detail_cfg: crate::details_view::DetailsViewCfg,
+    /// Per-column widths, parallel to `detail_cfg.columns`; adjusted by
+    /// the header resizers (each resizer resizes its own column).
+    pub details_cols: Vec<f32>,
+    /// Per-column visibility, parallel to `detail_cfg.columns` (the
+    /// column menu toggles it).
+    pub details_col_on: Vec<bool>,
     /// Details column drag in progress.
     pub(crate) col_drag: Option<ColDrag>,
+    /// Hovered Details column header (index into `detail_cfg.columns`).
+    pub(crate) col_hovered: Option<usize>,
     pub sort: SortBy,
+    /// Sort direction (true = ascending).
+    pub sort_asc: bool,
     pub show_hidden: bool,
     /// Font sizes (assets/fonts.yaml).
     pub fonts: crate::fonts::FontSizes,
@@ -252,7 +264,9 @@ impl Explorer {
         let view_cfg = crate::view_step::ViewCfg::load();
         let view_index = view_cfg.presets.details;
         let view_mask = view_cfg.mask();
-        let details_cols = view_cfg.details_col_widths();
+        let detail_cfg = crate::details_view::DetailsViewCfg::load();
+        let details_cols = detail_cfg.columns.iter().map(|c| c.width).collect();
+        let details_col_on = detail_cfg.columns.iter().map(|c| c.on).collect();
         let mut s = Self {
             window: None,
             cwd,
@@ -307,9 +321,13 @@ impl Explorer {
             folder_views: Default::default(),
             details_compact: true,
             it_label_lines: Vec::new(),
+            detail_cfg,
             details_cols,
+            details_col_on,
             col_drag: None,
+            col_hovered: None,
             sort: SortBy::Name,
+            sort_asc: true,
             show_hidden: false,
             fonts: crate::fonts::FontSizes::load(),
             ribbon: crate::ribbon::Ribbon::new(),
@@ -678,20 +696,24 @@ impl Explorer {
         }
     }
 
-    /// Sort entries: directories first, then by the active key.
+    /// Sort entries: directories first, then by the active key in the
+    /// active direction (`sort_asc`).
     pub fn apply_sort(&mut self) {
         let sort = self.sort;
+        let asc = self.sort_asc;
         self.entries.sort_by(|a, b| {
             let ad = a.kind == fs::EntryKind::Dir;
             let bd = b.kind == fs::EntryKind::Dir;
             if ad != bd {
                 return bd.cmp(&ad);
             }
-            match sort {
+            let ord = match sort {
                 SortBy::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
                 SortBy::Size => a.size.cmp(&b.size),
+                SortBy::Type => type_label(a).cmp(type_label(b)),
                 SortBy::Modified => a.modified.cmp(&b.modified),
-            }
+            };
+            if asc { ord } else { ord.reverse() }
         });
         // the cache is indexed by position — reordering invalidates it
         self.refresh_it_label_lines();
@@ -1285,6 +1307,30 @@ impl Explorer {
             // Details column drag (model/folder.rs)
             Message::ColumnSplitBegin(col) => self.column_split_begin(col),
             Message::ColumnSplitMove(x) => self.column_split_move(x),
+            // Details column header (model/folder.rs / model/menu.rs)
+            Message::ColumnSortClick(col) => self.column_sort_click(col),
+            Message::ColumnFilterMenu(col) => {
+                self.column_filter_menu(col);
+                iced::Task::none()
+            }
+            Message::ColumnSettingsMenu => {
+                self.column_settings_menu();
+                iced::Task::none()
+            }
+            Message::ColumnHoverEnter(col) => {
+                if self.col_hovered != Some(col) {
+                    self.col_hovered = Some(col);
+                }
+                iced::Task::none()
+            }
+            Message::ColumnHoverExit(col) => {
+                if self.col_hovered == Some(col) {
+                    self.col_hovered = None;
+                }
+                iced::Task::none()
+            }
+            // capture-only: the header background never starts the rubber band
+            Message::ColumnHeaderPress => iced::Task::none(),
             Message::ToggleHidden => {
                 self.show_hidden = !self.show_hidden;
                 self.request_listing();

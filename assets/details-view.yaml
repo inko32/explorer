@@ -1,0 +1,32 @@
+# SPEC/detail-view.txt — the Details-view column header + columns as data.
+font_size: 13.0        # §3 column header font size
+text_pad_left: 16.0    # §4 space left of the header title text
+dropdown_w: 15.0       # §5 the column's right dropdown button width
+sep_w: 1.0             # §6 the 1px line left of the dropdown button
+arrow_w: 9.0           # §2 sort arrow, on top of the column title: 9px wide…
+arrow_h: 5.0           # …5px tall, touching the header's top line
+files_left: 14.0       # §13 space left of the file rows
+chrome_pad: 4.0        # §16 row chrome reserve inside the column block's right border
+col_min: 40.0          # column resizer clamp
+col_max: 600.0
+columns:               # §8/§11 the available columns, in order
+  - id: name           # the icon+name cell (id `name` is special)
+    label: Name
+    width: 300.0
+    sort: name         # header click sorts by this key (lowercase)
+    on: true           # a default column
+  - id: size
+    label: Size
+    width: 100.0
+    sort: size
+    on: true
+  - id: type
+    label: Type
+    width: 140.0
+    sort: type
+    on: true
+  - id: modified
+    label: Date modified
+    width: 170.0
+    sort: modified
+    on: true

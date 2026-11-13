@@ -232,17 +232,13 @@ pub struct DetailsCfg {
     /// rows so adjacent item borders coincide (-1 shares a 1px
     /// border); positive is looser.
     pub row_gap: f32,
-    /// Column header strip (overlays the scrollable's top).
+    /// Column header strip height (SPEC/detail-view.txt §1: 25px).
+    /// The header metrics themselves live in details-view.yaml.
     pub header_h: f32,
+    /// SPEC/detail-view.txt §12: the space below the title bar,
+    /// before the file rows (the file area starts below both).
+    pub files_gap: f32,
     pub icon: f32,
-    pub icon_cell_w: f32,
-    pub cell_padding_v: f32,
-    pub cell_padding_h: f32,
-    /// Adjustable column widths (Date modified / Type / Size); the Name
-    /// column takes the remaining width.
-    pub col_widths: Vec<f32>,
-    pub col_min: f32,
-    pub col_max: f32,
 }
 
 impl Default for DetailsCfg {
@@ -252,14 +248,9 @@ impl Default for DetailsCfg {
             row_h: 32.0,
             row_h_compact: 24.0,
             row_gap: -1.0,
-            header_h: 24.0,
+            header_h: 25.0,
+            files_gap: 6.0,
             icon: 16.0,
-            icon_cell_w: 26.0,
-            cell_padding_v: 2.0,
-            cell_padding_h: 4.0,
-            col_widths: vec![170.0, 140.0, 90.0],
-            col_min: 40.0,
-            col_max: 600.0,
         }
     }
 }
@@ -584,18 +575,6 @@ impl ViewCfg {
         (self.details_row_h(compact) + gap).max(1.0)
     }
 
-    /// Initial Details column widths (Date modified / Type / Size),
-    /// padded to 3 with the yaml defaults.
-    pub fn details_col_widths(&self) -> [f32; 3] {
-        let d = DetailsCfg::default();
-        let w = &self.layouts.details.col_widths;
-        [
-            w.first().copied().unwrap_or(d.col_widths[0]),
-            w.get(1).copied().unwrap_or(d.col_widths[1]),
-            w.get(2).copied().unwrap_or(d.col_widths[2]),
-        ]
-    }
-
     /// §8.2 small-icon cell metrics for icon size s.
     pub fn small_icon(&self, s: f32) -> SmallIconMetrics {
         let c = &self.small_icon;
@@ -699,7 +678,9 @@ impl ViewCfg {
         match self.family(index) {
             Family::Content => n_items as f32 * l.content.row_h,
             Family::Details => {
-                l.details.header_h + n_items as f32 * self.details_pitch(details_compact)
+                l.details.header_h
+                    + l.details.files_gap
+                    + n_items as f32 * self.details_pitch(details_compact)
             }
             Family::List => {
                 n_items.div_ceil(self.list_rows_per_col(viewport_h)) as f32
@@ -737,8 +718,8 @@ impl ViewCfg {
         let item = match self.family(index) {
             Family::Content => (offset / l.content.row_h).floor() as usize,
             Family::Details => {
-                // content starts below the header strip
-                let y = (offset - l.details.header_h).max(0.0);
+                // content starts below the header strip + the §12 gap
+                let y = (offset - (l.details.header_h + l.details.files_gap)).max(0.0);
                 (y / self.details_pitch(details_compact)).floor() as usize
             }
             Family::Tiles => {
@@ -786,7 +767,9 @@ impl ViewCfg {
         match self.family(index) {
             Family::Content => item as f32 * l.content.row_h,
             Family::Details => {
-                l.details.header_h + item as f32 * self.details_pitch(details_compact)
+                l.details.header_h
+                    + l.details.files_gap
+                    + item as f32 * self.details_pitch(details_compact)
             }
             Family::Tiles => {
                 (item / grid_cols(l.tiles.cell_w, 0.0, pane_w)) as f32 * l.tiles.cell_h
@@ -923,7 +906,8 @@ mod tests {
         assert_eq!(yaml.sizes, d.sizes);
         assert_eq!(yaml.steps(), 48);
         assert_eq!(yaml.layouts.content.row_h, d.layouts.content.row_h);
-        assert_eq!(yaml.layouts.details.col_widths, d.layouts.details.col_widths);
+        assert_eq!(yaml.layouts.details.header_h, d.layouts.details.header_h);
+        assert_eq!(yaml.layouts.details.files_gap, d.layouts.details.files_gap);
         assert_eq!(yaml.layouts.list.name_max_units, d.layouts.list.name_max_units);
         assert_eq!(yaml.icon_top.label_lines_switch, d.icon_top.label_lines_switch);
         assert_eq!(yaml.input.notch_delta, d.input.notch_delta);

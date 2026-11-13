@@ -203,7 +203,8 @@ impl Explorer {
         Task::none()
     }
 
-    /// Press on a Details column split handle: start a column drag.
+    /// Press on a Details column right-edge resizer: start a column
+    /// drag (the resizer resizes only its own column).
     pub(crate) fn column_split_begin(&mut self, col: usize) -> Task<Message> {
         if col < self.details_cols.len() {
             self.col_drag = Some(ColDrag {
@@ -220,12 +221,29 @@ impl Explorer {
         if let Some(drag) = &mut self.col_drag {
             // first move after the press anchors the drag origin
             let start_x = *drag.start_x.get_or_insert(x);
-            // the handle sits at the column's left edge: dragging
-            // left widens the column
-            let d = &self.view_cfg.layouts.details;
+            // the resizer sits at the column's right edge: dragging
+            // right widens the column
+            let d = &self.detail_cfg;
             self.details_cols[drag.col] =
-                (drag.start_w + (start_x - x)).clamp(d.col_min, d.col_max);
+                (drag.start_w + (x - start_x)).clamp(d.col_min, d.col_max);
         }
+        Task::none()
+    }
+
+    /// Left-click a Details column header: sort by the column's key;
+    /// clicking the already-sorted column toggles ascending/descending
+    /// (SPEC/detail-view.txt §9).
+    pub(crate) fn column_sort_click(&mut self, col: usize) -> Task<Message> {
+        let Some(key) = self.detail_cfg.columns.get(col).and_then(|c| c.sort) else {
+            return Task::none();
+        };
+        if self.sort == key {
+            self.sort_asc = !self.sort_asc;
+        } else {
+            self.sort = key;
+            self.sort_asc = true;
+        }
+        self.apply_sort();
         Task::none()
     }
 
@@ -273,7 +291,9 @@ impl Explorer {
                 let pitch = cfg.details_pitch(self.details_compact);
                 (
                     0.0,
-                    cfg.layouts.details.header_h + i as f32 * pitch,
+                    cfg.layouts.details.header_h
+                        + cfg.layouts.details.files_gap
+                        + i as f32 * pitch,
                     pane_w,
                     row_h,
                 )
@@ -407,7 +427,7 @@ impl Explorer {
     }
 }
 
-/// Details column drag: which fixed column (0=Date, 1=Type, 2=Size),
+/// Details column drag: which column (index into `detail_cfg.columns`),
 /// the cursor x at drag start (learned on the first move) and the
 /// column width at drag start.
 pub(crate) struct ColDrag {

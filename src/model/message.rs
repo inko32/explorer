@@ -170,6 +170,23 @@ pub enum Message {
     ColumnSplitBegin(usize),
     /// Cursor moved during a Details column drag (window-logical x).
     ColumnSplitMove(f32),
+    /// Left-clicked a Details column header: sort by its key, toggling
+    /// ascending/descending when it is already the sort column
+    /// (SPEC/detail-view.txt §9).
+    ColumnSortClick(usize),
+    /// Clicked a Details column's dropdown button: open its filter
+    /// menu (SPEC/detail-view.txt §9).
+    ColumnFilterMenu(usize),
+    /// Right-clicked a Details column header: open the column menu.
+    ColumnSettingsMenu,
+    /// Details column header hover (drives the blue highlight; the
+    /// exit clears only when that same column is still hovered).
+    ColumnHoverEnter(usize),
+    ColumnHoverExit(usize),
+    /// A press on the Details header background (not a title, resizer
+    /// or dropdown): capture only — the rubber band must never start
+    /// on the title bar (SPEC/detail-view.txt §14).
+    ColumnHeaderPress,
     SetSort(SortBy),
     /// A ribbon framework event (IUICommandHandler::Execute and friends).
     Ribbon(crate::ribbon::RibbonEvent),
@@ -247,10 +264,12 @@ pub enum Message {
     DragCancel,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum SortBy {
     Name,
     Size,
+    Type,
     Modified,
 }
 

@@ -371,6 +371,14 @@ impl Item {
         }
     }
 
+    /// A plain disabled item (a placeholder entry — the Details column
+    /// filter menu uses it until filtering lands).
+    pub fn disabled(id: &str, label: String) -> Self {
+        let mut item = Self::plain(id, label);
+        item.enabled = false;
+        item
+    }
+
     /// §8 applicability against the whole selection.
     fn applies(&self, has_files: bool, has_dirs: bool, n: usize) -> bool {
         (self.files || !has_files)

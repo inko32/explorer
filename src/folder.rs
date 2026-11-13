@@ -559,9 +559,18 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
                 // below the column header. So the header overlays the
                 // scrollable's top strip (the content reserves that
                 // strip with a spacer) and the strip sits beside both.
+                // The overlay spans the §12 gap too and captures every
+                // press: the rubber band must never start on the title
+                // bar (§14) — the folder-view pane is shifted down by it.
+                let d = &cfg.layouts.details;
+                let header = mouse_area(column![
+                    details_header(state, skin),
+                    Space::new().height(Length::Fixed(d.files_gap)),
+                ])
+                .on_press(Message::ColumnHeaderPress);
                 stack![
-                    details_view(state, skin, inner_w),
-                    container(details_header(state, skin)).width(Length::Fill),
+                    details_view(state, skin),
+                    container(header).width(Length::Fill),
                 ]
                 .boxed()
             }
@@ -711,52 +720,147 @@ fn pane_backdrop(rainbow: bool, skin: skin::Skin) -> Element<'static, Message> {
         .boxed()
 }
 
-/// Details column header (Name / Date modified / Type / Size). The
-/// fixed columns are adjustable: the 4px handle at a column's left edge
-/// drags the boundary (Name takes the remaining width).
+/// The resizer hit target at a column's right edge: a 1px separator
+/// line (§15) widened to 4px for the drag (the extra 3px are
+/// colorless — §10).
+const COL_RESIZER_W: f32 = 4.0;
+
+/// Visible Details columns (indices into `detail_cfg.columns`), in order.
+fn details_visible(state: &Explorer) -> Vec<usize> {
+    (0..state.detail_cfg.columns.len())
+        .filter(|&i| state.details_col_on.get(i).copied().unwrap_or(true))
+        .collect()
+}
+
+/// The width of a Details column (the header resizer adjusts it).
+fn details_col_w(state: &Explorer, col: usize) -> f32 {
+    state
+        .details_cols
+        .get(col)
+        .copied()
+        .unwrap_or(state.detail_cfg.columns[col].width)
+}
+
+/// SPEC/detail-view.txt §2: the sort arrow — 9px wide, 5px tall,
+/// sitting on top of the column title, touching the header's top line.
+/// Drawn as an inline SVG so the hover state can tint it blue (§9).
+fn sort_arrow(ascending: bool, w: f32, h: f32, color: Color) -> Element<'static, Message> {
+    let points = if ascending {
+        "4.5,0.5 8.5,4.5 0.5,4.5" // ▲
+    } else {
+        "0.5,0.5 8.5,0.5 4.5,4.5" // ▼
+    };
+    let handle = iced::widget::svg::Handle::from_memory(
+        format!(
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 9 5'>\
+             <polygon points='{points}' fill='{}'/></svg>",
+            crate::icons::hex(color),
+        )
+        .into_bytes(),
+    );
+    iced::widget::svg(handle)
+        .width(Length::Fixed(w))
+        .height(Length::Fixed(h))
+        .boxed()
+}
+
+/// SPEC/detail-view.txt column header. Every visible column is
+/// `16px space + title + fill + 1px line + 15px dropdown button`
+/// (§4/§6), followed by its right-edge resizer (§10/§15). Hover
+/// highlights blue (§9); a click sorts, the dropdown opens the filter
+/// menu, a right-click opens the column menu. The block is as wide as
+/// the columns need — no 100% fill (§7/§10).
 fn details_header(state: &Explorer, skin: skin::Skin) -> Element<'static, Message> {
     let d = &state.view_cfg.layouts.details;
-    let prop = state.view_cfg.style.prop_size;
-    let mut cols = row![
-        container(text("Name").size(prop).color(skin.subtle))
-            .width(Length::Fill)
-            .padding([4.0, 8.0]),
-    ];
-    for (col, label) in ["Date modified", "Type", "Size"].into_iter().enumerate() {
-        let w = state.details_cols[col];
-        // split handle: 1px separator line + 4px drag target
-        let handle = mouse_area(
-            container(Space::new().width(Length::Fill).height(Length::Fill))
-                .width(Length::Fixed(4.0))
+    let dc = &state.detail_cfg;
+    let mut cols = row![Space::new().width(Length::Fixed(dc.files_left))];
+    for &g in &details_visible(state) {
+        let c = &dc.columns[g];
+        let w = details_col_w(state, g);
+        let hovered = state.col_hovered == Some(g);
+        // §9: hover highlights the title and the dropdown glyph blue
+        let color = if hovered { skin.accent } else { skin.subtle };
+        // §2: the sort arrow sits ON TOP of the title (other columns
+        // reserve the same 5px so the titles stay aligned)
+        let arrow: Element<Message> = if c.sort.is_some() && state.sort == c.sort.unwrap() {
+            sort_arrow(state.sort_asc, dc.arrow_w, dc.arrow_h, color)
+        } else {
+            Space::new()
+                .width(Length::Fixed(dc.arrow_w))
+                .height(Length::Fixed(dc.arrow_h))
+                .boxed()
+        };
+        // §5/§6: the 1px line + the 15px dropdown button at the right
+        let dropdown = mouse_area(
+            container(sort_arrow(false, dc.arrow_w, dc.arrow_h, color))
+                .width(Length::Fixed(dc.dropdown_w))
                 .height(Length::Fill)
-                .style(move |_t: &iced::Theme| container::Style {
-                    border: iced::Border {
-                        color: skin.group_sep,
-                        width: crate::theme::border_w(1.0),
-                        radius: 0.0.into(),
-                    },
-                    ..Default::default()
-                }),
+                .align_x(iced::alignment::Horizontal::Center)
+                .align_y(iced::alignment::Vertical::Center),
+        )
+        .on_press(Message::ColumnFilterMenu(g))
+        .on_enter(Message::ColumnHoverEnter(g))
+        .on_exit(Message::ColumnHoverExit(g));
+        let cell = container(
+            column![
+                container(arrow)
+                    .height(Length::Fixed(dc.arrow_h))
+                    .padding(iced::Padding {
+                        left: dc.text_pad_left,
+                        ..Default::default()
+                    }),
+                row![
+                    container(text(c.label.clone()).size(dc.font_size).color(color))
+                        .padding(iced::Padding {
+                            left: dc.text_pad_left,
+                            ..Default::default()
+                        }),
+                    Space::new().width(Length::Fill),
+                    container(
+                        Space::new()
+                            .width(Length::Fixed(crate::theme::border_w(dc.sep_w)))
+                            .height(Length::Fill)
+                    )
+                    .style(bg(skin.sep)),
+                    dropdown,
+                ]
+                .height(Length::Fill)
+                .align_y(iced::Alignment::Center),
+            ]
+            .height(Length::Fixed(d.header_h)),
+        )
+        .width(Length::Fixed(w));
+        let cell = mouse_area(cell)
+            .on_press(Message::ColumnSortClick(g))
+            .on_right_press(Message::ColumnSettingsMenu)
+            .on_enter(Message::ColumnHoverEnter(g))
+            .on_exit(Message::ColumnHoverExit(g));
+        cols = cols.push(cell.boxed());
+        // §10/§15: the column's right resizer — the 1px separator line
+        // with a 4px drag target; resizes only its own column
+        let resizer = mouse_area(
+            container(
+                row![
+                    container(
+                        Space::new()
+                            .width(Length::Fixed(crate::theme::border_w(1.0)))
+                            .height(Length::Fill)
+                    )
+                    .style(bg(skin.sep)),
+                    Space::new().width(Length::Fixed(COL_RESIZER_W - crate::theme::border_w(1.0))),
+                ]
+                .height(Length::Fixed(d.header_h)),
+            )
+            .width(Length::Fixed(COL_RESIZER_W)),
         )
         .interaction(iced::mouse::Interaction::ResizingHorizontally)
-        .on_press(Message::ColumnSplitBegin(col));
-        cols = cols.push(handle.boxed());
-        cols = cols.push(
-            container(text(label).size(prop).color(skin.subtle))
-                .width(Length::Fixed(w - 4.0))
-                .padding([4.0, 8.0])
-                .boxed(),
-        );
+        .on_press(Message::ColumnSplitBegin(g));
+        cols = cols.push(resizer.boxed());
     }
     container(cols.height(Length::Fixed(d.header_h)).align_y(iced::Alignment::Center))
         .width(Length::Fill)
         .style(move |_t: &iced::Theme| container::Style {
             background: Some(skin.col_header_bg.into()),
-            border: iced::Border {
-                color: skin.sep,
-                width: 0.0,
-                radius: 0.0.into(),
-            },
             ..Default::default()
         })
         .boxed()
@@ -880,27 +984,24 @@ fn tile_cell<'a>(i: usize, e: &Entry, state: &'a Explorer, skin: skin::Skin) -> 
 // ---------------------------------------------------------------------------
 // index 2 — Details (§8.1)
 
-fn details_view(state: &Explorer, skin: skin::Skin, width: f32) -> Element<'_, Message> {
+fn details_view(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     let d = &state.view_cfg.layouts.details;
     let row_h = state.view_cfg.details_row_h(state.details_compact);
     // rows are spaced by the effective gap (row_h → pitch); the gap is
     // in border pixels so it follows the border DPI unscale
     let gap = state.view_cfg.details_pitch(state.details_compact) - row_h;
     let total = state.entries.len();
-    // the content reserves the header strip (the real header overlays it)
-    let (first, last) = row_window(
-        total,
-        row_h + gap,
-        (state.scroll_y - d.header_h).max(0.0),
-        state.viewport_h,
-    );
-    let mut rows = column![vspacer(d.header_h)].spacing(gap);
+    // the content reserves the header strip + the §12 gap (the real
+    // header overlays the strip)
+    let top = d.header_h + d.files_gap;
+    let (first, last) = row_window(total, row_h + gap, (state.scroll_y - top).max(0.0), state.viewport_h);
+    let mut rows = column![vspacer(top)].spacing(gap);
     if first > 0 {
         rows = rows.push(vspacer(first as f32 * (row_h + gap)).boxed());
     }
     for i in first..last {
         if let Some(e) = state.entries.get(i) {
-            rows = rows.push(file_row(i, e, state, skin, width));
+            rows = rows.push(file_row(i, e, state, skin));
         }
     }
     if last < total {
@@ -914,17 +1015,63 @@ fn file_row<'a>(
     e: &Entry,
     state: &'a Explorer,
     skin: skin::Skin,
-    width: f32,
+) -> Element<'a, Message> {
+    let dc = &state.detail_cfg;
+    let row_h = state.view_cfg.details_row_h(state.details_compact);
+    let vis = details_visible(state);
+    let mut cells = row![].align_y(iced::Alignment::Center);
+    let mut total_w = 0.0f32;
+    for (n, &g) in vis.iter().enumerate() {
+        let w = details_col_w(state, g);
+        total_w += w;
+        let cell = if dc.columns[g].id == "name" {
+            name_cell(i, e, state, skin, w, row_h)
+        } else {
+            value_cell(&dc.columns[g], e, state, skin, w, row_h)
+        };
+        cells = cells.push(cell);
+        // between columns: the header's right resizers sit here (§15)
+        if n + 1 < vis.len() {
+            total_w += COL_RESIZER_W;
+            cells = cells.push(Space::new().width(Length::Fixed(COL_RESIZER_W)).boxed());
+        }
+    }
+    // §13: 14px left of the files; §16: the chrome keeps a 4px space
+    // inside the column block's right border
+    let content = container(cells)
+        .width(Length::Fixed(dc.chrome_pad + total_w + dc.chrome_pad))
+        .height(Length::Fixed(row_h))
+        .padding(iced::Padding {
+            left: dc.chrome_pad,
+            ..Default::default()
+        });
+    item_chrome(
+        i,
+        row![
+            Space::new().width(Length::Fixed(dc.files_left - dc.chrome_pad)),
+            content,
+        ],
+        state,
+        skin,
+    )
+}
+
+/// The Details name cell: icon + (elided) name; the renaming row swaps
+/// the name for the edit field. The cell starts at the column edge —
+/// the 14px files margin lives outside (§13).
+fn name_cell<'a>(
+    i: usize,
+    e: &Entry,
+    state: &'a Explorer,
+    skin: skin::Skin,
+    w: f32,
+    row_h: f32,
 ) -> Element<'a, Message> {
     let d = &state.view_cfg.layouts.details;
     let font = state.view_cfg.style.font_size;
-    let row_h = state.view_cfg.details_row_h(state.details_compact);
-    let [date_w, type_w, size_w] = state.details_cols;
-    // the Name column is the elastic one: pane width minus the icon
-    // slot, the fixed columns and the cell padding; an overlong name
-    // is tail-cut with "..." (3 chars reserved)
-    let name_w = (width - d.icon_cell_w - date_w - type_w - size_w - 2.0 * d.cell_padding_h).max(0.0);
-    let name_cell: Element<Message> = if state.renaming.as_ref().map(|(ri, _)| *ri) == Some(i) {
+    const ICON_GAP: f32 = 4.0;
+    let name_w = (w - d.icon - ICON_GAP).max(0.0);
+    let name: Element<'a, Message> = if state.renaming.as_ref().map(|(ri, _)| *ri) == Some(i) {
         // text_input borrows the value — borrow the state's buffer ('a);
         // the submit payload owns a clone
         let buf = &state.renaming.as_ref().expect("matched above").1;
@@ -935,28 +1082,59 @@ fn file_row<'a>(
             .padding(2)
             .boxed()
     } else {
-        text(elide_end(&e.name, name_w, 7.2)).size(font).color(skin.text).boxed()
+        text(elide_end(&e.name, name_w, 7.2))
+            .size(font)
+            .color(skin.text)
+            .boxed()
     };
-
-    let content = row![
-        container(crate::icon::for_entry(e, d.icon, &skin))
-            .width(Length::Fixed(d.icon_cell_w))
-            .center_y(Length::Fixed(d.icon)),
-        container(name_cell).width(Length::Fill).padding([d.cell_padding_v, d.cell_padding_h]),
-        container(text(e.modified.map(model::format_date).unwrap_or_default()).size(font).color(skin.text))
-            .width(Length::Fixed(date_w))
-            .padding([d.cell_padding_v, d.cell_padding_h]),
-        container(text(model::type_label(e)).size(font).color(skin.text))
-            .width(Length::Fixed(type_w))
-            .padding([d.cell_padding_v, d.cell_padding_h]),
-        container(text(item_size(e)).size(font).color(skin.text))
-            .width(Length::Fixed(size_w))
-            .padding([d.cell_padding_v, d.cell_padding_h]),
-    ]
+    container(
+        row![
+            crate::icon::for_entry(e, d.icon, &skin),
+            container(name)
+                .width(Length::Fixed(name_w))
+                .height(Length::Fixed(row_h))
+                .align_y(iced::alignment::Vertical::Center),
+        ]
+        .spacing(ICON_GAP)
+        .height(Length::Fixed(row_h))
+        .align_y(iced::Alignment::Center),
+    )
+    .width(Length::Fixed(w))
     .height(Length::Fixed(row_h))
-    .align_y(iced::Alignment::Center);
+    .boxed()
+}
 
-    item_chrome(i, container(content).width(Length::Fill), state, skin)
+/// A Details value cell: the column's property text, padded to the
+/// header title (§4). An overlong value is tail-cut with "...".
+fn value_cell<'a>(
+    col: &crate::details_view::ColumnCfg,
+    e: &Entry,
+    state: &'a Explorer,
+    skin: skin::Skin,
+    w: f32,
+    row_h: f32,
+) -> Element<'a, Message> {
+    let dc = &state.detail_cfg;
+    let font = state.view_cfg.style.font_size;
+    let value = match col.id.as_str() {
+        "size" => item_size(e),
+        "type" => model::type_label(e).to_string(),
+        "modified" => e.modified.map(model::format_date).unwrap_or_default(),
+        _ => String::new(),
+    };
+    container(
+        text(elide_end(&value, (w - dc.text_pad_left).max(0.0), 7.2))
+            .size(font)
+            .color(skin.text),
+    )
+    .width(Length::Fixed(w))
+    .height(Length::Fixed(row_h))
+    .align_y(iced::alignment::Vertical::Center)
+    .padding(iced::Padding {
+        left: dc.text_pad_left,
+        ..Default::default()
+    })
+    .boxed()
 }
 
 // ---------------------------------------------------------------------------
