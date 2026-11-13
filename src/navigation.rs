@@ -249,8 +249,8 @@ fn up_btn(enabled: bool, skin: skin::Skin) -> Element<'static, Message> {
                 border: border1(skin.menu_border),
                 ..Default::default()
             }),
-        tooltip::Position::Bottom,
     )
+    .position(tooltip::Position::Bottom)
     .boxed()
 }
 
