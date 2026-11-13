@@ -373,9 +373,10 @@ where
                                 // minimized: any tab's double-click
                                 // restores; maximized: only the ACTIVE
                                 // tab's double-click minimizes. The
-                                // trailing click of THIS double-click
-                                // must not toggle back.
-                                state.suppress_tab_arm = true;
+                                // early return leaves `pressed` unset,
+                                // so this double-click's own trailing
+                                // release has no target and cannot
+                                // toggle back or re-arm the detector.
                                 activate(
                                     fw,
                                     theme,
@@ -455,23 +456,15 @@ where
                     shell,
                     on_event.as_deref(),
                 );
-                match t {
-                    Target::Tab(i) if !state.suppress_tab_arm => {
-                        // arm the double-click detector: the next press
-                        // on this same tab within TAB_DOUBLE (with no
-                        // other interaction between) is a double-click
-                        state.last_tab_click = Some(state::TabClickArm {
-                            tab: *i,
-                            was_selected: state.cur_tab_press_selected == *i,
-                            at: Instant::now(),
-                        });
-                    }
-                    _ => {
-                        // trailing release of a double-click toggle (or
-                        // any non-tab release): keep the detector
-                        // disarmed
-                        state.suppress_tab_arm = false;
-                    }
+                if let Target::Tab(i) = t {
+                    // arm the double-click detector: the next press
+                    // on this same tab within TAB_DOUBLE (with no
+                    // other interaction between) is a double-click
+                    state.last_tab_click = Some(state::TabClickArm {
+                        tab: *i,
+                        was_selected: state.cur_tab_press_selected == *i,
+                        at: Instant::now(),
+                    });
                 }
                 shell.capture_event();
             }
@@ -483,18 +476,23 @@ where
                 move_to(state, position, shell);
             }
             iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-                if let Some(position) = cursor.position() {
-                    press_at(state, position, shell);
-                }
+                // While a popup overlay is open, iced levitates the
+                // cursor for the base tree (cursor.position() is None)
+                // because the overlay reports a mouse interaction — but
+                // the overlay passes click-aways through on purpose so
+                // the base widget can act on them (e.g. a tab-strip
+                // press must count toward a tab double-click). Fall
+                // back to the last tracked cursor position.
+                let position = cursor.position().unwrap_or(state.hover_pos);
+                press_at(state, position, shell);
             }
             iced::Event::Touch(iced::touch::Event::FingerPressed { position, .. }) => {
                 press_at(state, position, shell);
             }
             iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                match cursor.position() {
-                    Some(position) => release_at(state, position, shell),
-                    None => state.pressed = None,
-                }
+                // same levitated-cursor fallback as the press above
+                let position = cursor.position().unwrap_or(state.hover_pos);
+                release_at(state, position, shell);
             }
             iced::Event::Touch(iced::touch::Event::FingerLifted { position, .. }) => {
                 release_at(state, position, shell);
