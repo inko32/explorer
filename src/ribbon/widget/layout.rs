@@ -564,7 +564,7 @@ fn tab_strip(
                 let run_w: f32 = ws[i..=j]
                     .iter()
                     .sum::<f32>()
-                    + (i + 1..=j).map(|k| gap_before(k)).sum::<f32>();
+                    + (i + 1..=j).map(&gap_before).sum::<f32>();
                 let target = ctx.text_w(name, 12.0) + 6.0;
                 if run_w < target {
                     ws[j] += target - run_w;
