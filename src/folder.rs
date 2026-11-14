@@ -497,13 +497,15 @@ fn grid_view<'a>(
     cell_w: f32,
     cell_h: f32,
     gap: f32,
+    top: f32,
     cell: impl Fn(usize, &'a Entry) -> Element<'a, Message>,
 ) -> Element<'a, Message> {
     let cols = vs::grid_cols(cell_w, gap, width);
     let total_rows = state.entries.len().div_ceil(cols);
     let pitch = cell_h + gap;
-    let (first, last) = row_window(total_rows, pitch, state.scroll_y, state.viewport_h);
-    let mut rows = column![].spacing(0);
+    // the grid sits below the reserved files_top strip (rubber-band space)
+    let (first, last) = row_window(total_rows, pitch, (state.scroll_y - top).max(0.0), state.viewport_h);
+    let mut rows = column![vspacer(top).boxed()].spacing(0);
     if first > 0 {
         rows = rows.push(vspacer(first as f32 * pitch).boxed());
     }
@@ -589,15 +591,17 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
                 // below the column header. So the header overlays the
                 // scrollable's top strip (the content reserves that
                 // strip with a spacer) and the strip sits beside both.
-                // The overlay spans the §12 gap too and captures every
-                // press: the rubber band must never start on the title
-                // bar (§14) — the folder-view pane is shifted down by it.
+                // The press catcher covers the header only: the §12 gap
+                // strip below it stays free, so the rubber band can
+                // start there (it must never start on the header
+                // itself — the MarqueeZone clamps its top edge to the
+                // header's lower border)
                 let d = &cfg.layouts.details;
-                let header = mouse_area(column![
-                    details_header(state, skin),
+                let header = column![
+                    mouse_area(details_header(state, skin))
+                        .on_press(Message::ColumnHeaderPress),
                     Space::new().height(Length::Fixed(d.files_gap)),
-                ])
-                .on_press(Message::ColumnHeaderPress);
+                ];
                 stack![
                     details_view(state, skin),
                     container(header).width(Length::Fill),
@@ -607,7 +611,8 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
             vs::Family::List => list_view(state, skin, inner_w),
             vs::Family::SmallIcon => {
                 let m = cfg.small_icon(s);
-                grid_view(state, inner_w, m.cell_w, m.cell_h, m.gap, |i, e| {
+                let top = cfg.files_top(state.view_index);
+                grid_view(state, inner_w, m.cell_w, m.cell_h, m.gap, top, |i, e| {
                     small_icon_cell(i, e, state, skin, s, &m)
                 })
             }
@@ -949,8 +954,10 @@ fn details_header(state: &Explorer, skin: skin::Skin) -> Element<'static, Messag
 fn content_view(state: &Explorer, skin: skin::Skin, width: f32) -> Element<'_, Message> {
     let row_h = state.view_cfg.layouts.content.row_h;
     let total = state.entries.len();
-    let (first, last) = row_window(total, row_h, state.scroll_y, state.viewport_h);
-    let mut rows = column![].spacing(0);
+    // the rows sit below the reserved files_top strip (rubber-band space)
+    let top = state.view_cfg.files_top(state.view_index);
+    let (first, last) = row_window(total, row_h, (state.scroll_y - top).max(0.0), state.viewport_h);
+    let mut rows = column![vspacer(top).boxed()].spacing(0);
     if first > 0 {
         rows = rows.push(vspacer(first as f32 * row_h).boxed());
     }
@@ -1023,7 +1030,8 @@ fn content_row<'a>(
 
 fn tiles_view(state: &Explorer, skin: skin::Skin, width: f32) -> Element<'_, Message> {
     let t = &state.view_cfg.layouts.tiles;
-    grid_view(state, width, t.cell_w, t.cell_h, 0.0, |i, e| {
+    let top = state.view_cfg.files_top(state.view_index);
+    grid_view(state, width, t.cell_w, t.cell_h, 0.0, top, |i, e| {
         tile_cell(i, e, state, skin)
     })
 }
@@ -1288,7 +1296,6 @@ fn value_cell<'a>(
 // left to right; the pane scrolls horizontally.
 
 fn list_view(state: &Explorer, skin: skin::Skin, width: f32) -> Element<'_, Message> {
-    let l = &state.view_cfg.layouts.list;
     let longest = state
         .entries
         .iter()
@@ -1296,7 +1303,7 @@ fn list_view(state: &Explorer, skin: skin::Skin, width: f32) -> Element<'_, Mess
         .max()
         .unwrap_or(0);
     let col_w = state.view_cfg.list_col_w(longest);
-    let rows_per_col = ((state.viewport_h / l.row_h).floor() as usize).max(1);
+    let rows_per_col = state.view_cfg.list_rows_per_col(state.viewport_h);
     let total = state.entries.len();
     let total_cols = total.div_ceil(rows_per_col);
     // virtualize by column
@@ -1322,6 +1329,8 @@ fn list_view(state: &Explorer, skin: skin::Skin, width: f32) -> Element<'_, Mess
             (total_cols - last) as f32 * col_w,
         )).boxed());
     }
+    // the strip sits below the reserved files_top space (rubber-band space)
+    let strip: Element<Message> = column![vspacer(state.view_cfg.files_top(state.view_index)).boxed(), strip.boxed()].boxed();
     scrollable(strip)
         .id(file_scrollable_id())
         .width(Length::Fill)
@@ -1431,9 +1440,11 @@ fn icon_top_grid_view<'a>(
     }
     last = (last + 1).min(total_rows);
     let mut grid = column![].spacing(0);
-    if first > 0 {
-        grid = grid.push(vspacer(rows.starts[first]).boxed());
-    }
+    // starts[first] is always > 0 now: the row prefix sums begin at
+    // the reserved files_top strip, so the spacer must be pushed even
+    // for first == 0 (otherwise row 0 renders on top of the strip and
+    // presses there land on the items, not on empty space)
+    grid = grid.push(vspacer(rows.starts[first]).boxed());
     for r in first..last {
         let mut line = row![].spacing(m.gap);
         for c in 0..rows.cols {
