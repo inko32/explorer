@@ -322,7 +322,9 @@ impl Explorer {
             last_title_press: None,
             block_press: None,
             self_border: true,
-            frame_style: FrameStyle::Win8,
+            // the Win8.1 frame is the default (the View → Options
+            // toggle still switches between it and the Win8 frame)
+            frame_style: FrameStyle::Win81,
             clipboard: None,
             view_cfg,
             view_index,
