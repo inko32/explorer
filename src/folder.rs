@@ -1057,18 +1057,25 @@ fn tile_cell<'a>(i: usize, e: &Entry, state: &'a Explorer, skin: skin::Skin) -> 
 fn details_view(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     let d = &state.view_cfg.layouts.details;
     let row_h = state.view_cfg.details_row_h(state.details_compact);
-    // rows are spaced by the effective gap (row_h → pitch); the gap is
-    // in border pixels so it follows the border DPI unscale
+    // the pitch is row_h − 1 border px: adjacent rows overlap by one
+    // border px so their selected borders share a single line. The
+    // rows must land exactly on the model pitch grid (top + i·pitch)
+    // that the selection overlay and the hit tests use. A Fixed(pitch)
+    // wrapper per row would clamp the Shrink-height chrome into the
+    // slot (a Fixed length clears the infinite limit), shifting its
+    // bottom border 1 px off the overlay — and spacing(gap) inserts a
+    // gap after EVERY child, so the spacers are shaved by it to
+    // compensate
     let pitch = state.view_cfg.details_pitch(state.details_compact);
     let gap = pitch - row_h;
     let total = state.entries.len();
     // the content reserves the header strip + the §12 gap (the real
     // header overlays the strip)
     let top = d.header_h + d.files_gap;
-    let (first, last) = row_window(total, row_h + gap, (state.scroll_y - top).max(0.0), state.viewport_h);
-    let mut rows = column![vspacer(top)].spacing(gap);
+    let (first, last) = row_window(total, pitch, (state.scroll_y - top).max(0.0), state.viewport_h);
+    let mut rows = column![vspacer(top - gap)].spacing(gap);
     if first > 0 {
-        rows = rows.push(vspacer(first as f32 * (row_h + gap)).boxed());
+        rows = rows.push(vspacer(first as f32 * pitch - gap).boxed());
     }
     for i in first..last {
         if let Some(e) = state.entries.get(i) {
@@ -1076,8 +1083,12 @@ fn details_view(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
         }
     }
     if last < total {
-        rows = rows.push(vspacer((total - last) as f32 * (row_h + gap)).boxed());
+        rows = rows.push(vspacer((total - last) as f32 * pitch - gap).boxed());
     }
+    // tail room for the chrome's bottom overflow (one border px past
+    // the last slot): without it the stack would clamp the overlay's
+    // last border box 1 px short
+    rows = rows.push(vspacer((row_h - pitch).max(0.0)).boxed());
     // row_gap overlaps adjacent rows by one border px so their
     // selected borders share a single line — but the fill of a hovered
     // neighbor row (drawn later) paints over that line, so the visible
