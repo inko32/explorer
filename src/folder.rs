@@ -379,22 +379,15 @@ fn item_chrome<'a>(
     } else {
         Color::TRANSPARENT
     };
-    let border_color = if selected || targeted {
-        if live { skin.sel_border } else { skin.sel_inactive_border }
-    } else {
-        Color::TRANSPARENT
-    };
+    let border_color = chrome_border(state, skin, selected || targeted);
     // TEMP(rainbow): solid chrome would hide the rainbow backdrop
     // rectangle; tint it translucent (same 0.35 convention as the
     // marquee) so the rainbow passes through. Toggle off = solid
     // palette colors, identical to the other panes.
-    let (bgc, border_color) = if state.rainbow {
-        (
-            Color { a: bgc.a * 0.35, ..bgc },
-            Color { a: border_color.a * 0.6, ..border_color },
-        )
+    let bgc = if state.rainbow {
+        Color { a: bgc.a * 0.35, ..bgc }
     } else {
-        (bgc, border_color)
+        bgc
     };
     let styled = container(content).style(move |_t: &iced::Theme| container::Style {
         background: Some(bgc.into()),
@@ -430,6 +423,30 @@ fn item_chrome<'a>(
     }
 }
 
+/// Selection border color of an item chrome: the live accent while
+/// the folder pane is active, the grayed pair when it is not
+/// (SPEC/Unfocused_Window.md §4), transparent for unselected items.
+/// Shared with the Details overlay that redraws selected borders on
+/// top of the row fills.
+fn chrome_border(state: &Explorer, skin: skin::Skin, selected: bool) -> Color {
+    let popup_open = state.ribbon.framework().view().popup_open();
+    let live = state.focused
+        && !popup_open
+        && state.active_pane == crate::model::Pane::Folder;
+    let c = if selected {
+        if live { skin.sel_border } else { skin.sel_inactive_border }
+    } else {
+        Color::TRANSPARENT
+    };
+    // TEMP(rainbow): match the chrome translucency so the redrawn
+    // border is identical to the one under the fills
+    if state.rainbow {
+        Color { a: c.a * 0.6, ..c }
+    } else {
+        c
+    }
+}
+
 /// Vertical spacer reserving scroll height for virtualized rows.
 fn vspacer(h: f32) -> Space {
     Space::new().height(Length::Fixed(h))
@@ -446,7 +463,7 @@ fn row_window(total: usize, row_h: f32, scroll_y: f32, viewport_h: f32) -> (usiz
 /// The file-list scrollable (vertical; List uses a horizontal one). The
 /// built-in scrollbar is hidden — the Windows-style strip in
 /// `scrollbar.rs` sits beside the scrollable instead.
-fn file_scrollable(content: iced::widget::Column<iced::Element<'_, Message>>) -> iced::Element<'_, Message> {
+fn file_scrollable(content: iced::Element<'_, Message>) -> iced::Element<'_, Message> {
     scrollable(content)
         .id(file_scrollable_id())
         // Fill so the empty area beside a narrower grid still scrolls
@@ -498,7 +515,7 @@ fn grid_view<'a>(
     if last < total_rows {
         rows = rows.push(vspacer((total_rows - last) as f32 * pitch).boxed());
     }
-    file_scrollable(rows).boxed()
+    file_scrollable(rows.boxed()).boxed()
 }
 
 pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Element<'_, Message> {
@@ -748,6 +765,17 @@ fn details_visible(state: &Explorer) -> Vec<usize> {
         .collect()
 }
 
+/// Width of the visible Details column block: the column widths plus
+/// a resizer between each pair (§15). Shared by the row builder and
+/// the selection-border overlay (same geometry).
+fn details_cols_w(state: &Explorer) -> f32 {
+    let vis = details_visible(state);
+    vis.iter().enumerate().fold(0.0, |acc, (n, &g)| {
+        acc + details_col_w(state, g)
+            + if n + 1 < vis.len() { COL_RESIZER_W } else { 0.0 }
+    })
+}
+
 /// The width of a Details column (the header resizer adjusts it).
 fn details_col_w(state: &Explorer, col: usize) -> f32 {
     state
@@ -927,7 +955,7 @@ fn content_view(state: &Explorer, skin: skin::Skin, width: f32) -> Element<'_, M
     if last < total {
         rows = rows.push(vspacer((total - last) as f32 * row_h).boxed());
     }
-    file_scrollable(rows).boxed()
+    file_scrollable(rows.boxed()).boxed()
 }
 
 /// §8.1 Content row: 32px icon, name (semibold) + 2 property lines,
@@ -1031,7 +1059,8 @@ fn details_view(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     let row_h = state.view_cfg.details_row_h(state.details_compact);
     // rows are spaced by the effective gap (row_h → pitch); the gap is
     // in border pixels so it follows the border DPI unscale
-    let gap = state.view_cfg.details_pitch(state.details_compact) - row_h;
+    let pitch = state.view_cfg.details_pitch(state.details_compact);
+    let gap = pitch - row_h;
     let total = state.entries.len();
     // the content reserves the header strip + the §12 gap (the real
     // header overlays the strip)
@@ -1049,7 +1078,61 @@ fn details_view(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     if last < total {
         rows = rows.push(vspacer((total - last) as f32 * (row_h + gap)).boxed());
     }
+    // row_gap overlaps adjacent rows by one border px so their
+    // selected borders share a single line — but the fill of a hovered
+    // neighbor row (drawn later) paints over that line, so the visible
+    // rows' selection borders are drawn once more, on top of the fills
+    let rows: Element<Message> = stack![
+        rows.boxed(),
+        selection_borders(state, skin, first, last, top, pitch, row_h),
+    ]
+    .boxed();
     file_scrollable(rows).boxed()
+}
+
+/// Border-only rectangles of the visible selected Details rows,
+/// stacked above the row fills (see `details_view`). Spacer-positioned
+/// like the marquee rectangle; the geometry mirrors `file_row`'s
+/// chrome: 0 → files_left margin, the column block, the 4px chrome
+/// pad at the right (§13/§16).
+fn selection_borders<'a>(
+    state: &'a Explorer,
+    skin: skin::Skin,
+    first: usize,
+    last: usize,
+    top: f32,
+    pitch: f32,
+    row_h: f32,
+) -> Element<'a, Message> {
+    let w = state.detail_cfg.files_left + details_cols_w(state) + state.detail_cfg.chrome_pad;
+    let radius = state.view_cfg.style.corner_radius;
+    let mut overlay = stack![];
+    for i in first..last {
+        if !state.selected.contains(&i) {
+            continue;
+        }
+        let color = chrome_border(state, skin, true);
+        if color.a == 0.0 {
+            continue;
+        }
+        let y = (top + i as f32 * pitch).max(0.0);
+        overlay = overlay.push(
+            column![
+                vspacer(y),
+                container(Space::new().width(Length::Fixed(w)).height(Length::Fixed(row_h)))
+                    .style(move |_t: &iced::Theme| container::Style {
+                        border: iced::Border {
+                            color,
+                            width: crate::theme::border_w(1.0),
+                            radius: radius.into(),
+                        },
+                        ..Default::default()
+                    }),
+            ]
+            .boxed(),
+        );
+    }
+    overlay.boxed()
 }
 
 fn file_row<'a>(
@@ -1061,11 +1144,10 @@ fn file_row<'a>(
     let dc = &state.detail_cfg;
     let row_h = state.view_cfg.details_row_h(state.details_compact);
     let vis = details_visible(state);
+    let total_w = details_cols_w(state);
     let mut cells = row![].align_y(iced::Alignment::Center);
-    let mut total_w = 0.0f32;
     for (n, &g) in vis.iter().enumerate() {
         let w = details_col_w(state, g);
-        total_w += w;
         let cell = if dc.columns[g].id == "name" {
             name_cell(i, e, state, skin, w, row_h)
         } else {
@@ -1074,7 +1156,6 @@ fn file_row<'a>(
         cells = cells.push(cell);
         // between columns: the header's right resizers sit here (§15)
         if n + 1 < vis.len() {
-            total_w += COL_RESIZER_W;
             cells = cells.push(Space::new().width(Length::Fixed(COL_RESIZER_W)).boxed());
         }
     }
@@ -1313,7 +1394,7 @@ fn icon_top_grid_view<'a>(
     let m = state.view_cfg.icon_top(s);
     let total_rows = rows.starts.len();
     if total_rows == 0 {
-        return file_scrollable(column![]).boxed();
+        return file_scrollable(Space::new().boxed()).boxed();
     }
     // first row whose start is at or above the scroll offset
     let first = rows
@@ -1350,7 +1431,7 @@ fn icon_top_grid_view<'a>(
     if last < total_rows {
         grid = grid.push(vspacer(rows.extent - rows.starts[last]).boxed());
     }
-    file_scrollable(grid).boxed()
+    file_scrollable(grid.boxed()).boxed()
 }
 
 fn icon_top_cell<'a>(
