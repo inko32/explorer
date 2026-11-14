@@ -436,12 +436,21 @@ pub struct IconTopMetrics {
 pub const LABEL_LINE_GAP: f32 = 1.0;
 /// Padding below the last icon-top label line to the item chrome edge.
 pub const LABEL_LINE_BOTTOM: f32 = 2.0;
+/// Portion of the font descent cropped from each label line box. The
+/// descent (~3.5px at 12px) is empty under most characters, and
+/// keeping it in the box is what made multi-line labels look loose;
+/// real descenders (g/j/p/q/y) dip this many pixels into the gap or
+/// the bottom pad below — nothing clips (the container keeps the
+/// LABEL_LINE_BOTTOM pad and its own cell padding is empty).
+pub const LABEL_DESCENT_SHAVE: f32 = 1.5;
 
 /// Height of the icon-top label box for `lines` lines of `block`
-/// pixels each: the glyph blocks stack flush, `LABEL_LINE_GAP` between
-/// them, `LABEL_LINE_BOTTOM` below the last line.
+/// pixels each: the line boxes stack flush (each cropped by
+/// LABEL_DESCENT_SHAVE), LABEL_LINE_GAP between them,
+/// LABEL_LINE_BOTTOM below the last line.
 pub fn label_box_h(lines: f32, block: f32) -> f32 {
-    lines * block + (lines - 1.0).max(0.0) * LABEL_LINE_GAP + LABEL_LINE_BOTTOM
+    let line = (block - LABEL_DESCENT_SHAVE).max(1.0);
+    lines * line + (lines - 1.0).max(0.0) * LABEL_LINE_GAP + LABEL_LINE_BOTTOM
 }
 
 /// §8.3 icon-top grid with dynamic row heights: the row pitch follows
