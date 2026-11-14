@@ -94,6 +94,26 @@ impl Explorer {
             self.details_compact,
         ) + within)
             .max(0.0);
+        // the scrollable clamps its offset to (content - viewport).max(0)
+        // at render; an instant scroll_to stores the offset UNCLAMPED and
+        // iced publishes no on_scroll for it (none at all when the content
+        // fits the viewport), so an anchor past the range would leave
+        // scroll_y ahead of the real viewport and the rubber band one
+        // header-height off. Mirror the clamp here (x for List, y else)
+        let extent = cfg.content_extent(
+            index,
+            n,
+            pane_w,
+            self.viewport_h,
+            longest,
+            &self.it_label_lines,
+            self.details_compact,
+        );
+        let offset = if cfg.family(index) == crate::view_step::Family::List {
+            offset.min((extent - pane_w).max(0.0))
+        } else {
+            offset.min((extent - self.viewport_h).max(0.0))
+        };
         let (x, y) = if cfg.family(index) == crate::view_step::Family::List {
             self.scroll_x = offset;
             self.scroll_y = 0.0;
