@@ -224,6 +224,10 @@ pub struct Explorer {
     pub pane_content: crate::pane::Content,
     pub status: String,
     pub last_click: Option<(usize, std::time::Instant)>,
+    /// Last free-space (empty-area) press: a second press within
+    /// theme.yaml `double_click_ms` is a double-click, which releases
+    /// the idle selector back to its default (first item, hidden).
+    pub(crate) last_free_click: Option<std::time::Instant>,
     pub loading: bool,
     pub volumes: Vec<fs::Volume>,
     /// Navigation pane tree (expanded nodes + cached children).
@@ -363,6 +367,7 @@ impl Explorer {
             pane_content: crate::pane::Content::None,
             status: String::new(),
             last_click: None,
+            last_free_click: None,
             loading: false,
             volumes: Vec::new(),
             nav: NavTree::new(),
@@ -1036,6 +1041,15 @@ impl Explorer {
                 } else {
                     self.selected.iter().next().copied()
                 };
+                // a second free-space press within double_click_ms is a
+                // double-click: it releases the idle selector to its
+                // default instead of showing the rectangle
+                let now = std::time::Instant::now();
+                let double_free = self.last_free_click.is_some_and(|t| {
+                    now.duration_since(t).as_millis()
+                        < u128::from(crate::theme::double_click_ms())
+                });
+                self.last_free_click = Some(now);
                 // the drag owns the pointer until MarqueeEnd: drop the
                 // hover chrome (folder items, details column headers)
                 // and let the hover handlers below ignore updates, so
@@ -1057,7 +1071,13 @@ impl Explorer {
                 // a plain click on empty space releases the selection
                 // (the zero-size marquee intersects nothing)
                 self.marquee_update();
-                if let Some(i) = released
+                if double_free {
+                    // the double-click releases the idle selector to
+                    // its default: the rectangle on the first item,
+                    // hidden
+                    self.focus_item = (!self.entries.is_empty()).then_some(0);
+                    self.focus_shown = false;
+                } else if let Some(i) = released
                     && self.selected.is_empty()
                 {
                     self.focus_item = Some(i);
