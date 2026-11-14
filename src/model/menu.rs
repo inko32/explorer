@@ -54,6 +54,7 @@ impl Explorer {
             nav_target: None,
             bar: None,
         });
+        self.menu_popup_open();
     }
 
     /// Right-click a Details column header: the column menu — one
@@ -112,10 +113,81 @@ impl Explorer {
         });
     }
 
+    /// Host `self.menu` off-window: paint it and open the xdg_popup at
+    /// its anchor. No-op (in-window fallback) without the side channel
+    /// or for address-bar dropdowns (`bar: Some`, anchored widgets).
+    /// Call right after assigning `self.menu`.
+    pub(crate) fn menu_popup_open(&mut self) {
+        let Some(wl) = &self.dnd_wl else { return };
+        let Some(open) = &self.menu else { return };
+        if open.bar.is_some() {
+            return;
+        }
+        let skin = if self.dark {
+            crate::ui_common::skin::dark()
+        } else {
+            crate::ui_common::skin::light()
+        };
+        let painted = self.scale_dpi();
+        let Some(visual) = crate::menu::paint_popup(open, &self.menu_cfg, skin, painted)
+        else {
+            return;
+        };
+        // unit chain: the popup buffer is painted at `painted`
+        // (= scale_dpi), and its wl buffer scale must equal the PARENT
+        // surface's — winit uses ceil(effective scale), and the
+        // effective scale IS scale_dpi (system scale x the --dpi
+        // multiplier). The compositor then sizes the popup 1:1 with
+        // the window content at ANY --dpi. Input comes back in
+        // popup-local units = buffer/scale, converted to model-logical
+        // with scale/painted.
+        let popup_scale = painted.ceil().max(1.0) as i32;
+        let to_model = popup_scale as f32 / painted;
+        wl.open_popup(to_model, popup_scale, visual);
+        self.menu_popup = true;
+    }
+
+    /// Re-paint an open popup (hover changes).
+    pub(crate) fn repaint_menu_popup(&mut self) {
+        if !self.menu_popup {
+            return;
+        }
+        let (Some(wl), Some(open)) = (&self.dnd_wl, &self.menu) else {
+            return;
+        };
+        let skin = if self.dark {
+            crate::ui_common::skin::dark()
+        } else {
+            crate::ui_common::skin::light()
+        };
+        if let Some(visual) =
+            crate::menu::paint_popup(open, &self.menu_cfg, skin, self.scale_dpi())
+        {
+            wl.update_popup(visual);
+        }
+    }
+
+    /// Close the menu wherever it is hosted (popup or in-window).
+    pub(crate) fn menu_close(&mut self) {
+        self.menu = None;
+        if self.menu_popup {
+            self.menu_popup = false;
+            if let Some(wl) = &self.dnd_wl {
+                wl.close_popup();
+            }
+        }
+    }
+
     /// Menu item activated: close the menu, then dispatch (§8: every
     /// command re-validates at execution — the file ops report errors
     /// via the status bar).
     pub(crate) fn menu_dispatch(&mut self, idx: usize) -> iced::Task<Message> {
+        if self.menu_popup
+            && let Some(wl) = &self.dnd_wl
+        {
+            wl.close_popup();
+            self.menu_popup = false;
+        }
         let Some(open) = self.menu.take() else {
             return iced::Task::none();
         };

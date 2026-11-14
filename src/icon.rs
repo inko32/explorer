@@ -255,34 +255,41 @@ pub fn raster(name: &str, size: u32, skin: &Skin) -> IconPix {
         }
         _ => crate::icons::builtin_svg_xml(name, skin),
     };
-    match svg.as_deref().and_then(raster_svg) {
+    match svg.as_deref().and_then(|s| raster_svg(s, want)) {
         Some(pix) => pix,
-        None => raster_svg(&crate::icons::builtin_svg_xml("folder", skin).unwrap_or_default())
-            .unwrap_or(IconPix {
-                width: 1,
-                height: 1,
-                pixels: vec![0, 0, 0, 0],
-            }),
+        None => {
+            raster_svg(&crate::icons::builtin_svg_xml("folder", skin).unwrap_or_default(), want)
+                .unwrap_or(IconPix {
+                    width: 1,
+                    height: 1,
+                    pixels: vec![0, 0, 0, 0],
+                })
+        }
     }
 }
 
-/// Raster an SVG document at its intrinsic size (physical pixels).
-fn raster_svg(svg: &str) -> Option<IconPix> {
+/// Raster an SVG document to `target` physical pixels on its long edge
+/// (the sources are 16px templates / small theme icons — rendering at
+/// the intrinsic size and upscaling later pixelizes the drag image).
+pub(crate) fn raster_svg(svg: &str, target: u32) -> Option<IconPix> {
     let tree = resvg::usvg::Tree::from_data(svg.as_bytes(), &Default::default()).ok()?;
     let size = tree.size();
     let (w, h) = (size.width(), size.height());
     if w <= 0.0 || h <= 0.0 {
         return None;
     }
-    let mut pixmap = resvg::tiny_skia::Pixmap::new(w.ceil() as u32, h.ceil() as u32)?;
+    let scale = target.max(1) as f32 / w.max(h);
+    let pw = (w * scale).ceil().max(1.0) as u32;
+    let ph = (h * scale).ceil().max(1.0) as u32;
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(pw, ph)?;
     resvg::render(
         &tree,
-        resvg::tiny_skia::Transform::default(),
+        resvg::tiny_skia::Transform::from_scale(scale, scale),
         &mut pixmap.as_mut(),
     );
     Some(IconPix {
-        width: pixmap.width(),
-        height: pixmap.height(),
+        width: pw,
+        height: ph,
         pixels: pixmap.data().to_vec(),
     })
 }

@@ -236,10 +236,10 @@ pub enum Message {
     /// Wayland DnD side-channel event (drag-in hover/drop, drag-out
     /// finish) — see `dnd_wayland`.
     Dnd(crate::dnd_wayland::Event),
-    /// Raw Wayland window handles `(wl_surface, wl_display)` delivered
-    /// by `iced::window::raw_handle` once the window exists; spawns the
-    /// DnD side-channel.
-    WlHandles(Option<(usize, usize)>),
+    /// Raw Wayland window handles `(wl_surface, wl_display,
+    /// xdg_toplevel)` delivered by `iced::window::raw_handle` once the
+    /// window exists; spawns the Wayland side-channel (DnD + popups).
+    WlHandles(Option<(usize, usize, usize)>),
     /// Scroll offset + viewport height from the file list scrollable.
     Scrolled {
         x: f32,

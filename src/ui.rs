@@ -73,9 +73,13 @@ fn drag_caption(state: &Explorer, skin: skin::Skin) -> Option<Element<'_, Messag
         return None;
     }
     let cap = state.dnd.caption()?;
-    // near the cursor: 10px right-down, in window-logical pixels
-    const DX: f32 = 16.0;
-    const DY: f32 = 16.0;
+    // near the cursor, in window-logical pixels — the SAME offsets the
+    // Wayland drag surface paints (dnd_wayland::paint_drag_visual):
+    // badge at cursor+(2,2), this plate at cursor+(71,71), so the
+    // handoff from in-window overlay to compositor icon is seamless
+    // (the drag hotspot is fixed at the icon's top-left corner)
+    const DX: f32 = 71.0;
+    const DY: f32 = 71.0;
     let badge: Element<Message> = match cap {
         crate::dnd::DragCaption::Hidden => return None,
         crate::dnd::DragCaption::Banned => banned_icon(),
@@ -198,18 +202,17 @@ fn drag_icon_badge(state: &Explorer, skin: skin::Skin) -> Option<Element<'static
                 .boxed(),
         );
     }
-    // left-higher of the caption: the badge's bottom-right corner sits
-    // 19px above-left of the caption plate (the caption sits at DX/DY)
-    const DX: f32 = 16.0;
-    const DY: f32 = 20.0;
-    const GAP: f32 = 19.0;
+    // same origin as the Wayland drag surface: badge top-left at
+    // cursor+(2,2) — the handoff at the window edge must not jump
+    const DX: f32 = 2.0;
+    const DY: f32 = 2.0;
     Some(
         container(badge)
             .width(Length::Fill)
             .height(Length::Fill)
             .padding(iced::Padding {
-                top: (state.cursor.y + DY - BADGE - GAP).max(0.0),
-                left: (state.cursor.x + DX - BADGE - GAP).max(0.0),
+                top: (state.cursor.y + DY).max(0.0),
+                left: (state.cursor.x + DX).max(0.0),
                 ..Default::default()
             })
             .boxed(),
@@ -544,14 +547,19 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
             s = s.push(el);
         }
         // context menu above everything (SPEC/MENU_SPEC.MD): in-window
-        // by default, overlay layer with menu.yaml layout.popup
+        // by default, overlay layer with menu.yaml layout.popup; the
+        // Wayland xdg_popup host replaces both (menu drawn off-window)
         if let Some(open) = &state.menu {
-            let el = if state.menu_cfg.layout.popup {
-                crate::menu::host(open, &state.menu_cfg, skin)
+            if state.menu_popup {
+                // hosted by the side-channel popup — nothing in-window
             } else {
-                crate::menu::layer(open, &state.menu_cfg, skin)
-            };
-            s = s.push(el);
+                let el = if state.menu_cfg.layout.popup {
+                    crate::menu::host(open, &state.menu_cfg, skin)
+                } else {
+                    crate::menu::layer(open, &state.menu_cfg, skin)
+                };
+                s = s.push(el);
+            }
         }
         s.boxed()
     } else {
