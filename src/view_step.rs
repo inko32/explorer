@@ -431,6 +431,16 @@ pub struct IconTopMetrics {
     pub lines: f32,
 }
 
+/// Vertical gap between the icon area and the label inside an
+/// icon-top cell. Fixed (not `gap_factor`-derived): the label font
+/// stays the same size at every icon step.
+pub const ICON_LABEL_GAP: f32 = 3.0;
+/// Cell padding below the label box (label-box bottom to the chrome
+/// edge). Smaller than the top/side pads: the label box already
+/// carries its LABEL_LINE_BOTTOM inset, and the visual text-to-edge
+/// space is LABEL_PAD_BOTTOM + LABEL_LINE_BOTTOM + the line's own
+/// half-leading.
+pub const LABEL_PAD_BOTTOM: f32 = 2.0;
 /// Vertical gap between two wrapped icon-top label lines (glyph
 /// bottom to next glyph top).
 pub const LABEL_LINE_GAP: f32 = 1.0;
@@ -465,7 +475,8 @@ pub struct IconTopRows {
     pub starts: Vec<f32>,
     /// total content height (drives the scrollbar extent)
     pub extent: f32,
-    /// chrome height of each item: pad + s + gap + label_box_h(lines) + pad
+    /// chrome height of each item: pad + s + ICON_LABEL_GAP +
+    /// label_box_h(lines) + LABEL_PAD_BOTTOM
     pub item_h: Vec<f32>,
 }
 
@@ -627,7 +638,9 @@ impl ViewCfg {
         let block = crate::text_metrics::line_block(self.style.font_size, crate::fonts::primary());
         IconTopMetrics {
             cell_w: (s + 2.0 * pad).max(c.w_min),
-            cell_h: pad + s + gap + label_box_h(lines, block) + pad,
+            // icon area pinned to s (the image widget's height follows
+            // the graphic's aspect ratio, not s) — see icon_top_cell
+            cell_h: pad + s + ICON_LABEL_GAP + label_box_h(lines, block) + LABEL_PAD_BOTTOM,
             pad,
             gap,
             lines,
@@ -650,7 +663,10 @@ impl ViewCfg {
         let block = crate::text_metrics::line_block(self.style.font_size, crate::fonts::primary());
         let item_h: Vec<f32> = label_lines[..n]
             .iter()
-            .map(|&l| m.pad + s + m.gap + label_box_h((l as f32).max(1.0), block) + m.pad)
+            .map(|&l| {
+                m.pad + s + ICON_LABEL_GAP + label_box_h((l as f32).max(1.0), block)
+                    + LABEL_PAD_BOTTOM
+            })
             .collect();
         let mut starts = Vec::with_capacity(n.div_ceil(cols));
         // the first row sits below the reserved files_top strip
@@ -935,7 +951,7 @@ mod tests {
         let s = cfg.icon_px(cfg.presets.medium);
         let m = cfg.icon_top(s);
         let block = crate::text_metrics::line_block(cfg.style.font_size, crate::fonts::primary());
-        let one = m.pad + s + m.gap + label_box_h(1.0, block) + m.pad;
+        let one = m.pad + s + ICON_LABEL_GAP + label_box_h(1.0, block) + LABEL_PAD_BOTTOM;
         let lines = [1u8, 1, 3, 1];
         // a width that fits exactly 2 columns
         let w = 2.0 * (m.cell_w + m.gap) - m.gap;

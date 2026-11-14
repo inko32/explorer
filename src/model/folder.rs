@@ -350,7 +350,8 @@ impl Explorer {
                 let own = self.it_label_lines.get(i).copied().unwrap_or(1).max(1) as f32;
                 let block =
                     crate::text_metrics::line_block(cfg.style.font_size, crate::fonts::primary());
-                m.pad + cfg.icon_px(index) + m.gap + vs::label_box_h(own, block) + m.pad
+                m.pad + cfg.icon_px(index) + vs::ICON_LABEL_GAP + vs::label_box_h(own, block)
+                    + vs::LABEL_PAD_BOTTOM
             }
         };
         let extent = cfg.content_extent(
