@@ -31,6 +31,7 @@ impl Explorer {
             self.selected.insert(i);
             vec![self.entries[i].path.clone()]
         };
+        self.focus_item = Some(i);
         if paths.is_empty() {
             return;
         }

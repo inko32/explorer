@@ -13,6 +13,17 @@ pub enum Pane {
     Nav,
 }
 
+/// Keyboard focus navigation direction (the idle-selector rectangle
+/// follows the layout geometry: grid columns/rows in the icon views,
+/// rows-per-column in List, a single column in Content/Details).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FocusDir {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
 #[derive(Debug, Clone)]
 pub enum Message {
     WindowOpened(iced::window::Id),
@@ -90,6 +101,13 @@ pub enum Message {
     Up,
     Refresh,
     Select(usize),
+    /// Arrow-key navigation of the idle selector (the focus
+    /// rectangle): plain arrows move the selection along, Ctrl+arrow
+    /// moves the rectangle only, Shift+arrow extends the range.
+    FocusMove(FocusDir),
+    /// Space toggles the idle-selected item (the Windows checkbox
+    /// gesture; Ctrl+Space accumulates a multiple selection).
+    FocusSpace,
     /// A row's hover ended; clears only if that row is still the
     /// hovered one (event order: moving up, the new row's enter
     /// arrives before the old row's exit).

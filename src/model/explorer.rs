@@ -54,6 +54,13 @@ pub struct Explorer {
     pub cwd: PathBuf,
     pub entries: Vec<fs::Entry>,
     pub selected: std::collections::BTreeSet<usize>,
+    /// Idle selector (the Windows keyboard-focus item): a border-only
+    /// rectangle. Defaults to the first item after every listing, but
+    /// stays invisible until an arrow key moves it or a plain
+    /// free-space click releases the selection.
+    pub(crate) focus_item: Option<usize>,
+    /// Whether the idle-selector border is shown.
+    pub(crate) focus_shown: bool,
     pub hovered: Option<usize>,
     /// Hovered navigation tree row: the path plus a tag that is true
     /// when the hovered row is a Favorites shortcut (nav_pane uses it
@@ -274,6 +281,8 @@ impl Explorer {
             cwd,
             entries: Vec::new(),
             selected: Default::default(),
+            focus_item: None,
+            focus_shown: false,
             hovered: None,
             nav_hover: None,
             nav_selected: None,
@@ -802,6 +811,10 @@ impl Explorer {
                                 .collect();
                             self.apply_sort();
                             self.selected.clear();
+                            // the idle selector restarts on the first
+                            // item, invisible until keyboard navigation
+                            self.focus_item = (!self.entries.is_empty()).then_some(0);
+                            self.focus_shown = false;
                             self.hovered = None;
                             self.renaming = None;
                             if let Ok(pat) = std::env::var("EXPLORER_DEBUG_SELECT") {
@@ -815,6 +828,7 @@ impl Explorer {
                                 && let Some(i) = self.entries.iter().position(|e| e.name == name)
                             {
                                 self.selected.insert(i);
+                                self.focus_item = Some(i);
                                 self.renaming = Some((i, name));
                             }
                         }
@@ -998,10 +1012,20 @@ impl Explorer {
             }
             // folder-view selection gesture (model/folder.rs)
             Message::Select(i) => self.select_press(i),
+            Message::FocusMove(dir) => self.focus_move(dir),
+            Message::FocusSpace => self.focus_space(),
             Message::MarqueeBegin { x, y } => {
                 // a press on the pane's empty space focuses the folder
                 // pane, same as pressing an item (SPEC/Unfocused_Window.md §1)
                 self.active_pane = Pane::Folder;
+                // a plain click on free space releases the selection;
+                // the idle selector then shows its border on the first
+                // released item (Windows free-space click)
+                let released = if self.ctrl_held {
+                    None
+                } else {
+                    self.selected.iter().next().copied()
+                };
                 // the drag owns the pointer until MarqueeEnd: drop the
                 // hover chrome (folder items, details column headers)
                 // and let the hover handlers below ignore updates, so
@@ -1023,6 +1047,12 @@ impl Explorer {
                 // a plain click on empty space releases the selection
                 // (the zero-size marquee intersects nothing)
                 self.marquee_update();
+                if let Some(i) = released
+                    && self.selected.is_empty()
+                {
+                    self.focus_item = Some(i);
+                    self.focus_shown = true;
+                }
                 iced::Task::none()
             }
             Message::MarqueeMove { x, y } => {

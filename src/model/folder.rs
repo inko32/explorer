@@ -5,9 +5,23 @@
 use iced::Task;
 
 use crate::fs;
+use crate::view_step as vs;
 
 use super::explorer::Explorer;
-use super::message::Message;
+use super::message::{FocusDir, Message};
+
+/// Grid adjacency shared by the Tiles / SmallIcon / IconTop families:
+/// left/right stay in the row, up/down keep the column (no wrap-around).
+fn grid_neighbor(i: usize, n: usize, cols: usize, dir: FocusDir) -> Option<usize> {
+    // then(), not then_some(): the subtraction arguments must not be
+    // evaluated when the guard fails (debug builds overflow-check)
+    match dir {
+        FocusDir::Left => (!i.is_multiple_of(cols)).then(|| i - 1),
+        FocusDir::Right => (i % cols + 1 < cols && i + 1 < n).then(|| i + 1),
+        FocusDir::Up => (i >= cols).then(|| i - cols),
+        FocusDir::Down => (i + cols < n).then(|| i + cols),
+    }
+}
 
 impl Explorer {
     /// §10 per-folder persistence: restore the stored view index for the
@@ -170,6 +184,7 @@ impl Explorer {
             if !self.selected.remove(&i) {
                 self.selected.insert(i);
             }
+            self.focus_item = Some(i);
             self.sel_anchor = Some(i);
             self.last_click = None;
             self.press = None; // selection gesture, not a drag
@@ -179,6 +194,7 @@ impl Explorer {
             // Shift+click: the anchor..=item range
             let anchor = self.sel_anchor.unwrap_or(i);
             self.selected = (anchor.min(i)..=anchor.max(i)).collect();
+            self.focus_item = Some(i);
             self.last_click = None;
             self.press = None; // selection gesture, not a drag
             return Task::none();
@@ -187,6 +203,7 @@ impl Explorer {
         // NOT collapse the selection yet: a drag takes all of it,
         // a plain release collapses it (see `collapse`).
         if self.selected.contains(&i) && self.selected.len() > 1 {
+            self.focus_item = Some(i);
             self.press = Some(super::dnd::PressArm {
                 i,
                 at: self.cursor,
@@ -202,6 +219,175 @@ impl Explorer {
             right: false,
         });
         self.select_single(i)
+    }
+
+    /// The idle-selected (keyboard focus) item: the tracked one when
+    /// still valid, else the first entry (the default, per Windows).
+    pub(crate) fn focus_or_default(&self) -> usize {
+        self.focus_item
+            .filter(|&i| i < self.entries.len())
+            .unwrap_or(0)
+    }
+
+    /// Arrow-key navigation of the idle selector (model/message.rs):
+    /// the rectangle follows the layout geometry in every view. Plain
+    /// arrows move the selection along, Ctrl+arrow moves the rectangle
+    /// only (then Space accumulates a multiple selection), Shift+arrow
+    /// extends the range from the anchor. The scroll axis follows an
+    /// off-screen rectangle.
+    pub(crate) fn focus_move(&mut self, dir: FocusDir) -> Task<Message> {
+        if self.entries.is_empty() {
+            return Task::none();
+        }
+        self.active_pane = crate::model::Pane::Folder;
+        let next = self.neighbor(self.focus_or_default(), dir).unwrap_or_else(|| self.focus_or_default());
+        self.focus_item = Some(next);
+        self.focus_shown = true;
+        if self.shift_held {
+            let anchor = self.sel_anchor.unwrap_or(next);
+            self.selected = (anchor.min(next)..=anchor.max(next)).collect();
+        } else if !self.ctrl_held {
+            // a plain arrow moves the selection with the rectangle
+            self.selected.clear();
+            self.selected.insert(next);
+            self.sel_anchor = Some(next);
+        }
+        self.scroll_item_into_view(next)
+    }
+
+    /// Space toggles the idle-selected item (the Windows checkbox
+    /// gesture): an unselected item joins the selection (Ctrl held or
+    /// not — that is the multiple-selection accumulate), a selected
+    /// one leaves it.
+    pub(crate) fn focus_space(&mut self) -> Task<Message> {
+        if self.entries.is_empty() {
+            return Task::none();
+        }
+        self.active_pane = crate::model::Pane::Folder;
+        let i = self.focus_or_default();
+        self.focus_item = Some(i);
+        self.focus_shown = true;
+        if !self.selected.remove(&i) {
+            self.selected.insert(i);
+        }
+        self.sel_anchor = Some(i);
+        Task::none()
+    }
+
+    /// The adjacent item in `dir` for the current layout: a single
+    /// column in Content/Details, rows-per-column in List, grid
+    /// columns in Tiles/SmallIcon/IconTop. None at the edge.
+    fn neighbor(&self, i: usize, dir: FocusDir) -> Option<usize> {
+        let n = self.entries.len();
+        let cfg = &self.view_cfg;
+        let w = self.file_pane_width();
+        match cfg.family(self.view_index) {
+            vs::Family::Content | vs::Family::Details => match dir {
+                FocusDir::Up => i.checked_sub(1),
+                FocusDir::Down => (i + 1 < n).then(|| i + 1),
+                FocusDir::Left | FocusDir::Right => None,
+            },
+            vs::Family::List => {
+                let rows = ((self.viewport_h / cfg.layouts.list.row_h).floor() as usize).max(1);
+                match dir {
+                    FocusDir::Up => (!i.is_multiple_of(rows)).then(|| i - 1),
+                    FocusDir::Down => (i % rows < rows - 1 && i + 1 < n).then(|| i + 1),
+                    FocusDir::Left => (i >= rows).then(|| i - rows),
+                    FocusDir::Right => (i + rows < n).then(|| i + rows),
+                }
+            }
+            vs::Family::Tiles => {
+                let t = &cfg.layouts.tiles;
+                grid_neighbor(i, n, vs::grid_cols(t.cell_w, 0.0, w), dir)
+            }
+            vs::Family::SmallIcon => {
+                let m = cfg.small_icon(cfg.icon_px(self.view_index));
+                grid_neighbor(i, n, vs::grid_cols(m.cell_w, m.gap, w), dir)
+            }
+            vs::Family::IconTop => {
+                let m = cfg.icon_top(cfg.icon_px(self.view_index));
+                grid_neighbor(i, n, vs::grid_cols(m.cell_w, m.gap, w), dir)
+            }
+        }
+    }
+
+    /// Scroll the scroll axis so item `i` is fully visible (a keyboard
+    /// focus move keeps the rectangle inside the viewport; List scrolls
+    /// x, every other family y). Mirrors the anchor_view clamp: an
+    /// instant scroll_to stores the offset unclamped, which would leave
+    /// scroll_x/scroll_y ahead of the real viewport.
+    fn scroll_item_into_view(&mut self, i: usize) -> Task<Message> {
+        let cfg = &self.view_cfg;
+        let index = self.view_index;
+        let longest = self
+            .entries
+            .iter()
+            .map(|e| e.name.chars().count())
+            .max()
+            .unwrap_or(0);
+        let pane_w = self.file_pane_width();
+        let offset = cfg.item_offset(
+            index,
+            i,
+            pane_w,
+            self.viewport_h,
+            longest,
+            &self.it_label_lines,
+            self.details_compact,
+        );
+        // the item's extent along the scroll axis
+        let len = match cfg.family(index) {
+            vs::Family::Content => cfg.layouts.content.row_h,
+            vs::Family::Details => cfg.details_pitch(self.details_compact),
+            vs::Family::List => cfg.list_col_w(longest),
+            vs::Family::Tiles => cfg.layouts.tiles.cell_h,
+            vs::Family::SmallIcon => {
+                let m = cfg.small_icon(cfg.icon_px(index));
+                m.cell_h + m.gap
+            }
+            vs::Family::IconTop => {
+                let m = cfg.icon_top(cfg.icon_px(index));
+                let own = self.it_label_lines.get(i).copied().unwrap_or(1).max(1) as f32;
+                m.pad + cfg.icon_px(index) + m.gap + own * cfg.icon_top.label_line_h + m.pad
+            }
+        };
+        let extent = cfg.content_extent(
+            index,
+            self.entries.len(),
+            pane_w,
+            self.viewport_h,
+            longest,
+            &self.it_label_lines,
+            self.details_compact,
+        );
+        let is_x = cfg.family(index) == vs::Family::List;
+        let (scroll, viewport) = if is_x {
+            (self.scroll_x, pane_w)
+        } else {
+            (self.scroll_y, self.viewport_h)
+        };
+        let mut target = scroll;
+        if offset < scroll {
+            target = offset;
+        } else if offset + len > scroll + viewport {
+            target = offset + len - viewport;
+        }
+        target = target.clamp(0.0, (extent - viewport).max(0.0));
+        if (target - scroll).abs() < 0.5 {
+            return Task::none();
+        }
+        let (x, y) = if is_x {
+            self.scroll_x = target;
+            (Some(target), None)
+        } else {
+            self.scroll_y = target;
+            (None, Some(target))
+        };
+        iced::widget::operation::scrollable::scroll_to(
+            crate::folder::file_scrollable_id(),
+            iced::widget::operation::scrollable::AbsoluteOffset { x, y },
+            iced::widget::operation::Animation::Instant,
+        )
     }
 
     /// Right-pressed a file-view row: unlike the selection gestures
@@ -277,6 +463,7 @@ impl Explorer {
     pub(crate) fn select_single(&mut self, i: usize) -> iced::Task<Message> {
         self.selected.clear();
         self.selected.insert(i);
+        self.focus_item = Some(i);
         self.sel_anchor = Some(i);
         let now = std::time::Instant::now();
         if let Some((last_i, t)) = self.last_click
@@ -466,4 +653,135 @@ pub(crate) struct ColDrag {
     col: usize,
     start_x: Option<f32>,
     start_w: f32,
+}
+
+#[cfg(test)]
+mod focus_tests {
+    //! The idle selector (keyboard focus rectangle): layout-aware
+    //! arrow navigation in every family, Space toggle, and the
+    //! free-space click that releases the selection but shows the
+    //! rectangle on the first released item.
+    use super::*;
+    use std::path::PathBuf;
+
+    fn entry(name: &str) -> fs::Entry {
+        fs::Entry {
+            name: name.into(),
+            path: PathBuf::from("/tmp").join(name),
+            kind: fs::EntryKind::File,
+            size: 0,
+            modified: None,
+            is_hidden: false,
+            is_symlink: false,
+            is_executable: false,
+            symlink_target: None,
+        }
+    }
+
+    fn explorer(n: usize) -> Explorer {
+        let mut e = Explorer::new();
+        e.entries = (0..n).map(|i| entry(&format!("item{i:02}"))).collect();
+        e.viewport_h = 96.0;
+        e.focus_item = Some(0);
+        e.focus_shown = false;
+        e
+    }
+
+    #[test]
+    fn details_moves_vertically_only() {
+        let mut e = explorer(5);
+        e.view_index = e.view_cfg.presets.details;
+        assert_eq!(e.neighbor(0, FocusDir::Up), None);
+        assert_eq!(e.neighbor(0, FocusDir::Down), Some(1));
+        assert_eq!(e.neighbor(4, FocusDir::Down), None);
+        assert_eq!(e.neighbor(2, FocusDir::Left), None);
+        assert_eq!(e.neighbor(2, FocusDir::Right), None);
+    }
+
+    #[test]
+    fn grid_follows_columns_and_rows() {
+        let mut e = explorer(0);
+        e.view_index = e.view_cfg.presets.tiles;
+        let t = &e.view_cfg.layouts.tiles;
+        let cols = vs::grid_cols(t.cell_w, 0.0, e.file_pane_width());
+        // enough items for two full rows plus one partial
+        let n = cols * 2 + 1;
+        e.entries = (0..n).map(|i| entry(&format!("item{i:02}"))).collect();
+        assert_eq!(e.neighbor(0, FocusDir::Left), None);
+        assert_eq!(e.neighbor(0, FocusDir::Right), Some(1));
+        assert_eq!(e.neighbor(cols - 1, FocusDir::Right), None);
+        assert_eq!(e.neighbor(0, FocusDir::Down), Some(cols));
+        assert_eq!(e.neighbor(cols, FocusDir::Up), Some(0));
+        // the last (partial) row: below the first row, none further
+        assert_eq!(e.neighbor(cols, FocusDir::Down), Some(2 * cols));
+        assert_eq!(e.neighbor(2 * cols, FocusDir::Down), None);
+    }
+
+    #[test]
+    fn list_follows_rows_per_column() {
+        let mut e = explorer(10);
+        e.view_index = e.view_cfg.presets.list;
+        // 96px viewport / 24px rows = 4 rows per column
+        assert_eq!(e.neighbor(0, FocusDir::Down), Some(1));
+        assert_eq!(e.neighbor(3, FocusDir::Down), None);
+        // index 4 tops the second column: nothing above, one left
+        assert_eq!(e.neighbor(4, FocusDir::Up), None);
+        assert_eq!(e.neighbor(5, FocusDir::Up), Some(4));
+        assert_eq!(e.neighbor(4, FocusDir::Left), Some(0));
+        assert_eq!(e.neighbor(4, FocusDir::Right), Some(8));
+        assert_eq!(e.neighbor(6, FocusDir::Right), None);
+    }
+
+    #[test]
+    fn plain_arrow_moves_selection_ctrl_moves_rectangle_only() {
+        let mut e = explorer(5);
+        e.view_index = e.view_cfg.presets.details;
+        let _ = e.focus_move(FocusDir::Down);
+        assert_eq!(e.focus_item, Some(1));
+        assert!(e.focus_shown);
+        assert_eq!(e.selected.iter().copied().collect::<Vec<_>>(), vec![1]);
+        // Ctrl+arrow: the rectangle walks, the selection stays
+        e.ctrl_held = true;
+        let _ = e.focus_move(FocusDir::Down);
+        assert_eq!(e.focus_item, Some(2));
+        assert_eq!(e.selected.iter().copied().collect::<Vec<_>>(), vec![1]);
+        e.ctrl_held = false;
+    }
+
+    #[test]
+    fn space_toggles_the_idle_item() {
+        let mut e = explorer(3);
+        e.view_index = e.view_cfg.presets.details;
+        // rectangle on the first item (the default), invisible
+        assert!(!e.focus_shown);
+        let _ = e.focus_space();
+        assert!(e.focus_shown);
+        assert!(e.selected.contains(&0));
+        // Ctrl+Space accumulate: walk to item 2, add it
+        e.ctrl_held = true;
+        let _ = e.focus_move(FocusDir::Down);
+        let _ = e.focus_move(FocusDir::Down);
+        let _ = e.focus_space();
+        assert_eq!(e.selected.iter().copied().collect::<Vec<_>>(), vec![0, 2]);
+        e.ctrl_held = false;
+        // Space on a selected item releases it
+        let _ = e.focus_space();
+        assert_eq!(e.selected.iter().copied().collect::<Vec<_>>(), vec![0]);
+    }
+
+    #[test]
+    fn free_space_click_shows_rectangle_on_first_released() {
+        let mut e = explorer(5);
+        e.view_index = e.view_cfg.presets.details;
+        e.selected.insert(2);
+        e.selected.insert(4);
+        e.focus_shown = false;
+        let _ = e.update(Message::MarqueeBegin { x: 5.0, y: 5.0 });
+        let _ = e.update(Message::MarqueeEnd);
+        // the selection is released…
+        assert!(e.selected.is_empty());
+        // …and the idle selector borders the first released item
+        assert_eq!(e.focus_item, Some(2));
+        assert!(e.focus_shown);
+    }
 }
