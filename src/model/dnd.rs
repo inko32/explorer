@@ -105,6 +105,19 @@ impl Explorer {
         self.status = format!("Dragging {n} item{}", if n == 1 { "" } else { "s" });
     }
 
+    /// The drag image renders in OUTPUT space (the compositor shows it
+    /// at the cursor over any surface), where surface-local units map to
+    /// physical pixels via `output_scale / buffer_scale`. With integer
+    /// buffer scale `ls = ceil(output_scale)` and a paint factor of
+    /// `scale_dpi * ls / output_scale`, the icon lands at exactly
+    /// `scale_dpi` device px per logical unit at any --dpi (without this,
+    /// a 1.5x output enlarges a scale-1 icon 1.5x).
+    fn wl_paint_scale(&self) -> (f32, i32) {
+        let out = self.system_scale.max(0.01);
+        let ls = out.ceil().max(1.0) as i32;
+        (self.scale_dpi() * ls as f32 / out, ls)
+    }
+
     /// The simulated drag crossed the window edge: hand it to the
     /// compositor. The implicit grab keeps the press serial valid, so
     /// `start_drag` succeeds even though the press happened earlier.
@@ -124,20 +137,21 @@ impl Explorer {
         } else {
             crate::ui_common::skin::light()
         };
+        let (paint, ls) = self.wl_paint_scale();
         let visual = crate::dnd_wayland::paint_drag_visual(
             items,
             self.dnd.top(),
             items.len(),
             &caption,
             &skin,
-            self.scale_dpi(),
+            paint,
         );
         let uris: Vec<String> = items.iter().map(|i| i.uri.clone()).collect();
         // Copy|Move advertised together (the core protocol has no link
         // action): the destination (or the compositor) resolves, like
         // our ambiguous-drop menu.
         use smithay_client_toolkit::reexports::client::protocol::wl_data_device_manager::DndAction as Wl;
-        wl.begin_drag(uris, Wl::Copy | Wl::Move, visual);
+        wl.begin_drag(uris, Wl::Copy | Wl::Move, ls, visual);
         self.dnd_wl_drag = true;
     }
 
@@ -180,13 +194,14 @@ impl Explorer {
             crate::ui_common::skin::light()
         };
         let caption = self.wayland_caption();
+        let (paint, _) = self.wl_paint_scale();
         let visual = crate::dnd_wayland::paint_drag_visual(
             items,
             self.dnd.top(),
             items.len(),
             &caption,
             &skin,
-            self.scale_dpi(),
+            paint,
         );
         wl.update_visual(visual);
     }
@@ -299,6 +314,7 @@ impl Explorer {
             nav_target: None,
             bar: None,
         });
+        self.menu_popup_open();
     }
 
     /// §5.4/§12: the single place a drop becomes a file operation.

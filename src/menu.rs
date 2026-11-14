@@ -135,7 +135,7 @@ impl Default for LayoutCfg {
             icon_size: 16.0,
             separator_height: 9.0,
             pad_h: 6.0,
-            font_size: 12.0,
+            font_size: 13.0,
             corner_radius: 0.0,
             popup: false,
         }
@@ -685,7 +685,7 @@ pub fn view<'a>(open: &'a Open, cfg: &'a MenuCfg, skin: skin::Skin) -> Element<'
 /// the border, or below the last item. Mirrors the fixed row geometry
 /// of `view` (items of `item_height`, separators of `separator_height`,
 /// content starting after the 1px border).
-fn hover_at(entries: &[Entry], y: f32, l: &LayoutCfg) -> Option<usize> {
+pub(crate) fn hover_at(entries: &[Entry], y: f32, l: &LayoutCfg) -> Option<usize> {
     let mut top = crate::theme::border_w(1.0);
     for (i, e) in entries.iter().enumerate() {
         let h = match e {
@@ -1028,6 +1028,152 @@ mod tests {
             assert_eq!(c.settings.menu_click_through.0, want, "menu_click_through: {v}");
         }
     }
+}
+
+/// Off-window popup painting (Wayland xdg_popup via the side channel):
+/// a pixel sibling of [`view`] with the same geometry constants and
+/// colors, but real text metrics (available here, unlike in view()).
+/// Returns the premultiplied-RGBA pixels to upload.
+pub fn paint_popup(
+    open: &Open,
+    cfg: &MenuCfg,
+    skin: skin::Skin,
+    scale: f32,
+) -> Option<crate::dnd_wayland::DragVisual> {
+    use crate::dnd_wayland::{draw_text_weighted, text_size_weighted, Canvas};
+
+    let l = &cfg.layout;
+    let scale = scale.max(1.0);
+    let border = crate::theme::border_w(1.0);
+    if open.entries.is_empty() {
+        return None;
+    }
+
+    // --- width: real metrics, same paddings as `view` ---
+    let mut content_w = l.min_width;
+    for e in &open.entries {
+        if let Entry::Item(i) = e {
+            let label = text_size_weighted(&i.label, l.font_size * scale, i.bold).0 / scale;
+            let w = l.gutter
+                + label
+                + if i.shortcut.is_empty() {
+                    0.0
+                } else {
+                    l.gutter + text_size_weighted(&i.shortcut, l.font_size * scale, false).0 / scale
+                }
+                + l.pad_h
+                + 4.0;
+            content_w = content_w.max(w);
+        }
+    }
+    let w = ((content_w + border * 2.0) * scale).ceil() as u32;
+
+    // --- height: the fixed row geometry of `hover_at` ---
+    let rows_h: f32 = open
+        .entries
+        .iter()
+        .map(|e| match e {
+            Entry::Item(_) => l.item_height,
+            Entry::Sep => l.separator_height,
+        })
+        .sum();
+    let h = ((rows_h + border * 2.0) * scale).ceil() as u32;
+
+    let mut px = vec![0u8; (w * h * 4) as usize];
+    let mut cv = Canvas { px: &mut px, w, h };
+
+    // drop shadow (the in-window menu's blur becomes a flat plate here)
+    let shadow = [skin.text.r, skin.text.g, skin.text.b]
+        .map(|c| (c * 255.0) as u8);
+    cv.fill_rect(
+        scale,
+        border + 2.0,
+        border + 2.0,
+        content_w + border,
+        rows_h + border,
+        iced::Color::from_rgba8(shadow[0], shadow[1], shadow[2], 0.25),
+        96,
+    );
+
+    // frame + background
+    cv.fill_rect(1.0, 0.0, 0.0, w as f32, h as f32, skin.menu_bg, 255);
+    cv.stroke_rect(0.0, 0.0, w as f32, h as f32, skin.menu_border);
+
+    // --- rows ---
+    let mut top = border;
+    for (i, entry) in open.entries.iter().enumerate() {
+        match entry {
+            Entry::Sep => {
+                // 1px line after the icon gutter, vertically centered
+                let y = (top + l.separator_height / 2.0) * scale;
+                let x0 = (border + l.gutter) * scale;
+                let x1 = (border + content_w - l.pad_h) * scale;
+                let line = crate::dnd_wayland::rgba255(skin.menu_section_border);
+                let xx = x0 as i32;
+                let yy = y as i32;
+                for x in xx..x1 as i32 {
+                    cv.blend(x, yy, line, 255);
+                }
+                top += l.separator_height;
+            }
+            Entry::Item(item) => {
+                let row_top = top;
+                if item.enabled && open.hover == Some(i) {
+                    // fill and border both go through the same scale
+                    cv.fill_rect(scale, border, row_top, content_w, l.item_height, skin.hover, 255);
+                    cv.stroke_rect(border * scale, row_top * scale, content_w * scale, l.item_height * scale, skin.nav_hover_border);
+                }
+                // icon (rasterized from the active pack)
+                if let Some(name) = &item.icon {
+                    let icon = crate::icon::raster(name, (l.icon_size * scale).round() as u32, &skin);
+                    let ix = border + (l.gutter - l.icon_size) / 2.0;
+                    let iy = row_top + (l.item_height - l.icon_size) / 2.0;
+                    cv.blend_icon(1.0, ix, iy, l.icon_size, &icon, 255);
+                }
+                let color = if item.enabled { skin.text } else { skin.disabled };
+                let c = crate::dnd_wayland::rgba255(color);
+                let size = l.font_size * scale;
+                let (tw, th) = text_size_weighted(&item.label, size, item.bold);
+                let tx = (border + l.gutter) * scale;
+                let ty = (row_top + (l.item_height - th / scale) / 2.0) * scale;
+                draw_text_weighted(&mut cv, tx, ty, size, &item.label, c, item.bold);
+                if !item.shortcut.is_empty() {
+                    let sx = (border + l.gutter + tw / scale + l.gutter) * scale;
+                    let (sw, sh) = text_size_weighted(&item.shortcut, size, false);
+                    let sy = (row_top + (l.item_height - sh / scale) / 2.0) * scale;
+                    draw_text_weighted(&mut cv, sx, sy, size, &item.shortcut, crate::dnd_wayland::rgba255(skin.subtle), false);
+                    let _ = sw;
+                }
+                top += l.item_height;
+            }
+        }
+    }
+
+    if std::env::var_os("EXPLORER_DEBUG").is_some() {
+        // straight-alpha PNG dump of exactly what gets uploaded
+        let mut straight = px.clone();
+        let (chunks, _) = straight.as_chunks_mut::<4>();
+        for b in chunks {
+            let a = b[3] as u32;
+            for c in &mut b[..3] {
+                // un-premultiply (debug dump only): a == 0 stays 0
+                *c = ((*c as u32).checked_mul(255).and_then(|v| v.checked_div(a)).unwrap_or(0)) as u8;
+            }
+        }
+        let _ = ::image::save_buffer(
+            "/tmp/menu_dump.png",
+            &straight,
+            w,
+            h,
+            ::image::ExtendedColorType::Rgba8,
+        );
+    }
+
+    Some(crate::dnd_wayland::DragVisual {
+        width: w,
+        height: h,
+        pixels: px,
+    })
 }
 
 /// Menu layer for ui.rs (default in-window rendering): the floated menu

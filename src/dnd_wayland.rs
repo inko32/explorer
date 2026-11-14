@@ -69,11 +69,27 @@ enum Cmd {
     BeginDrag {
         uris: Vec<String>,
         actions: DndAction,
+        /// wl buffer scale for the icon surface (ceil(output scale))
+        scale: i32,
         visual: DragVisual,
     },
     /// Re-paint the drag image while a drag is live (caption changes
     /// when the modifier-derived action changes).
     UpdateVisual(DragVisual),
+    /// Open an off-window menu popup (xdg_popup), showing the painted
+    /// pixels. The anchor is the thread's own tracked pointer position
+    /// (parent surface-local — exact, no unit conversion). `to_model`
+    /// converts popup-local input coords back to model-logical units
+    /// (popup_scale / painted_scale).
+    OpenPopup {
+        to_model: f32,
+        scale: i32,
+        visual: DragVisual,
+    },
+    /// Re-paint an open popup (hover changes).
+    UpdatePopup(DragVisual),
+    /// Close the popup.
+    ClosePopup,
 }
 
 /// A fully painted drag image: premultiplied RGBA pixels. The hotspot
@@ -99,6 +115,15 @@ pub enum Event {
     /// The drag we started ended: `performed` = a destination took the
     /// data; false = cancelled (Esc / no accepting target).
     DragFinished { performed: bool },
+    /// Pointer moved over the menu popup, popup-local logical coords.
+    PopupMotion { x: f32, y: f32 },
+    /// Left press on the menu popup (popup-local logical coords).
+    PopupPress { x: f32, y: f32 },
+    /// The compositor dismissed the popup (outside click).
+    PopupDone,
+    /// A key pressed while the popup holds the grab: the raw xkb
+    /// keysym (Esc = 0xff1b).
+    PopupKey { keysym: u32 },
 }
 
 /// GUI-side handle to the side-channel thread.
@@ -109,16 +134,33 @@ pub struct Handle {
 }
 
 impl Handle {
-    pub fn begin_drag(&self, uris: Vec<String>, actions: DndAction, visual: DragVisual) {
+    pub fn begin_drag(&self, uris: Vec<String>, actions: DndAction, scale: i32, visual: DragVisual) {
         self.send(Cmd::BeginDrag {
             uris,
             actions,
+            scale,
             visual,
         });
     }
 
     pub fn update_visual(&self, visual: DragVisual) {
         self.send(Cmd::UpdateVisual(visual));
+    }
+
+    pub fn open_popup(&self, to_model: f32, scale: i32, visual: DragVisual) {
+        self.send(Cmd::OpenPopup {
+            to_model,
+            scale,
+            visual,
+        });
+    }
+
+    pub fn update_popup(&self, visual: DragVisual) {
+        self.send(Cmd::UpdatePopup(visual));
+    }
+
+    pub fn close_popup(&self) {
+        self.send(Cmd::ClosePopup);
     }
 
     fn send(&self, cmd: Cmd) {
@@ -138,16 +180,16 @@ pub fn init_channel() -> EventSender {
 }
 
 /// Wrap winit's Wayland objects and spawn the side-channel thread.
-/// `handles` is `(wl_surface, wl_display)` from
+/// `handles` is `(wl_surface, wl_display, xdg_toplevel)` from
 /// `iced::window::raw_handle`; `ev_tx` comes from [`init_channel`].
 /// `None` when the platform is not Wayland or the wrap fails (the app
-/// then simply has no native DnD).
+/// then simply has no native DnD/popups).
 ///
 /// The thread must never panic: the release profile aborts the process
 /// on any panic, so every fallible call in it is handled.
-pub fn spawn(handles: (usize, usize), ev_tx: EventSender) -> Option<Handle> {
-    let (surface, display) = handles;
-    if surface == 0 || display == 0 {
+pub fn spawn(handles: (usize, usize, usize), ev_tx: EventSender) -> Option<Handle> {
+    let (surface, display, toplevel) = handles;
+    if surface == 0 || display == 0 || toplevel == 0 {
         return None;
     }
     let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<Cmd>();
@@ -155,7 +197,7 @@ pub fn spawn(handles: (usize, usize), ev_tx: EventSender) -> Option<Handle> {
 
     std::thread::Builder::new()
         .name("explorer-dnd".into())
-        .spawn(move || thread_main(surface, display, cmd_rx, ev_tx, wake_r))
+        .spawn(move || thread_main(surface, display, toplevel, cmd_rx, ev_tx, wake_r))
         .ok()?;
 
     Some(Handle {
@@ -182,11 +224,12 @@ macro_rules! trace {
 fn thread_main(
     surface_ptr: usize,
     display_ptr: usize,
+    toplevel_ptr: usize,
     cmds: std::sync::mpsc::Receiver<Cmd>,
     ev_tx: EventSender,
     wake_r: std::os::unix::io::OwnedFd,
 ) {
-    let result = run(surface_ptr, display_ptr, &cmds, &ev_tx, &wake_r);
+    let result = run(surface_ptr, display_ptr, toplevel_ptr, &cmds, &ev_tx, &wake_r);
     if let Err(e) = result {
         eprintln!("dnd-wayland: side-channel stopped: {e}");
     }
@@ -198,6 +241,7 @@ fn thread_main(
 fn run(
     surface_ptr: usize,
     display_ptr: usize,
+    toplevel_ptr: usize,
     cmds: &std::sync::mpsc::Receiver<Cmd>,
     ev_tx: &EventSender,
     wake_r: &std::os::unix::io::OwnedFd,
@@ -216,6 +260,16 @@ fn run(
     let origin_id = unsafe { ObjectId::from_ptr(WlSurface::interface(), surface_ptr as *mut _) }
         .map_err(|e| e.to_string())?;
     let origin = WlSurface::from_id(&conn, origin_id).map_err(|e| e.to_string())?;
+    // the window's xdg_toplevel, wrapped for the popup parent chain
+    // SAFETY: same — winit owns it, same client, outlives the thread's
+    // use of it (the window never goes away in this app)
+    use smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::XdgToplevel;
+    let toplevel_id =
+        unsafe { ObjectId::from_ptr(XdgToplevel::interface(), toplevel_ptr as *mut _) }
+        .map_err(|e| e.to_string())?;
+    let toplevel = XdgToplevel::from_id(&conn, toplevel_id).map_err(|e| e.to_string())?;
+    let parent = smithay_client_toolkit::shell::xdg::window::Window::from_xdg_toplevel(&toplevel)
+        .ok_or("xdg_toplevel is not an sctk-managed window")?;
 
     // Our own registry + queue on winit's connection.
     let (globals, mut queue) = registry_queue_init::<State>(&conn).map_err(|e| e.to_string())?;
@@ -224,7 +278,10 @@ fn run(
     let shm = Shm::bind(&globals, &qh).map_err(|e| e.to_string())?;
     let compositor = CompositorState::bind(&globals, &qh).map_err(|e| e.to_string())?;
     let ddm = DataDeviceManagerState::bind(&globals, &qh).map_err(|e| e.to_string())?;
+    let xdg = smithay_client_toolkit::shell::xdg::XdgShell::bind(&globals, &qh)
+        .map_err(|e| e.to_string())?;
     let icon_pool = SlotPool::new(256 * 256 * 4, &shm).map_err(|e| e.to_string())?;
+    let popup_pool = SlotPool::new(512 * 1024, &shm).map_err(|e| e.to_string())?;
     let mut state = State {
         registry_state: RegistryState::new(&globals),
         seat_state: SeatState::new(&globals, &qh),
@@ -232,14 +289,20 @@ fn run(
         compositor,
         shm,
         ddm,
+        xdg,
+        parent,
+        popup: None,
+        popup_pool,
         device: None,
         origin,
         icon_pool,
         icon_surface: None,
         icon_buffer: None,
+        icon_scale: 1,
         source: None,
         payload: Vec::new(),
         last_serial: 0,
+        ptr_pos: (0.0, 0.0),
         hover_mimes: Vec::new(),
         pending: Vec::new(),
         ev_tx: ev_tx.clone(),
@@ -346,20 +409,87 @@ struct State {
     device: Option<DataDevice>,
     /// the explorer window surface (wrapped foreign object) — drag origin
     origin: WlSurface,
+    xdg: smithay_client_toolkit::shell::xdg::XdgShell,
+    /// the window's xdg_toplevel wrapper — the popup parent chain
+    parent: smithay_client_toolkit::shell::xdg::window::Window,
+    /// the open off-window menu popup, if any
+    popup: Option<PopupState>,
+    popup_pool: SlotPool,
     icon_pool: SlotPool,
     icon_surface: Option<WlSurface>,
     icon_buffer: Option<Buffer>,
+    /// wl buffer scale of the icon surface (output-space rendering)
+    icon_scale: i32,
     /// live drag: dropping it cancels the drag (SCTK destroys the source)
     source: Option<smithay_client_toolkit::data_device_manager::data_source::DragSource>,
     /// uri-list bytes served to the destination on request
     payload: Vec<u8>,
     /// serial of the last left-button press (grab serial for start_drag)
     last_serial: u32,
+    /// last pointer position over the window, in PARENT SURFACE-LOCAL
+    /// coordinates — the only exact anchor for popups (model-logical
+    /// units differ from surface-local under DPI)
+    ptr_pos: (f64, f64),
     /// MIMEs of the drag currently hovering our window
     hover_mimes: Vec<String>,
     /// accepted drops being read from their pipes
     pending: Vec<PendingRead>,
     ev_tx: EventSender,
+}
+
+/// xdg_positioner userdata: the positioner has no events, but
+/// wayland-client still wants a Dispatch impl — a local type keeps it
+/// off the delegate_dispatch2 blanket (and the orphan rule blocks
+/// implementing sctk's Dispatch2 for sctk's GlobalData).
+struct PosData;
+
+impl<D> smithay_client_toolkit::dispatch2::Dispatch2<
+    smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_positioner::XdgPositioner,
+    D,
+> for PosData
+{
+    fn event(
+        &self,
+        _: &mut D,
+        _: &smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_positioner::XdgPositioner,
+        _: smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_positioner::Event,
+        _: &Connection,
+        _: &QueueHandle<D>,
+    ) {
+    }
+}
+
+/// Copy menu pixels into a fresh buffer on the popup surface (new
+/// slot every paint; the compositor may hold the previous one).
+fn commit_popup_pixels(pool: &mut SlotPool, popup: &mut PopupState, visual: DragVisual) {
+    let (w, h) = (visual.width.max(1), visual.height.max(1));
+    let Ok((buffer, canvas)) = pool.create_buffer(
+        w as i32,
+        h as i32,
+        w as i32 * 4,
+        wayland_client::protocol::wl_shm::Format::Argb8888,
+    ) else {
+        return;
+    };
+    let src = swizzle(&visual.pixels);
+    let Some(dst) = canvas.get_mut(..src.len()) else {
+        return;
+    };
+    dst.copy_from_slice(&src);
+    let surface = popup.popup.wl_surface();
+    surface.damage_buffer(0, 0, w as i32, h as i32);
+    if buffer.attach_to(surface).is_ok() {
+        surface.commit();
+    }
+}
+
+/// An open xdg_popup hosting an off-window menu.
+struct PopupState {
+    popup: smithay_client_toolkit::shell::xdg::popup::Popup,
+    /// pixels waiting for the first configure before they can attach
+    pending: Option<DragVisual>,
+    /// popup-local -> model-logical factor (hover hit-testing)
+    to_model: f32,
 }
 
 struct PendingRead {
@@ -378,6 +508,7 @@ impl State {
             Cmd::BeginDrag {
                 uris,
                 actions,
+                scale,
                 visual,
             } => {
                 if self.device.is_none() {
@@ -386,6 +517,15 @@ impl State {
                 // a stale source can only be a drag whose terminal event
                 // we have not dispatched yet — cancel it and take over
                 self.source.take();
+                // the drag icon renders in OUTPUT space (compositor
+                // shows it at the cursor), so it needs an explicit
+                // buffer scale — without it a 1.5x output enlarges the
+                // icon 1.5x. Recreate the surface when the scale
+                // changes (buffer scale is fixed per surface).
+                if self.icon_scale != scale {
+                    self.icon_surface = None;
+                    self.icon_scale = scale;
+                }
                 let source = self.ddm.create_drag_and_drop_source(
                     qh,
                     ["text/uri-list", "text/plain;charset=utf-8"],
@@ -410,6 +550,61 @@ impl State {
                     self.ensure_icon(qh, &visual);
                 }
             }
+            Cmd::OpenPopup {
+                to_model,
+                scale,
+                visual,
+            } => {
+                // replace any open popup
+                self.popup = None;
+                let anchor = (self.ptr_pos.0.round() as i32, self.ptr_pos.1.round() as i32);
+                let pos = self.xdg.xdg_wm_base().create_positioner(qh, PosData);
+                let (w, h) = (visual.width.max(1) as i32, visual.height.max(1) as i32);
+                // logical size/anchor: the parent surface-local space
+                let ls = scale.max(1);
+                pos.set_size(w / ls, h / ls);
+                pos.set_anchor_rect(anchor.0, anchor.1, 1, 1);
+                use smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_positioner::{
+                    Anchor, ConstraintAdjustment, Gravity,
+                };
+                pos.set_anchor(Anchor::TopLeft);
+                // the surface is placed TOWARDS the gravity: bottom_right
+                // puts the menu's top-left at the cursor (extends
+                // down-right); the constraint adjustment flips it at
+                // screen edges
+                pos.set_gravity(Gravity::BottomRight);
+                // let the compositor flip/slide the menu to stay on screen
+                pos.set_constraint_adjustment(
+                    ConstraintAdjustment::FlipX
+                        | ConstraintAdjustment::FlipY
+                        | ConstraintAdjustment::SlideX
+                        | ConstraintAdjustment::SlideY,
+                );
+                use smithay_client_toolkit::shell::xdg::XdgSurface as _;
+                if let Ok(popup) = smithay_client_toolkit::shell::xdg::popup::Popup::new(
+                    self.parent.xdg_surface(),
+                    &pos,
+                    qh,
+                    &self.compositor,
+                    &self.xdg,
+                ) {
+                    popup.wl_surface().set_buffer_scale(ls);
+                    self.popup = Some(PopupState {
+                        popup,
+                        pending: Some(visual),
+                        to_model,
+                    });
+                }
+                pos.destroy();
+            }
+            Cmd::UpdatePopup(visual) => {
+                if let Some(p) = &mut self.popup {
+                    commit_popup_pixels(&mut self.popup_pool, p, visual);
+                }
+            }
+            Cmd::ClosePopup => {
+                self.popup = None;
+            }
         }
     }
 
@@ -428,7 +623,9 @@ impl State {
             .create_buffer(w as i32, h as i32, w as i32 * 4, wayland_client::protocol::wl_shm::Format::Argb8888)
             .ok()?;
         if self.icon_surface.is_none() {
-            self.icon_surface = Some(self.compositor.create_surface(qh));
+            let surface = self.compositor.create_surface(qh);
+            surface.set_buffer_scale(self.icon_scale.max(1));
+            self.icon_surface = Some(surface);
         }
         let src = swizzle(&visual.pixels);
         // the pool may pad the slot past w*h*4
@@ -487,6 +684,42 @@ impl CompositorHandler for State {
     fn surface_leave(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlSurface, _: &WlOutput) {}
 }
 
+fn return_btn(b: u32) -> &'static str {
+    match b {
+        0x110 => "press-left",
+        0x111 => "press-right",
+        _ => "press-other",
+    }
+}
+
+fn return_rel(b: u32) -> &'static str {
+    match b {
+        0x110 => "rel-left",
+        0x111 => "rel-right",
+        _ => "rel-other",
+    }
+}
+
+impl smithay_client_toolkit::shell::xdg::window::WindowHandler for State {
+    fn request_close(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &smithay_client_toolkit::shell::xdg::window::Window,
+    ) {
+    }
+
+    fn configure(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &smithay_client_toolkit::shell::xdg::window::Window,
+        _: smithay_client_toolkit::shell::xdg::window::WindowConfigure,
+        _: u32,
+    ) {
+    }
+}
+
 impl OutputHandler for State {
     fn output_state(&mut self) -> &mut OutputState {
         &mut self.output_state
@@ -509,6 +742,10 @@ impl SeatHandler for State {
             let _pointer = self.seat_state.get_pointer(qh, &seat);
             self.device = Some(self.ddm.get_data_device(qh, &seat));
         }
+        if capability == Capability::Keyboard {
+            // menu popup keys: Esc dismissal (and later, arrow-key nav)
+            let _keyboard = self.seat_state.get_keyboard(qh, &seat, None);
+        }
     }
     fn remove_capability(&mut self, _: &Connection, _: &QueueHandle<Self>, _: WlSeat, capability: Capability) {
         if capability == Capability::Pointer {
@@ -522,11 +759,165 @@ impl PointerHandler for State {
     fn pointer_frame(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlPointer, events: &[PointerEvent]) {
         use PointerEventKind::*;
         for e in events {
+            if std::env::var_os("EXPLORER_DEBUG").is_some() {
+                let kind = match e.kind {
+                    Motion { .. } => "motion",
+                    Press { button, .. } => return_btn(button),
+                    Release { button, .. } => return_rel(button),
+                    Enter { .. } => "enter",
+                    Leave { .. } => "leave",
+                    _ => "other",
+                };
+                let on_popup = self
+                    .popup
+                    .as_ref()
+                    .map(|p| &e.surface == p.popup.wl_surface())
+                    .unwrap_or(false);
+                eprintln!(
+                    "[ptr] {kind} surface={} popup={on_popup} pos=({:.0},{:.0})",
+                    if e.surface == self.origin { "origin".into() } else { format!("{:?}", e.surface.id()) },
+                    e.position.0,
+                    e.position.1
+                );
+            }
+            // menu popup input (the popup is our client's surface, so
+            // our pointer binding receives its events while the grab
+            // lasts; the main window never sees them)
+            if let Some(p) = &self.popup
+                && &e.surface == p.popup.wl_surface()
+            {
+                // popup-local -> model-logical for hit-testing
+                let f = p.to_model;
+                let (x, y) = (e.position.0 as f32 * f, e.position.1 as f32 * f);
+                match e.kind {
+                    Motion { .. } => {
+                        let _ = self.ev_tx.unbounded_send(Event::PopupMotion { x, y });
+                    }
+                    Press { button, .. } if button == BTN_LEFT => {
+                        let _ = self.ev_tx.unbounded_send(Event::PopupPress { x, y });
+                    }
+                    _ => {}
+                }
+                continue;
+            }
             match e.kind {
-                Press { button, serial, .. } if button == BTN_LEFT => self.last_serial = serial,
+                // track the pointer over the window in surface-local
+                // coordinates (the exact popup anchor) — motion AND
+                // presses: a right-click that teleports without a motion
+                // event would otherwise leave the anchor stale at (0,0)
+                Motion { .. } | Press { .. } | Enter { .. } => {
+                    self.ptr_pos = e.position;
+                    if let Press { button, serial, .. } = e.kind
+                        && button == BTN_LEFT
+                    {
+                        // a press on the main window while the popup is
+                        // open is an outside click (popup_done is not
+                        // guaranteed on all compositors)
+                        if self.popup.is_some() {
+                            self.popup = None;
+                            let _ = self.ev_tx.unbounded_send(Event::PopupDone);
+                        }
+                        self.last_serial = serial;
+                    }
+                }
                 _ => {}
             }
         }
+    }
+}
+
+impl smithay_client_toolkit::shell::xdg::popup::PopupHandler for State {
+    fn configure(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &smithay_client_toolkit::shell::xdg::popup::Popup,
+        _: smithay_client_toolkit::shell::xdg::popup::PopupConfigure,
+    ) {
+        // first configure: attach the waiting pixels
+        if let Some(p) = &mut self.popup
+            && let Some(visual) = p.pending.take()
+        {
+            commit_popup_pixels(&mut self.popup_pool, p, visual);
+        }
+    }
+
+    fn done(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &smithay_client_toolkit::shell::xdg::popup::Popup) {
+        if self.popup.is_some() {
+            self.popup = None;
+            let _ = self.ev_tx.unbounded_send(Event::PopupDone);
+        }
+    }
+}
+
+impl smithay_client_toolkit::seat::keyboard::KeyboardHandler for State {
+    fn enter(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wayland_client::protocol::wl_keyboard::WlKeyboard,
+        _: &WlSurface,
+        _: u32,
+        _: &[u32],
+        _: &[smithay_client_toolkit::seat::keyboard::Keysym],
+    ) {
+    }
+
+    fn leave(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wayland_client::protocol::wl_keyboard::WlKeyboard,
+        _: &WlSurface,
+        _: u32,
+    ) {
+    }
+
+    fn press_key(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wayland_client::protocol::wl_keyboard::WlKeyboard,
+        _: u32,
+        event: smithay_client_toolkit::seat::keyboard::KeyEvent,
+    ) {
+        if self.popup.is_some() {
+            let _ = self.ev_tx.unbounded_send(Event::PopupKey {
+                keysym: event.keysym.raw(),
+            });
+        }
+    }
+
+    fn repeat_key(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wayland_client::protocol::wl_keyboard::WlKeyboard,
+        _: u32,
+        _: smithay_client_toolkit::seat::keyboard::KeyEvent,
+    ) {
+    }
+
+    fn release_key(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wayland_client::protocol::wl_keyboard::WlKeyboard,
+        _: u32,
+        _: smithay_client_toolkit::seat::keyboard::KeyEvent,
+    ) {
+    }
+
+    fn update_modifiers(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wayland_client::protocol::wl_keyboard::WlKeyboard,
+        _: u32,
+        _: smithay_client_toolkit::seat::keyboard::Modifiers,
+        _: smithay_client_toolkit::seat::keyboard::RawModifiers,
+        _: u32,
+    ) {
     }
 }
 
@@ -659,11 +1050,11 @@ smithay_client_toolkit::delegate_dispatch2!(State);
 /// in-window overlay (`ui::drag_caption` + `ui::drag_icon_badge`) shows,
 /// composed into one surface (Wayland has a single drag icon).
 ///
-/// Layout matches the overlay exactly (ui.rs): the caption plate sits at
-/// (cursor + 16, cursor + 20); the badge's top-left is
-/// (cursor + 16 - 50 - 19, cursor + 20 - 50 - 19). The surface hotspot is
-/// (0,0), so content is drawn at (0,0) = badge top-left and the caption
-/// plate at (69, 69).
+/// Geometry is SHARED with the in-window overlays (ui.rs): the badge's
+/// top-left sits at cursor + (2,2), the caption plate at cursor +
+/// (71,71). The drag surface's hotspot is fixed at its top-left corner
+/// (= the cursor), which cannot express "cursor inside the bbox" — so
+/// both hosts use this same origin and the handoff is seamless.
 pub fn paint_drag_visual(
     items: &[crate::dnd::DraggedItem],
     top: Option<&str>,
@@ -698,14 +1089,15 @@ pub fn paint_drag_visual(
     // caption_tl - badge_tl = ((DX) - (DX - BADGE - GAP), (DY) - (DY - BADGE - GAP))
     //                      = (BADGE + GAP, BADGE + GAP) = (69, 69)
     let plate_at = BADGE + GAP; // 69
-    let w = ((plate_at + pw).max(BADGE) * scale).ceil() as u32;
-    let h = ((plate_at + ph).max(BADGE) * scale).ceil() as u32;
+    let w = ((plate_at + pw + OFF).max(BADGE + OFF) * scale).ceil() as u32;
+    let h = ((plate_at + ph + OFF).max(BADGE + OFF) * scale).ceil() as u32;
     let mut px = vec![0u8; (w * h * 4) as usize];
     let mut cv = Canvas { px: &mut px, w, h };
 
-    // --- the badge square (accent @ 0.6) ---
+    // --- the badge square (accent @ 0.6), offset (2,2) from the hotspot
     let accent = skin.accent;
-    cv.fill_rect(scale, 0.0, 0.0, BADGE, BADGE, accent, FADE);
+    const OFF: f32 = 2.0;
+    cv.fill_rect(scale, OFF, OFF, BADGE, BADGE, accent, FADE);
 
     // --- the icon stack, deepest first ---
     let top = top.map(str::to_string);
@@ -729,18 +1121,18 @@ pub fn paint_drag_visual(
             .and_then(|p| p.file_name().map(|f| f.to_string_lossy().into_owned()))
             .unwrap_or_else(|| it.uri.clone());
         let icon = icon_pix(skin, it.kind == crate::dnd::ItemKind::Directory, &name, icon_size * scale);
-        cv.blend_icon(scale, PAD + off, PAD + off, icon_size, &icon, FADE);
+        cv.blend_icon(scale, OFF + PAD + off, OFF + PAD + off, icon_size, &icon, FADE);
     }
 
     // --- the count plate (solid accent, bottom-left) ---
     if total > 1 {
-        cv.fill_rect(scale, BADGE - COUNT, BADGE - COUNT, COUNT, COUNT, accent, 255);
+        cv.fill_rect(scale, OFF + BADGE - COUNT, OFF + BADGE - COUNT, COUNT, COUNT, accent, 255);
         let label = total.to_string();
         let (tw, th) = text_size(&label, 11.0 * scale);
         draw_text(
             &mut cv,
-            (BADGE - COUNT + (COUNT - tw / scale) / 2.0) * scale,
-            (BADGE - COUNT + (COUNT - th / scale) / 2.0) * scale,
+            (OFF + BADGE - COUNT + (COUNT - tw / scale) / 2.0) * scale,
+            (OFF + BADGE - COUNT + (COUNT - th / scale) / 2.0) * scale,
             11.0 * scale,
             &label,
             [255, 255, 255, 255],
@@ -749,8 +1141,8 @@ pub fn paint_drag_visual(
 
     // --- the caption plate ---
     if let Some((pw, ph, text)) = plate {
-        let x = plate_at * scale;
-        let y = plate_at * scale;
+        let x = (plate_at + OFF) * scale;
+        let y = (plate_at + OFF) * scale;
         let pw = pw * scale;
         let ph = ph * scale;
         cv.fill_rect(1.0, x, y, pw, ph, skin.menu_bg, 255);
@@ -792,33 +1184,18 @@ fn icon_pix(skin: &crate::theme::Palette, is_dir: bool, name: &str, size: f32) -
     crate::icon::raster_for(is_dir, name, size.round().max(1.0) as u32, skin)
 }
 
-fn raster_svg_str(svg: &str, _size: f32) -> crate::icon::IconPix {
-    // reuse the icon module's rasterizer through a throwaway builtin name?
-    // simplest: inline parse via resvg here
-    let tree = resvg::usvg::Tree::from_data(svg.as_bytes(), &Default::default());
-    match tree {
-        Ok(tree) => {
-            let size = tree.size();
-            let (w, h) = (size.width().ceil().max(1.0) as u32, size.height().ceil().max(1.0) as u32);
-            let mut pm = resvg::tiny_skia::Pixmap::new(w, h).unwrap();
-            resvg::render(&tree, resvg::tiny_skia::Transform::default(), &mut pm.as_mut());
-            crate::icon::IconPix {
-                width: w,
-                height: h,
-                pixels: pm.data().to_vec(),
-            }
-        }
-        Err(_) => crate::icon::IconPix {
-            width: 1,
-            height: 1,
-            pixels: vec![0; 4],
-        },
-    }
+fn raster_svg_str(svg: &str, size: f32) -> crate::icon::IconPix {
+    crate::icon::raster_svg(svg, size.round().max(1.0) as u32).unwrap_or(crate::icon::IconPix {
+        width: 1,
+        height: 1,
+        pixels: vec![0; 4],
+    })
 }
 
 // --- tiny raster helpers (all coordinates physical px unless *scale) ---
+// pub(crate): shared with the off-window menu painter (menu popup)
 
-fn rgba255(c: iced::Color) -> [u8; 4] {
+pub(crate) fn rgba255(c: iced::Color) -> [u8; 4] {
     [
         (c.r * 255.0) as u8,
         (c.g * 255.0) as u8,
@@ -827,15 +1204,15 @@ fn rgba255(c: iced::Color) -> [u8; 4] {
     ]
 }
 
-struct Canvas<'a> {
-    px: &'a mut [u8],
-    w: u32,
-    h: u32,
+pub(crate) struct Canvas<'a> {
+    pub(crate) px: &'a mut [u8],
+    pub(crate) w: u32,
+    pub(crate) h: u32,
 }
 
 impl Canvas<'_> {
     #[allow(clippy::too_many_arguments)]
-    fn fill_rect(&mut self, scale: f32, x: f32, y: f32, rw: f32, rh: f32, c: iced::Color, alpha: u16) {
+    pub(crate) fn fill_rect(&mut self, scale: f32, x: f32, y: f32, rw: f32, rh: f32, c: iced::Color, alpha: u16) {
         let c = rgba255(c);
         let x0 = (x * scale) as i32;
         let y0 = (y * scale) as i32;
@@ -848,7 +1225,7 @@ impl Canvas<'_> {
         }
     }
 
-    fn stroke_rect(&mut self, x: f32, y: f32, rw: f32, rh: f32, c: iced::Color) {
+    pub(crate) fn stroke_rect(&mut self, x: f32, y: f32, rw: f32, rh: f32, c: iced::Color) {
         let c = rgba255(c);
         let x1 = (x + rw - 1.0) as i32;
         let y1 = (y + rh - 1.0) as i32;
@@ -862,7 +1239,7 @@ impl Canvas<'_> {
         }
     }
 
-    fn blend_icon(&mut self, scale: f32, x: f32, y: f32, size: f32, icon: &crate::icon::IconPix, fade: u16) {
+    pub(crate) fn blend_icon(&mut self, scale: f32, x: f32, y: f32, size: f32, icon: &crate::icon::IconPix, fade: u16) {
         // fit the icon into size*size, centered, blended at `fade`/255
         let (iw, ih) = (icon.width as f32, icon.height as f32);
         if iw <= 0.0 || ih <= 0.0 {
@@ -893,7 +1270,7 @@ impl Canvas<'_> {
     }
 
     /// Source-over blend of `color` (premultiplied by mask) at (x, y).
-    fn blend(&mut self, x: i32, y: i32, color: [u8; 4], mask: u8) {
+    pub(crate) fn blend(&mut self, x: i32, y: i32, color: [u8; 4], mask: u8) {
         if x < 0 || y < 0 || x as u32 >= self.w || y as u32 >= self.h {
             return;
         }
@@ -926,10 +1303,30 @@ fn plate_size(text: &str, scale: f32) -> Option<(f32, f32, Option<String>)> {
 }
 
 fn text_size(text: &str, size: f32) -> (f32, f32) {
+    text_size_weighted(text, size, false)
+}
+
+/// Text attributes with the app's primary family (fonts.yaml fallback
+/// list) — the same face the in-window UI renders with.
+pub(crate) fn attrs(bold: bool) -> cosmic_text::Attrs<'static> {
+    let mut a = cosmic_text::Attrs::new();
+    if let iced::font::Family::Name(name) = crate::fonts::primary().family {
+        a = a.family(cosmic_text::Family::Name(name));
+    }
+    if bold {
+        a = a.weight(cosmic_text::Weight::BOLD);
+    }
+    a
+}
+
+/// Real text metrics (physical px). `bold` matches the menu's default
+/// action row.
+pub(crate) fn text_size_weighted(text: &str, size: f32, bold: bool) -> (f32, f32) {
     let mut ts = text_system().lock().unwrap();
     let (fs, _) = &mut *ts;
+    let attrs = attrs(bold);
     let mut buffer = cosmic_text::Buffer::new(fs, cosmic_text::Metrics::new(size, size * 1.25));
-    buffer.set_text(text, &cosmic_text::Attrs::new(), cosmic_text::Shaping::Basic, None);
+    buffer.set_text(text, &attrs, cosmic_text::Shaping::Basic, None);
     buffer.shape_until_scroll(fs, false);
     let mut w = 0.0f32;
     let mut h = 0.0f32;
@@ -940,22 +1337,47 @@ fn text_size(text: &str, size: f32) -> (f32, f32) {
     (w, h)
 }
 
-fn draw_text(cv: &mut Canvas, x: f32, y: f32, size: f32, text: &str, color: [u8; 4]) {
+/// Draw `text` with an optional bold weight (menus: default action).
+pub(crate) fn draw_text(cv: &mut Canvas, x: f32, y: f32, size: f32, text: &str, color: [u8; 4]) {
+    draw_text_weighted(cv, x, y, size, text, color, false)
+}
+
+pub(crate) fn draw_text_weighted(
+    cv: &mut Canvas,
+    x: f32,
+    y: f32,
+    size: f32,
+    text: &str,
+    color: [u8; 4],
+    bold: bool,
+) {
     let mut ts = text_system().lock().unwrap();
     let (fs, cache) = &mut *ts;
+    let attrs = attrs(bold);
     let mut buffer = cosmic_text::Buffer::new(fs, cosmic_text::Metrics::new(size, size * 1.25));
-    buffer.set_text(text, &cosmic_text::Attrs::new(), cosmic_text::Shaping::Basic, None);
+    buffer.set_text(text, &attrs, cosmic_text::Shaping::Basic, None);
     buffer.shape_until_scroll(fs, false);
     for run in buffer.layout_runs() {
+        // round the line origin ONCE: per-glyph truncation snaps glyphs
+        // onto different pixel rows (the "up and down" text)
+        let origin_y = (y + run.line_y).round();
+        let origin_x = x.round();
         for glyph in run.glyphs {
-            let physical = glyph.physical((x, y + run.line_y), 1.0);
+            let px = (origin_x + glyph.x).round() as i32;
+            let py = (origin_y + glyph.y).round() as i32;
+            // the cache key still needs the subpixel bins (placement)
+            let physical = glyph.physical((origin_x, origin_y), 1.0);
             let Some(img) = cache.get_image(fs, physical.cache_key).clone() else {
                 continue;
             };
             let iw = img.placement.width as i32;
             let ih = img.placement.height as i32;
-            let ox = physical.x + img.placement.left;
-            let oy = physical.y + img.placement.top;
+            let ox = px + img.placement.left;
+            // swash placement is Y-UP (zeno convention): the ink top
+            // sits `top` px ABOVE the baseline — add it and every
+            // glyph lands below the baseline, colliding with the row
+            // beneath (the "up and down" text + ghost row)
+            let oy = py - img.placement.top;
             for j in 0..ih {
                 for i in 0..iw {
                     let m = img.data[(j * iw + i) as usize];

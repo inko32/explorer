@@ -251,6 +251,9 @@ pub struct Explorer {
     /// An ambiguous drop (Shift / right-button drag) released and
     /// waiting for the choice-menu pick.
     pub(crate) pending_drop: Option<super::dnd::PendingDrop>,
+    /// True while `self.menu` is hosted by the off-window Wayland popup
+    /// (xdg_popup) instead of the in-window overlay.
+    pub menu_popup: bool,
     /// Alt held (Alt-drop = create a link).
     pub(crate) alt_held: bool,
 }
@@ -305,6 +308,7 @@ impl Explorer {
             forward: Vec::new(),
             dnd_wl: None,
             dnd_wl_drag: false,
+            menu_popup: false,
             dark: false,
             // the ribbon.yaml `disabled_style` setting is read once the
             // ribbon framework exists (just below the Self literal)
@@ -1008,6 +1012,55 @@ impl Explorer {
                             "Drop cancelled".into()
                         };
                     }
+                    // --- off-window menu popup input ---
+                    E::PopupMotion { x, y } => {
+                        if std::env::var_os("EXPLORER_DEBUG").is_some() {
+                            eprintln!("[popup] motion {x:.0} {y:.0}");
+                        }
+                        if self.menu_popup
+                            && let Some(open) = &mut self.menu
+                        {
+                            let hit =
+                                crate::menu::hover_at(&open.entries, y, &self.menu_cfg.layout);
+                            if hit != open.hover {
+                                open.hover = hit;
+                                self.repaint_menu_popup();
+                            }
+                        }
+                    }
+                    E::PopupPress { x, y } => {
+                        if std::env::var_os("EXPLORER_DEBUG").is_some() {
+                            eprintln!("[popup] press {x:.0} {y:.0}");
+                        }
+                        if self.menu_popup
+                            && let Some(open) = &self.menu
+                        {
+                            let hit =
+                                crate::menu::hover_at(&open.entries, y, &self.menu_cfg.layout);
+                            let enabled = hit.is_some_and(|i| {
+                                matches!(
+                                    open.entries.get(i),
+                                    Some(crate::menu::Entry::Item(it)) if it.enabled
+                                )
+                            });
+                            if enabled
+                                && let Some(i) = hit
+                            {
+                                // dispatch FIRST — it takes the menu
+                                // (and closes the popup at its top);
+                                // closing here would leave dispatch with
+                                // self.menu == None
+                                return self.menu_dispatch(i);
+                            }
+                        }
+                    }
+                    E::PopupDone => self.menu_close(),
+                    E::PopupKey { keysym } => {
+                        const ESCAPE: u32 = 0xff1b;
+                        if keysym == ESCAPE {
+                            self.menu_close();
+                        }
+                    }
                 }
                 iced::Task::none()
             }
@@ -1337,6 +1390,7 @@ impl Explorer {
                     nav_target: None,
                     bar: None,
                 });
+                self.menu_popup_open();
                 iced::Task::none()
             }
             Message::ContextNav(path) => {
@@ -1354,6 +1408,7 @@ impl Explorer {
                     nav_target: Some(path),
                     bar: None,
                 });
+                self.menu_popup_open();
                 iced::Task::none()
             }
             Message::MenuPick(i) => self.menu_dispatch(i),
@@ -1369,7 +1424,7 @@ impl Explorer {
             Message::CloseMenu => {
                 self.pending_drop = None;
                 self.nav_selected = None;
-                self.menu = None;
+                self.menu_close();
                 iced::Task::none()
             }
             Message::MenuKey => {
