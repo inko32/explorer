@@ -385,6 +385,11 @@ pub struct StyleCfg {
     pub font_size: f32,
     /// Property lines (Content/Tiles) and the Details header.
     pub prop_size: f32,
+    /// Empty strip reserved above the files in every layout without
+    /// a header (Content/Tiles/List/SmallIcon/IconTop): the rubber
+    /// band can start there. Details reserves its own strip
+    /// (details.header_h + details.files_gap).
+    pub top_gap: f32,
 }
 
 impl Default for StyleCfg {
@@ -393,6 +398,7 @@ impl Default for StyleCfg {
             corner_radius: 4.0,
             font_size: 12.0,
             prop_size: 12.0,
+            top_gap: 6.0,
         }
     }
 }
@@ -627,7 +633,8 @@ impl ViewCfg {
             .map(|&l| m.pad + s + m.gap + (l as f32).max(1.0) * c.label_line_h + m.pad)
             .collect();
         let mut starts = Vec::with_capacity(n.div_ceil(cols));
-        let mut y = 0.0f32;
+        // the first row sits below the reserved files_top strip
+        let mut y = self.files_top(index);
         for r in 0..n.div_ceil(cols) {
             starts.push(y);
             let row_max = item_h[r * cols..((r + 1) * cols).min(n)]
@@ -651,9 +658,24 @@ impl ViewCfg {
             .clamp(c.col_w_min, c.col_w_max)
     }
 
-    /// §8.1 List rows per column (columns flow top to bottom).
-    fn list_rows_per_col(&self, viewport_h: f32) -> usize {
-        ((viewport_h / self.layouts.list.row_h).floor() as usize).max(1)
+    /// Empty strip above the files in content coordinates (px) —
+    /// reserved space where the rubber band may start. Details
+    /// reserves its own strip (details.header_h + details.files_gap,
+    /// see the Details branches below); every other family reserves
+    /// style.top_gap.
+    pub fn files_top(&self, index: u8) -> f32 {
+        if self.family(index) == Family::Details {
+            0.0
+        } else {
+            self.style.top_gap
+        }
+    }
+
+    /// §8.1 List rows per column (columns flow top to bottom, below
+    /// the reserved files_top strip).
+    pub fn list_rows_per_col(&self, viewport_h: f32) -> usize {
+        (((viewport_h - self.style.top_gap).max(0.0) / self.layouts.list.row_h).floor() as usize)
+            .max(1)
     }
 
     /// Content extent along the scroll axis (px; y, or x for List) —
@@ -676,7 +698,10 @@ impl ViewCfg {
     ) -> f32 {
         let l = &self.layouts;
         match self.family(index) {
-            Family::Content => n_items as f32 * l.content.row_h,
+            // content starts below the reserved files_top strip
+            Family::Content => {
+                self.files_top(index) + n_items as f32 * l.content.row_h
+            }
             Family::Details => {
                 l.details.header_h
                     + l.details.files_gap
@@ -687,12 +712,17 @@ impl ViewCfg {
                     * self.list_col_w(longest_chars)
             }
             Family::Tiles => {
-                n_items.div_ceil(grid_cols(l.tiles.cell_w, 0.0, pane_w)) as f32 * l.tiles.cell_h
+                self.files_top(index)
+                    + n_items.div_ceil(grid_cols(l.tiles.cell_w, 0.0, pane_w)) as f32
+                        * l.tiles.cell_h
             }
             Family::SmallIcon => {
                 let m = self.small_icon(self.icon_px(index));
-                n_items.div_ceil(grid_cols(m.cell_w, m.gap, pane_w)) as f32 * (m.cell_h + m.gap)
+                self.files_top(index)
+                    + n_items.div_ceil(grid_cols(m.cell_w, m.gap, pane_w)) as f32
+                        * (m.cell_h + m.gap)
             }
+            // icon_top_rows folds files_top into the row starts
             Family::IconTop => {
                 self.icon_top_rows(index, n_items, pane_w, label_lines).extent
             }
@@ -716,14 +746,16 @@ impl ViewCfg {
     ) -> usize {
         let l = &self.layouts;
         let item = match self.family(index) {
-            Family::Content => (offset / l.content.row_h).floor() as usize,
+            Family::Content => {
+                ((offset - self.files_top(index)).max(0.0) / l.content.row_h).floor() as usize
+            }
             Family::Details => {
                 // content starts below the header strip + the §12 gap
                 let y = (offset - (l.details.header_h + l.details.files_gap)).max(0.0);
                 (y / self.details_pitch(details_compact)).floor() as usize
             }
             Family::Tiles => {
-                (offset / l.tiles.cell_h).floor() as usize
+                ((offset - self.files_top(index)).max(0.0) / l.tiles.cell_h).floor() as usize
                     * grid_cols(l.tiles.cell_w, 0.0, pane_w)
             }
             Family::List => {
@@ -732,9 +764,10 @@ impl ViewCfg {
             }
             Family::SmallIcon => {
                 let m = self.small_icon(self.icon_px(index));
-                (offset / (m.cell_h + m.gap)).floor() as usize
+                ((offset - self.files_top(index)).max(0.0) / (m.cell_h + m.gap)).floor() as usize
                     * grid_cols(m.cell_w, m.gap, pane_w)
             }
+            // icon_top_rows folds files_top into the row starts
             Family::IconTop => {
                 let rows = self.icon_top_rows(index, n_items, pane_w, label_lines);
                 // last row whose start is at or above the offset
@@ -765,14 +798,15 @@ impl ViewCfg {
     ) -> f32 {
         let l = &self.layouts;
         match self.family(index) {
-            Family::Content => item as f32 * l.content.row_h,
+            Family::Content => self.files_top(index) + item as f32 * l.content.row_h,
             Family::Details => {
                 l.details.header_h
                     + l.details.files_gap
                     + item as f32 * self.details_pitch(details_compact)
             }
             Family::Tiles => {
-                (item / grid_cols(l.tiles.cell_w, 0.0, pane_w)) as f32 * l.tiles.cell_h
+                self.files_top(index)
+                    + (item / grid_cols(l.tiles.cell_w, 0.0, pane_w)) as f32 * l.tiles.cell_h
             }
             Family::List => {
                 (item / self.list_rows_per_col(viewport_h)) as f32
@@ -780,8 +814,10 @@ impl ViewCfg {
             }
             Family::SmallIcon => {
                 let m = self.small_icon(self.icon_px(index));
-                (item / grid_cols(m.cell_w, m.gap, pane_w)) as f32 * (m.cell_h + m.gap)
+                self.files_top(index)
+                    + (item / grid_cols(m.cell_w, m.gap, pane_w)) as f32 * (m.cell_h + m.gap)
             }
+            // icon_top_rows folds files_top into the row starts
             Family::IconTop => {
                 let rows = self.icon_top_rows(index, item + 1, pane_w, label_lines);
                 let r = (item / rows.cols).min(rows.starts.len().saturating_sub(1));
@@ -883,13 +919,15 @@ mod tests {
         // a width that fits exactly 2 columns
         let w = 2.0 * (m.cell_w + m.gap) - m.gap;
         let rows = cfg.icon_top_rows(cfg.presets.medium, 4, w, &lines);
+        // the first row sits below the reserved files_top strip
+        let top = cfg.files_top(cfg.presets.medium);
         assert_eq!(rows.cols, 2);
         // row 0: both 1 line; row 1: tallest is 3 lines
-        assert_eq!(rows.starts[0], 0.0);
-        assert_eq!(rows.starts[1], one + m.gap);
+        assert_eq!(rows.starts[0], top);
+        assert_eq!(rows.starts[1], top + one + m.gap);
         assert_eq!(
             rows.extent,
-            2.0 * (one + m.gap) + 2.0 * cfg.icon_top.label_line_h
+            top + 2.0 * (one + m.gap) + 2.0 * cfg.icon_top.label_line_h
         );
         // each item's chrome is only as tall as its own label
         assert_eq!(rows.item_h[0], one);
@@ -910,6 +948,7 @@ mod tests {
         assert_eq!(yaml.layouts.details.files_gap, d.layouts.details.files_gap);
         assert_eq!(yaml.layouts.list.name_max_units, d.layouts.list.name_max_units);
         assert_eq!(yaml.icon_top.label_lines_switch, d.icon_top.label_lines_switch);
+        assert_eq!(yaml.style.top_gap, d.style.top_gap);
         assert_eq!(yaml.input.notch_delta, d.input.notch_delta);
     }
 }

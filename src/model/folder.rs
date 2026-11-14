@@ -288,7 +288,7 @@ impl Explorer {
                 FocusDir::Left | FocusDir::Right => None,
             },
             vs::Family::List => {
-                let rows = ((self.viewport_h / cfg.layouts.list.row_h).floor() as usize).max(1);
+                let rows = cfg.list_rows_per_col(self.viewport_h);
                 match dir {
                     FocusDir::Up => (!i.is_multiple_of(rows)).then(|| i - 1),
                     FocusDir::Down => (i % rows < rows - 1 && i + 1 < n).then(|| i + 1),
@@ -490,10 +490,13 @@ impl Explorer {
         use crate::view_step as vs;
         let cfg = &self.view_cfg;
         let s = cfg.icon_px(self.view_index);
+        // the files sit below the reserved files_top strip (the
+        // IconTop branch reads it back from the row prefix sums)
+        let top = cfg.files_top(self.view_index);
         match cfg.family(self.view_index) {
             vs::Family::Content => {
                 let row_h = cfg.layouts.content.row_h;
-                (0.0, i as f32 * row_h, pane_w, row_h)
+                (0.0, top + i as f32 * row_h, pane_w, row_h)
             }
             vs::Family::Details => {
                 let row_h = cfg.details_row_h(self.details_compact);
@@ -516,10 +519,10 @@ impl Explorer {
                     .max()
                     .unwrap_or(0);
                 let col_w = cfg.list_col_w(longest);
-                let rows = ((self.viewport_h / l.row_h).floor() as usize).max(1);
+                let rows = cfg.list_rows_per_col(self.viewport_h);
                 (
                     (i / rows) as f32 * col_w,
-                    (i % rows) as f32 * l.row_h,
+                    top + (i % rows) as f32 * l.row_h,
                     col_w,
                     l.row_h,
                 )
@@ -529,7 +532,7 @@ impl Explorer {
                 let cols = vs::grid_cols(t.cell_w, 0.0, pane_w);
                 (
                     (i % cols) as f32 * t.cell_w,
-                    (i / cols) as f32 * t.cell_h,
+                    top + (i / cols) as f32 * t.cell_h,
                     t.cell_w,
                     t.cell_h,
                 )
@@ -539,7 +542,7 @@ impl Explorer {
                 let cols = vs::grid_cols(m.cell_w, m.gap, pane_w);
                 (
                     (i % cols) as f32 * (m.cell_w + m.gap),
-                    (i / cols) as f32 * (m.cell_h + m.gap),
+                    top + (i / cols) as f32 * (m.cell_h + m.gap),
                     m.cell_w,
                     m.cell_h,
                 )
@@ -721,15 +724,15 @@ mod focus_tests {
     fn list_follows_rows_per_column() {
         let mut e = explorer(10);
         e.view_index = e.view_cfg.presets.list;
-        // 96px viewport / 24px rows = 4 rows per column
+        // (96px viewport − 6px top strip) / 24px rows = 3 rows per column
         assert_eq!(e.neighbor(0, FocusDir::Down), Some(1));
-        assert_eq!(e.neighbor(3, FocusDir::Down), None);
-        // index 4 tops the second column: nothing above, one left
-        assert_eq!(e.neighbor(4, FocusDir::Up), None);
-        assert_eq!(e.neighbor(5, FocusDir::Up), Some(4));
-        assert_eq!(e.neighbor(4, FocusDir::Left), Some(0));
-        assert_eq!(e.neighbor(4, FocusDir::Right), Some(8));
-        assert_eq!(e.neighbor(6, FocusDir::Right), None);
+        assert_eq!(e.neighbor(2, FocusDir::Down), None);
+        // index 3 tops the second column: nothing above, one left
+        assert_eq!(e.neighbor(3, FocusDir::Up), None);
+        assert_eq!(e.neighbor(4, FocusDir::Up), Some(3));
+        assert_eq!(e.neighbor(3, FocusDir::Left), Some(0));
+        assert_eq!(e.neighbor(3, FocusDir::Right), Some(6));
+        assert_eq!(e.neighbor(9, FocusDir::Right), None);
     }
 
     #[test]
