@@ -23,8 +23,10 @@ TARGET      ?= x86_64-unknown-linux-gnu
 # wl_display/wl_surface, which iced does not expose upstream. Instead of
 # maintaining a forked tree, we keep a small additive patch
 # (deps/iced-raw-handle.patch) and generate the overlay here: upstream iced
-# at ICED_REV, patched, living entirely in tmpfs. deps/iced symlinks to it
-# and Cargo.toml's [patch] section points there.
+# at ICED_REV, patched, living entirely in tmpfs. Cargo.toml's [patch]
+# section reaches it through the existing `target/` symlink
+# ("target/iced-overlay"), so the source tree carries no generated
+# paths at all.
 #
 # When iced upstream updates: bump ICED_REV, `make setup-iced` re-seeds and
 # re-applies the patch. The patch is purely additive, so it should apply
@@ -32,7 +34,9 @@ TARGET      ?= x86_64-unknown-linux-gnu
 # re-placed by hand (rare; ~30 lines).
 ICED_REV     := b2fbd3cb6289603f8cbbb2387a5242231f509d13
 ICED_PATCH   := $(CURDIR)/deps/iced-raw-handle.patch
-ICED_OVERLAY := $(TMPROOT)/iced-overlay
+# (same dir as CARGO_TARGET_DIR; spelled via TMPROOT because this block
+# is parsed before the CARGO_TARGET_DIR export below)
+ICED_OVERLAY := $(TMPROOT)/target/iced-overlay
 
 
 export CARGO_TARGET_DIR := $(TMPROOT)/target
@@ -89,7 +93,6 @@ setup-iced:
 		echo "==> bump ICED_REV or refresh deps/iced-raw-handle.patch"; \
 		exit 1; \
 	fi
-	@ln -sfn $(ICED_OVERLAY) $(CURDIR)/deps/iced
 
 setup-env: setup-iced
 	@ln -sf $(CARGO_TARGET_DIR) target
