@@ -749,7 +749,15 @@ impl Explorer {
         let font = self.view_cfg.style.font_size;
         self.entries
             .iter()
-            .map(|e| crate::ui_common::wrap_line_count(&e.name, label_w, font).min(m.lines as usize) as u8)
+            .map(|e| {
+                crate::text_metrics::hard_wrap_count(
+                    &e.name,
+                    label_w,
+                    m.lines as usize,
+                    font,
+                    crate::fonts::primary(),
+                ) as u8
+            })
             .collect()
     }
 

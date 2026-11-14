@@ -368,7 +368,7 @@ impl Default for IconTopCfg {
             gap_min: 4.0,
             label_lines_small: 2,
             label_lines_switch: 96.0,
-            label_lines_large: 3,
+            label_lines_large: 4,
             label_line_h: 20.0,
             label_pad: 8.0,
         }
@@ -429,7 +429,7 @@ pub struct IconTopMetrics {
     pub cell_h: f32,
     pub pad: f32,
     pub gap: f32,
-    /// Label line cap for this step (configured 2/3, never above 4).
+    /// Label line cap for this step (configured 2/4, never above 4).
     pub lines: f32,
 }
 
