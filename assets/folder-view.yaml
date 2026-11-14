@@ -115,7 +115,6 @@ icon_top:
   label_lines_large: 4      # …this many label lines (capped at 4)
                            # the name wraps to at most 4 lines; the tail
                            # is cut to "..." when it would not fit
-  label_line_h: 20.0
   label_pad: 8.0            # horizontal breathing room for the elided label
                            # (the cut estimate weights per-char glyph
                            # widths instead of a flat px/char average)

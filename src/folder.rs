@@ -568,8 +568,9 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
         vs::Family::IconTop => {
             // dynamic row heights: the strip arrows step one 1-line row
             let m = cfg.icon_top(s);
-            let c = &cfg.icon_top;
-            m.pad + s + m.gap + c.label_line_h + m.pad + m.gap
+            let block =
+                crate::text_metrics::line_block(cfg.style.font_size, crate::fonts::primary());
+            m.pad + s + m.gap + vs::label_box_h(1.0, block) + m.pad + m.gap
         }
     };
     let body: Element<Message> = if state.loading {
@@ -1521,13 +1522,13 @@ fn icon_top_cell<'a>(
         state.view_cfg.style.font_size,
         crate::fonts::primary(),
     );
-    // Each line's height is pinned to the configured label_line_h
-    // (Absolute) so the text column fills the chrome box exactly —
-    // with the default Relative(1.375) line height a 12px label is
-    // 16.5px tall and leaves a growing slack below multi-line names
-    // that reads as an empty extra line.
-    let line_height =
-        iced::widget::text::LineHeight::Absolute(c.label_line_h.into());
+    // Each line's box is exactly the font's glyph block (measured),
+    // so consecutive lines sit flush and only the explicit gaps
+    // separate them: LABEL_LINE_GAP between lines (glyph bottom to
+    // next glyph top) and LABEL_LINE_BOTTOM below the last line.
+    let font = crate::fonts::primary();
+    let block = text_metrics::line_block(state.view_cfg.style.font_size, font);
+    let line_height = iced::widget::text::LineHeight::Absolute(block.into());
     let label_col = column(
         label
             .iter()
@@ -1541,7 +1542,8 @@ fn icon_top_cell<'a>(
                     .boxed()
             })
             .collect::<Vec<Element<Message>>>(),
-    );
+    )
+    .spacing(vs::LABEL_LINE_GAP);
     let content = column![
         container(crate::icon::for_entry(e, s, &skin))
             .width(Length::Fill)
@@ -1549,12 +1551,18 @@ fn icon_top_cell<'a>(
             .padding([0.0, m.pad]),
         container(label_col)
             .width(Length::Fill)
-            .height(Length::Fixed(own * c.label_line_h))
+            .height(Length::Fixed(vs::label_box_h(own, block)))
+            .padding(iced::Padding {
+                top: 0.0,
+                right: 0.0,
+                bottom: vs::LABEL_LINE_BOTTOM,
+                left: 0.0,
+            })
             .clip(true),
     ]
     .spacing(m.gap);
-    // chrome = pad + icon + gap + own label lines + pad
-    let item_h = m.pad + s + m.gap + own * c.label_line_h + m.pad;
+    // chrome = pad + icon + gap + own label box + pad
+    let item_h = m.pad + s + m.gap + vs::label_box_h(own, block) + m.pad;
     item_chrome(
         i,
         container(content)

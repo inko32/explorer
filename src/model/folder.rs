@@ -348,7 +348,9 @@ impl Explorer {
             vs::Family::IconTop => {
                 let m = cfg.icon_top(cfg.icon_px(index));
                 let own = self.it_label_lines.get(i).copied().unwrap_or(1).max(1) as f32;
-                m.pad + cfg.icon_px(index) + m.gap + own * cfg.icon_top.label_line_h + m.pad
+                let block =
+                    crate::text_metrics::line_block(cfg.style.font_size, crate::fonts::primary());
+                m.pad + cfg.icon_px(index) + m.gap + vs::label_box_h(own, block) + m.pad
             }
         };
         let extent = cfg.content_extent(
