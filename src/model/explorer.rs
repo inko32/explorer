@@ -999,6 +999,9 @@ impl Explorer {
             // folder-view selection gesture (model/folder.rs)
             Message::Select(i) => self.select_press(i),
             Message::MarqueeBegin { x, y } => {
+                // a press on the pane's empty space focuses the folder
+                // pane, same as pressing an item (SPEC/Unfocused_Window.md §1)
+                self.active_pane = Pane::Folder;
                 // the drag owns the pointer until MarqueeEnd: drop the
                 // hover chrome (folder items, details column headers)
                 // and let the hover handlers below ignore updates, so
