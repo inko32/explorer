@@ -1,0 +1,68 @@
+diff --git a/runtime/src/window.rs b/runtime/src/window.rs
+index e5ecb756b..e45a7892e 100644
+--- a/runtime/src/window.rs
++++ b/runtime/src/window.rs
+@@ -23,6 +23,14 @@ pub enum Action {
+     /// Gets the [`Id`] of the latest window.
+     GetLatest(oneshot::Sender<Option<Id>>),
+ 
++    /// Gets the raw Wayland window handles of the window, as opaque
++    /// pointers: `(wl_surface, wl_display)`.
++    ///
++    /// `None` on non-Wayland platforms. The pointers are only meaningful
++    /// while the window is alive and must only be used on the thread
++    /// running the event loop.
++    GetRawHandle(Id, oneshot::Sender<Option<(usize, usize)>>),
++
+     /// Move the window with the left mouse button until the button is
+     /// released.
+     ///
+@@ -281,6 +289,15 @@ pub fn latest() -> Task<Option<Id>> {
+     task::oneshot(|channel| crate::Action::Window(Action::GetLatest(channel)))
+ }
+ 
++/// Gets the raw Wayland window handles of the window with the given [`Id`],
++/// as opaque pointers: `(wl_surface, wl_display)`. `None` on non-Wayland.
++///
++/// The pointers are only meaningful while the window is alive and must only
++/// be used on the thread running the event loop.
++pub fn raw_handle(id: Id) -> Task<Option<(usize, usize)>> {
++    task::oneshot(move |channel| crate::Action::Window(Action::GetRawHandle(id, channel)))
++}
++
+ /// Begins dragging the window while the left mouse button is held.
+ pub fn drag<T>(id: Id) -> Task<T> {
+     task::effect(crate::Action::Window(Action::Drag(id)))
+diff --git a/winit/src/lib.rs b/winit/src/lib.rs
+index 88eaec45b..e3e0f8a0c 100644
+--- a/winit/src/lib.rs
++++ b/winit/src/lib.rs
+@@ -1366,6 +1366,28 @@ fn run_action<'a, P, C>(
+ 
+                 let _ = channel.send(id);
+             }
++            window::Action::GetRawHandle(id, channel) => {
++                use winit::raw_window_handle::{
++                    HasDisplayHandle, HasWindowHandle, RawDisplayHandle,
++                    RawWindowHandle,
++                };
++
++                let handles = window_manager.get_mut(id).and_then(|window| {
++                    let surface = match window.raw.window_handle().ok()?.as_raw() {
++                        RawWindowHandle::Wayland(handle) => handle.surface.as_ptr() as usize,
++                        _ => return None,
++                    };
++
++                    let display = match window.raw.display_handle().ok()?.as_raw() {
++                        RawDisplayHandle::Wayland(handle) => handle.display.as_ptr() as usize,
++                        _ => return None,
++                    };
++
++                    Some((surface, display))
++                });
++
++                let _ = channel.send(handles);
++            }
+             window::Action::Drag(id) => {
+                 if let Some(window) = window_manager.get_mut(id) {
+                     let _ = window.raw.drag_window();

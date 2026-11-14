@@ -241,6 +241,13 @@ pub struct Explorer {
     pub(crate) press: Option<PressArm>,
     /// The active drag session manager (SPEC/DRAGGING.md).
     pub dnd: crate::dnd::Session,
+    /// Wayland DnD side-channel (drag-out payloads + drag-in offers;
+    /// `None` off-Wayland or before the window exists).
+    pub dnd_wl: Option<crate::dnd_wayland::Handle>,
+    /// True while a native Wayland drag started here is live — the
+    /// compositor shows the drag image, so the in-window overlays
+    /// (icon badge + caption) must stay hidden.
+    pub dnd_wl_drag: bool,
     /// An ambiguous drop (Shift / right-button drag) released and
     /// waiting for the choice-menu pick.
     pub(crate) pending_drop: Option<super::dnd::PendingDrop>,
@@ -252,6 +259,10 @@ impl Explorer {
     pub fn new() -> Self {
         let (sched, ev_rx) = fs::spawn();
         let _ = crate::FS_STREAM_RX.set(std::sync::Mutex::new(Some(ev_rx)));
+        // the DnD event channel must exist before the app starts so the
+        // subscription stream picks it up; the thread connects later
+        let dnd_tx = crate::dnd_wayland::init_channel();
+        let _ = crate::DND_EVENT_TX.set(std::sync::Mutex::new(Some(dnd_tx)));
         // Initial path: first positional arg (flags and their values are
         // skipped — see main.rs for the flag set).
         let mut cwd = None;
@@ -292,6 +303,8 @@ impl Explorer {
             nav_selected: None,
             back: Vec::new(),
             forward: Vec::new(),
+            dnd_wl: None,
+            dnd_wl_drag: false,
             dark: false,
             // the ribbon.yaml `disabled_style` setting is read once the
             // ribbon framework exists (just below the Self literal)
@@ -952,7 +965,51 @@ impl Explorer {
         match message {
             Message::WindowOpened(id) => {
                 self.window = Some(id);
-                iced::window::scale_factor(id).map(Message::SystemScale)
+                // learn the scale and grab the raw Wayland handles; the
+                // latter spawns the DnD side-channel (Message::WlHandles)
+                iced::Task::batch([
+                    iced::window::scale_factor(id).map(Message::SystemScale),
+                    iced::window::raw_handle(id).map(Message::WlHandles),
+                ])
+            }
+            Message::WlHandles(handles) => {
+                let tx = crate::DND_EVENT_TX
+                    .get()
+                    .and_then(|m| m.lock().unwrap().take());
+                if let (Some(h), Some(tx)) = (handles, tx) {
+                    self.dnd_wl = crate::dnd_wayland::spawn(h, tx);
+                }
+                iced::Task::none()
+            }
+            Message::Dnd(ev) => {
+                use crate::dnd_wayland::Event as E;
+                match ev {
+                    E::Hover { mimes } => {
+                        if !self.dnd.active() {
+                            self.status = if mimes.iter().any(|m| m == "text/uri-list") {
+                                format!("Release to drop files into {}", self.cwd.display())
+                            } else {
+                                format!("Incoming drag: {}", mimes.join(", "))
+                            };
+                        }
+                    }
+                    E::HoverLeft => {
+                        if !self.dnd.active() {
+                            self.status.clear();
+                        }
+                    }
+                    E::Dropped { mime, data } => self.wayland_drop_received(mime, data),
+                    E::DragFinished { performed } => {
+                        self.dnd_wl_drag = false;
+                        self.dnd.take();
+                        self.status = if performed {
+                            "Drop completed".into()
+                        } else {
+                            "Drop cancelled".into()
+                        };
+                    }
+                }
+                iced::Task::none()
             }
             Message::SystemScale(s) => {
                 if std::env::var_os("EXPLORER_DEBUG").is_some() {
@@ -1599,6 +1656,21 @@ impl Explorer {
                 // was not caused by this layer; re-evaluate with a profile)
                 if let iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) = &e {
                     self.cursor = *position;
+                    // Wayland: a simulated drag that leaves the window
+                    // hands off to the compositor drag (grab serial stays
+                    // valid for the whole implicit grab); drags that stay
+                    // inside keep the full in-window simulation (zones,
+                    // highlighting, action-choice menu)
+                    if self.dnd.active()
+                        && !self.dnd_wl_drag
+                        && self.dnd_wl.is_some()
+                        && (position.x < 0.0
+                            || position.y < 0.0
+                            || position.x > self.win_w
+                            || position.y > self.win_h)
+                    {
+                        self.wayland_handoff();
+                    }
                 }
                 // ---- drag & drop lifecycle (SPEC/DRAGGING.md §5) ----
                 use iced::keyboard::{Event as KeyEvent, Key, key::Named};
@@ -1804,6 +1876,7 @@ impl Explorer {
                         // modifier-driven action switch (Copy/Move/Link)
                         self.dnd.set_modifiers(ctrl, self.shift_held, self.alt_held);
                         self.status = self.dnd.feedback();
+                        self.refresh_wayland_visual();
                     }
                     return iced::Task::none();
                 }

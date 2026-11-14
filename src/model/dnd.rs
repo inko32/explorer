@@ -11,6 +11,34 @@ use super::explorer::Explorer;
 use super::message::Message;
 
 impl Explorer {
+    /// An external (or our own) drag was dropped on the window with the
+    /// given MIME payload. URI lists become a file drop into the current
+    /// folder — the same commit path as every other drop (§5.4/§12).
+    pub(crate) fn wayland_drop_received(&mut self, mime: String, data: Vec<u8>) {
+        if mime == "text/uri-list" {
+            let text = String::from_utf8_lossy(&data);
+            let sources: Vec<PathBuf> = text
+                .lines()
+                .flat_map(crate::dnd::uri_to_path)
+                .collect();
+            if sources.is_empty() {
+                self.status = "only local files can be dropped here".into();
+                return;
+            }
+            let target = crate::dnd::DropTarget::EmptyDirectory(self.cwd.clone());
+            match crate::dnd::validate_commit(&sources, &target, crate::dnd::DropAction::Copy) {
+                Ok(()) => {
+                    let _ = self.perform_drop(sources, target, crate::dnd::DropAction::Copy);
+                }
+                Err(reason) => self.status = reason,
+            }
+        } else if let Ok(text) = String::from_utf8(data) {
+            // non-file drops have no importer yet (§9) — show what came in
+            let shown: String = text.chars().take(80).collect();
+            self.status = format!("received {mime}: {shown}");
+        }
+    }
+
     /// §5.1 drop-target feedback: `path` is the innermost target under
     /// the pointer while a drag is active.
     pub(crate) fn drop_targeted(&self, path: &Path) -> bool {
@@ -21,6 +49,9 @@ impl Explorer {
     /// row. Drags the whole selection when the row is part of it,
     /// otherwise the row alone (which becomes the selection).
     pub(crate) fn begin_drag(&mut self, i: usize, right: bool) {
+        // a fresh press implies no native drag is live — reset any flag
+        // a never-finished previous drag may have left behind
+        self.dnd_wl_drag = false;
         if i >= self.entries.len() {
             return;
         }
@@ -59,6 +90,9 @@ impl Explorer {
             right,
             top,
         });
+        // The drag starts as the in-window simulation; it hands off to
+        // the native Wayland drag only if the pointer leaves the window
+        // (see `wayland_handoff`).
         // The cursor was already inside the file view when the drag
         // began, so the empty area's zone fired its enter before the
         // session existed and the event was dropped: seed it (dropping
@@ -71,11 +105,105 @@ impl Explorer {
         self.status = format!("Dragging {n} item{}", if n == 1 { "" } else { "s" });
     }
 
+    /// The simulated drag crossed the window edge: hand it to the
+    /// compositor. The implicit grab keeps the press serial valid, so
+    /// `start_drag` succeeds even though the press happened earlier.
+    /// The drag image starts with a target-less caption ("Move",
+    /// "Copy", "Link" or "…") — the protocol cannot name foreign
+    /// targets; modifier changes still update it via
+    /// `refresh_wayland_visual`.
+    pub(crate) fn wayland_handoff(&mut self) {
+        let (Some(wl), Some(crate::dnd::DragPayload::Files(items))) =
+            (&self.dnd_wl, self.dnd.payload())
+        else {
+            return;
+        };
+        let caption = self.wayland_caption();
+        let skin = if self.dark {
+            crate::ui_common::skin::dark()
+        } else {
+            crate::ui_common::skin::light()
+        };
+        let visual = crate::dnd_wayland::paint_drag_visual(
+            items,
+            self.dnd.top(),
+            items.len(),
+            &caption,
+            &skin,
+            self.scale_dpi(),
+        );
+        let uris: Vec<String> = items.iter().map(|i| i.uri.clone()).collect();
+        // Copy|Move advertised together (the core protocol has no link
+        // action): the destination (or the compositor) resolves, like
+        // our ambiguous-drop menu.
+        use smithay_client_toolkit::reexports::client::protocol::wl_data_device_manager::DndAction as Wl;
+        wl.begin_drag(uris, Wl::Copy | Wl::Move, visual);
+        self.dnd_wl_drag = true;
+    }
+
+    /// The target-less caption for the compositor drag image: the
+    /// negotiated action name ("Move"/"Copy"/"Link") or "…" while the
+    /// drop is action-ambiguous. In-window zone captions must not be
+    /// used — the zones freeze at handoff and would go stale.
+    fn wayland_caption(&self) -> crate::dnd::DragCaption {
+        let all = [
+            crate::dnd::DropAction::Copy,
+            crate::dnd::DropAction::Move,
+            crate::dnd::DropAction::Link,
+        ];
+        if self.dnd.ambiguous() {
+            crate::dnd::DragCaption::Undecided
+        } else {
+            let action =
+                crate::dnd::resolve_action(self.ctrl_held, self.shift_held, self.alt_held, &all);
+            crate::dnd::DragCaption::Action {
+                action,
+                label: format!("{action:?}"),
+            }
+        }
+    }
+
+    /// Push the current drag caption onto the compositor drag image
+    /// (called when the modifier-derived caption changes mid-drag).
+    pub(crate) fn refresh_wayland_visual(&mut self) {
+        if !self.dnd_wl_drag {
+            return;
+        }
+        let (Some(wl), Some(crate::dnd::DragPayload::Files(items))) =
+            (&self.dnd_wl, self.dnd.payload())
+        else {
+            return;
+        };
+        let skin = if self.dark {
+            crate::ui_common::skin::dark()
+        } else {
+            crate::ui_common::skin::light()
+        };
+        let caption = self.wayland_caption();
+        let visual = crate::dnd_wayland::paint_drag_visual(
+            items,
+            self.dnd.top(),
+            items.len(),
+            &caption,
+            &skin,
+            self.scale_dpi(),
+        );
+        wl.update_visual(visual);
+    }
+
     /// §5.4 drop: revalidate the target and dispatch the file operation
     /// to the fs worker (§10 — the UI never copies files itself). An
     /// action-ambiguous drop (Shift / right-button drag) opens the
     /// action-choice menu instead of committing.
     pub(crate) fn commit_drag(&mut self) -> iced::Task<Message> {
+        // Wayland: the compositor owns the drop — the outcome arrives
+        // as `Event::DragFinished` (drop onto our own window also comes
+        // back as `Event::Dropped` with the URI list). Just clear the
+        // local session.
+        if self.dnd_wl_drag {
+            self.dnd.take();
+            return iced::Task::none();
+        }
         let target = self.dnd.current().cloned();
         let ambiguous = self.dnd.ambiguous();
         let Some(session) = self.dnd.take() else {

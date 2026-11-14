@@ -198,6 +198,109 @@ fn resolve(name: &str, size: u32, skin: &Skin) -> Option<Source> {
     Some(Source::Missing) // `file:` entry without a PNG asset
 }
 
+/// Off-window raster of an icon (premultiplied RGBA, `size` physical
+/// pixels) — for renderers that cannot consume iced widget handles,
+/// i.e. the Wayland drag-image surface (`dnd_wayland`). Mirrors
+/// [`view_opacity`]: theme PNG entries decode via `image`, builtin /
+/// theme SVG entries rasterize via resvg. The solid-circle marker is
+/// drawn for names the pack cannot produce.
+pub struct IconPix {
+    pub width: u32,
+    pub height: u32,
+    /// premultiplied RGBA8, len = width*height*4
+    pub pixels: Vec<u8>,
+}
+
+/// `raster` for a file entry (the internal-name mapping of
+/// [`for_name_opacity`]).
+pub fn raster_for(is_dir: bool, name: &str, size: u32, skin: &Skin) -> IconPix {
+    raster(name_for(is_dir, name), size, skin)
+}
+
+pub fn raster(name: &str, size: u32, skin: &Skin) -> IconPix {
+    let want = size.max(1);
+    let icons = icons();
+    let active = active_theme();
+    let def = if active == EXPLORER {
+        icons.explorer.get(name)
+    } else {
+        icons.system.get(&active).and_then(|m| m.get(name))
+    };
+    let png_path = match def {
+        Some(IconDef { icon: Some(icon), .. }) => {
+            crate::icon_theme::lookup(&active, icon, want)
+                .filter(|p| p.extension().is_some_and(|e| e == "png"))
+        }
+        _ => None,
+    };
+    if let Some(path) = png_path
+        && let Ok(bytes) = std::fs::read(&path)
+        && let Ok(img) = ::image::load_from_memory(&bytes)
+    {
+        let rgba = img.to_rgba8();
+        let (w, h) = rgba.dimensions();
+        return IconPix {
+            width: w,
+            height: h,
+            pixels: premultiply(rgba.into_raw()),
+        };
+    }
+    let svg = match def {
+        Some(IconDef { icon: Some(icon), .. }) => {
+            match crate::icon_theme::lookup(&active, icon, want) {
+                Some(path) => std::fs::read_to_string(path).ok(),
+                // theme lookup miss: the solid-circle marker
+                None => crate::icons::builtin_svg_xml("folder", skin),
+            }
+        }
+        _ => crate::icons::builtin_svg_xml(name, skin),
+    };
+    match svg.as_deref().and_then(raster_svg) {
+        Some(pix) => pix,
+        None => raster_svg(&crate::icons::builtin_svg_xml("folder", skin).unwrap_or_default())
+            .unwrap_or(IconPix {
+                width: 1,
+                height: 1,
+                pixels: vec![0, 0, 0, 0],
+            }),
+    }
+}
+
+/// Raster an SVG document at its intrinsic size (physical pixels).
+fn raster_svg(svg: &str) -> Option<IconPix> {
+    let tree = resvg::usvg::Tree::from_data(svg.as_bytes(), &Default::default()).ok()?;
+    let size = tree.size();
+    let (w, h) = (size.width(), size.height());
+    if w <= 0.0 || h <= 0.0 {
+        return None;
+    }
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(w.ceil() as u32, h.ceil() as u32)?;
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::default(),
+        &mut pixmap.as_mut(),
+    );
+    Some(IconPix {
+        width: pixmap.width(),
+        height: pixmap.height(),
+        pixels: pixmap.data().to_vec(),
+    })
+}
+
+/// Straight-alpha RGBA -> premultiplied (what the Wayland shm buffer
+/// and tiny-skia store).
+fn premultiply(straight: Vec<u8>) -> Vec<u8> {
+    let mut out = straight;
+    let (chunks, _) = out.as_chunks_mut::<4>();
+    for px in chunks {
+        let a = px[3] as u16;
+        for c in &mut px[..3] {
+            *c = (*c as u16 * a / 255) as u8;
+        }
+    }
+    out
+}
+
 /// Solid circle drawn when the active pack cannot produce an icon.
 fn missing_svg(skin: &Skin) -> svg::Handle {
     svg::Handle::from_memory(
