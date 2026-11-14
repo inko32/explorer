@@ -112,7 +112,7 @@ icon_top:
   gap_min: 4.0
   label_lines_small: 2      # LabelLines: below label_lines_switch…
   label_lines_switch: 96.0  # …at or above this icon size…
-  label_lines_large: 3      # …this many label lines (capped at 4)
+  label_lines_large: 4      # …this many label lines (capped at 4)
                            # the name wraps to at most 4 lines; the tail
                            # is cut to "..." when it would not fit
   label_line_h: 20.0

@@ -11,7 +11,8 @@ use iced::{Color, Element, Length, Rectangle, Size, Vector, mouse};
 
 use crate::fs::{self, Entry};
 use crate::model::{self, Explorer, Message};
-use crate::ui_common::{bg, elide, elide_end, skin, truncate_units, wrap_elide};
+use crate::text_metrics;
+use crate::ui_common::{bg, elide, skin, truncate_units};
 use crate::view_step as vs;
 
 pub(crate) fn file_scrollable_id() -> iced::widget::Id {
@@ -989,7 +990,7 @@ fn content_row<'a>(
     let text_w = (width - c.icon - c.icon_text_gap - 2.0 * c.pad_w - 8.0).max(60.0);
     let date = e.modified.map(model::format_date).unwrap_or_default();
     let lines = column![
-        text(elide_end(&e.name, text_w, 7.5))
+        text(text_metrics::ellipsize(&e.name, text_w, c.name_size, semibold))
             .size(c.name_size)
             .font(semibold)
             .color(skin.text)
@@ -1047,7 +1048,10 @@ fn tile_cell<'a>(i: usize, e: &Entry, state: &'a Explorer, skin: skin::Skin) -> 
     let content = row![
         crate::icon::for_entry(e, t.icon, &skin),
         column![
-            text(elide_end(&e.name, text_w, 7.5)).size(t.name_size).font(semibold).color(skin.text),
+            text(text_metrics::ellipsize(&e.name, text_w, t.name_size, semibold))
+                .size(t.name_size)
+                .font(semibold)
+                .color(skin.text),
             text(elide(model::type_label(e), text_w, 6.6)).size(t.prop_size).color(skin.subtle),
             text(item_size(e)).size(t.prop_size).color(skin.subtle),
         ]
@@ -1225,6 +1229,9 @@ fn name_cell<'a>(
     let font = state.view_cfg.style.font_size;
     const ICON_GAP: f32 = 4.0;
     let name_w = (w - d.icon - ICON_GAP).max(0.0);
+    // The rename editor occupies the exact same single-line label box
+    // (same width, same row height) — a bordered input where the
+    // elided label was.
     let name: Element<'a, Message> = if state.renaming.as_ref().map(|(ri, _)| *ri) == Some(i) {
         // text_input borrows the value — borrow the state's buffer ('a);
         // the submit payload owns a clone
@@ -1234,9 +1241,20 @@ fn name_cell<'a>(
             .on_submit(Message::CommitRename(buf.clone()))
             .size(font)
             .padding(2)
+            .style(move |_t: &iced::Theme, _status: text_input::Status| text_input::Style {
+                background: skin.menu_bg.into(),
+                border: iced::Border {
+                    color: skin.accent,
+                    width: crate::theme::border_w(1.0),
+                    radius: 0.0.into(),
+                },
+                placeholder: skin.disabled,
+                value: skin.text,
+                selection: skin.sel,
+            })
             .boxed()
     } else {
-        text(elide_end(&e.name, name_w, 7.2))
+        text(text_metrics::ellipsize(&e.name, name_w, font, crate::fonts::primary()))
             .size(font)
             .color(skin.text)
             .boxed()
@@ -1277,8 +1295,13 @@ fn value_cell<'a>(
         _ => String::new(),
     };
     container(
-        text(elide_end(&value, (w - dc.text_pad_left).max(0.0), 7.2))
-            .size(font)
+        text(text_metrics::ellipsize(
+            &value,
+            (w - dc.text_pad_left).max(0.0),
+            font,
+            crate::fonts::primary(),
+        ))
+        .size(font)
             .color(skin.text),
     )
     .width(Length::Fixed(w))
@@ -1393,8 +1416,13 @@ fn small_icon_cell<'a>(
 ) -> Element<'a, Message> {
     let content = row![
         crate::icon::for_entry(e, s, &skin),
-        text(elide_end(&e.name, m.label_w, 7.2))
-            .size(state.view_cfg.style.font_size)
+        text(text_metrics::ellipsize(
+            &e.name,
+            m.label_w,
+            state.view_cfg.style.font_size,
+            crate::fonts::primary(),
+        ))
+        .size(state.view_cfg.style.font_size)
             .color(skin.text)
             .width(Length::Fixed(m.label_w)),
     ]
@@ -1477,37 +1505,52 @@ fn icon_top_cell<'a>(
     m: &vs::IconTopMetrics,
 ) -> Element<'a, Message> {
     // §8.3: the label is identical in every item state (hover /
-    // selected): it wraps across the full cell width — filling the
-    // selection rectangle — and only when the wrap exceeds the line
-    // cap is the last line tail-cut to "..." (line-aware cut, per-char
-    // em widths). The wrap is unconditional: a word longer than the
-    // label breaks mid-word instead of overflowing. The chrome height
-    // follows this item's own label line count (dynamic row heights);
+    // selected): hard-wrapped at the cell width — filling the
+    // selection rectangle — into at most `m.lines` lines, breaking
+    // mid-word; when the wrap exceeds the cap, the remainder is joined
+    // and ellipsized onto the last line (`text_metrics::wrap_hard`,
+    // exact cosmic-text widths). The chrome height follows this item's
+    // own label line count (dynamic row heights, `it_label_lines`);
     // only the icon keeps the cell padding.
     let c = &state.view_cfg.icon_top;
     let own = state.it_label_lines.get(i).copied().unwrap_or(1).max(1) as f32;
-    let label = wrap_elide(
+    let label = text_metrics::wrap_hard(
         &e.name,
         m.cell_w - c.label_pad,
         m.lines as usize,
         state.view_cfg.style.font_size,
+        crate::fonts::primary(),
+    );
+    // Each line's height is pinned to the configured label_line_h
+    // (Absolute) so the text column fills the chrome box exactly —
+    // with the default Relative(1.375) line height a 12px label is
+    // 16.5px tall and leaves a growing slack below multi-line names
+    // that reads as an empty extra line.
+    let line_height =
+        iced::widget::text::LineHeight::Absolute(c.label_line_h.into());
+    let label_col = column(
+        label
+            .iter()
+            .map(|l| {
+                text(l.clone())
+                    .size(state.view_cfg.style.font_size)
+                    .line_height(line_height)
+                    .color(skin.text)
+                    .width(Length::Fill)
+                    .align_x(iced::alignment::Horizontal::Center)
+                    .boxed()
+            })
+            .collect::<Vec<Element<Message>>>(),
     );
     let content = column![
         container(crate::icon::for_entry(e, s, &skin))
             .width(Length::Fill)
             .align_x(iced::alignment::Horizontal::Center)
             .padding([0.0, m.pad]),
-        container(
-            text(label)
-                .size(state.view_cfg.style.font_size)
-                .color(skin.text)
-                .width(Length::Fill)
-                .align_x(iced::alignment::Horizontal::Center)
-                .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
-        )
-        .width(Length::Fill)
-        .height(Length::Fixed(own * c.label_line_h))
-        .clip(true),
+        container(label_col)
+            .width(Length::Fill)
+            .height(Length::Fixed(own * c.label_line_h))
+            .clip(true),
     ]
     .spacing(m.gap);
     // chrome = pad + icon + gap + own label lines + pad

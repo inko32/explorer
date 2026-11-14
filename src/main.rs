@@ -30,6 +30,7 @@ mod pane;
 mod ribbon;
 mod scrollbar;
 mod status;
+mod text_metrics;
 mod theme;
 mod ui;
 mod ui_common;
