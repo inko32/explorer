@@ -570,7 +570,9 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
             let m = cfg.icon_top(s);
             let block =
                 crate::text_metrics::line_block(cfg.style.font_size, crate::fonts::primary());
-            m.pad + s + m.gap + vs::label_box_h(1.0, block) + m.pad + m.gap
+            m.pad + s + vs::ICON_LABEL_GAP + vs::label_box_h(1.0, block)
+                + vs::LABEL_PAD_BOTTOM
+                + m.gap
         }
     };
     let body: Element<Message> = if state.loading {
@@ -1547,9 +1549,15 @@ fn icon_top_cell<'a>(
     )
     .spacing(vs::LABEL_LINE_GAP);
     let content = column![
+        // The icon area is pinned to exactly s (the image widget's
+        // height follows the graphic's aspect ratio, not s) so the
+        // label's vertical position — and the chrome math in
+        // ViewCfg::icon_top_rows — is exact.
         container(crate::icon::for_entry(e, s, &skin))
             .width(Length::Fill)
+            .height(Length::Fixed(s))
             .align_x(iced::alignment::Horizontal::Center)
+            .align_y(iced::alignment::Vertical::Center)
             .padding([0.0, m.pad]),
         container(label_col)
             .width(Length::Fill)
@@ -1562,15 +1570,21 @@ fn icon_top_cell<'a>(
             })
             .clip(true),
     ]
-    .spacing(m.gap);
-    // chrome = pad + icon + gap + own label box + pad
-    let item_h = m.pad + s + m.gap + vs::label_box_h(own, block) + m.pad;
+    .spacing(vs::ICON_LABEL_GAP);
+    // chrome = pad + icon + ICON_LABEL_GAP + own label box + bottom pad
+    let item_h =
+        m.pad + s + vs::ICON_LABEL_GAP + vs::label_box_h(own, block) + vs::LABEL_PAD_BOTTOM;
     item_chrome(
         i,
         container(content)
             .width(Length::Fixed(m.cell_w))
             .height(Length::Fixed(item_h))
-            .padding([m.pad, 0.0]),
+            .padding(iced::Padding {
+                top: m.pad,
+                right: 0.0,
+                bottom: vs::LABEL_PAD_BOTTOM,
+                left: 0.0,
+            }),
         state,
         skin,
     )
