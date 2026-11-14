@@ -28,4 +28,4 @@ mod tests;
 
 pub use explorer::Explorer;
 pub use format::{format_date, format_size, type_label};
-pub use message::{FrameStyle, Message, NavSection, Pane, SortBy};
+pub use message::{FocusDir, FrameStyle, Message, NavSection, Pane, SortBy};

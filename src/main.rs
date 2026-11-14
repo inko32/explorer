@@ -35,7 +35,7 @@ mod ui;
 mod ui_common;
 mod view_step;
 
-use model::{Explorer, Message};
+use model::{Explorer, FocusDir, Message};
 
 /// Fs event stream, taken by `Subscription::run` exactly once.
 pub static FS_STREAM_RX: std::sync::OnceLock<
@@ -288,6 +288,13 @@ pub fn handle_key(
         Key::Named(Named::F5) => Some(Message::Refresh),
         Key::Named(Named::ArrowLeft) if modifiers.alt() => Some(Message::Back),
         Key::Named(Named::ArrowRight) if modifiers.alt() => Some(Message::Forward),
+        // the idle selector (keyboard focus rectangle): arrows navigate
+        // it in the folder view, Space selects/deselects its item
+        Key::Named(Named::ArrowUp) => Some(Message::FocusMove(FocusDir::Up)),
+        Key::Named(Named::ArrowDown) => Some(Message::FocusMove(FocusDir::Down)),
+        Key::Named(Named::ArrowLeft) => Some(Message::FocusMove(FocusDir::Left)),
+        Key::Named(Named::ArrowRight) => Some(Message::FocusMove(FocusDir::Right)),
+        Key::Named(Named::Space) => Some(Message::FocusSpace),
         Key::Character(c) if modifiers.control() => match c.as_str() {
             "c" => Some(Message::CopySelection),
             "x" => Some(Message::CutSelection),

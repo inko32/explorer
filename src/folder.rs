@@ -363,6 +363,9 @@ fn item_chrome<'a>(
         .entries
         .get(i)
         .is_some_and(|e| state.drop_targeted(&e.path));
+    // the idle selector (keyboard focus): a border-only rectangle, no
+    // fill; never drawn over a real selection (which has its own)
+    let focused_idle = state.focus_shown && state.focus_item == Some(i) && !selected && !targeted;
     // selection fades to gray while the folder pane is inactive
     // (window unfocused, nav pane active, or a ribbon popup open);
     // hovering a grayed item (or an active drop target) restores the
@@ -379,7 +382,7 @@ fn item_chrome<'a>(
     } else {
         Color::TRANSPARENT
     };
-    let border_color = chrome_border(state, skin, selected || targeted);
+    let border_color = chrome_border(state, skin, selected || targeted || focused_idle);
     // TEMP(rainbow): solid chrome would hide the rainbow backdrop
     // rectangle; tint it translucent (same 0.35 convention as the
     // marquee) so the rainbow passes through. Toggle off = solid
@@ -393,7 +396,11 @@ fn item_chrome<'a>(
         background: Some(bgc.into()),
         border: iced::Border {
             color: border_color,
-            width: if selected || targeted { crate::theme::border_w(1.0) } else { 0.0 },
+            width: if selected || targeted || focused_idle {
+                crate::theme::border_w(1.0)
+            } else {
+                0.0
+            },
             radius: state.view_cfg.style.corner_radius.into(),
         },
         ..Default::default()
@@ -1101,8 +1108,9 @@ fn details_view(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     file_scrollable(rows).boxed()
 }
 
-/// Border-only rectangles of the visible selected Details rows,
-/// stacked above the row fills (see `details_view`). Spacer-positioned
+/// Border-only rectangles of the visible selected Details rows and
+/// the idle selector, stacked above the row fills (see `details_view`).
+/// Spacer-positioned
 /// like the marquee rectangle; the geometry mirrors `file_row`'s
 /// chrome: 0 → files_left margin, the column block, the 4px chrome
 /// pad at the right (§13/§16).
@@ -1119,7 +1127,11 @@ fn selection_borders<'a>(
     let radius = state.view_cfg.style.corner_radius;
     let mut overlay = stack![];
     for i in first..last {
-        if !state.selected.contains(&i) {
+        // selected rows redraw their border above the neighbor fills;
+        // the idle selector draws the same border-only rectangle
+        if !state.selected.contains(&i)
+            && !(state.focus_shown && state.focus_item == Some(i))
+        {
             continue;
         }
         let color = chrome_border(state, skin, true);
