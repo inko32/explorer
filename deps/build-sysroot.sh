@@ -25,6 +25,17 @@ echo "==> building sysprof stub"
 gcc -O2 -c "$(dirname "$0")/sysprof-stub.c" -o "$DISTFILES/sysprof-stub.o"
 ar rcs "$SYSROOT/lib/libsysprof-stub.a" "$DISTFILES/sysprof-stub.o"
 
+# Static libgcc shim: a linker script named libgcc_s.so that pulls in
+# gcc's static libgcc.a + libgcc_eh.a instead of the shared unwinder.
+# Our -L precedes /usr/lib so ld resolves -lgcc_s here. Safe because no
+# C++ exceptions cross the dlopened 7z.so boundary (plain COM ABI) and
+# the plugin carries its own unwinder. libgcc_s/libm/libc cannot all be
+# static: libc.so.6 is the dlopen provider 7z.so/wgpu/winit require.
+echo "==> building static libgcc shim"
+LIBGCC_A="$(gcc -print-file-name=libgcc.a)"
+LIBGCC_EH_A="$(gcc -print-file-name=libgcc_eh.a)"
+printf 'INPUT ( %s %s )\n' "$LIBGCC_A" "$LIBGCC_EH_A" > "$SYSROOT/lib/libgcc_s.so"
+
 if [ -f "$STAMP" ]; then
     echo "==> sysroot already built ($STAMP), nothing to do"
     exit 0
