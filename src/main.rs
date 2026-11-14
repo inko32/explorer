@@ -9,6 +9,7 @@ mod commands;
 // executables, favorites), not yet wired in the UI.
 #[allow(dead_code)]
 mod dnd;
+mod dnd_wayland;
 mod details_view;
 mod folder;
 mod fonts;
@@ -43,6 +44,20 @@ pub static FS_STREAM_RX: std::sync::OnceLock<
     std::sync::Mutex<Option<fs::EventReceiver>>,
 > = std::sync::OnceLock::new();
 
+/// Wayland DnD side-channel event stream, taken by `Subscription::run`
+/// exactly once. The channel is pre-created in `Explorer::new` (like
+/// the fs worker) so the stream is live before the window exists; the
+/// thread connects to the sender later via `DND_EVENT_TX`.
+pub static DND_STREAM_RX: std::sync::OnceLock<
+    std::sync::Mutex<Option<dnd_wayland::EventReceiver>>,
+> = std::sync::OnceLock::new();
+
+/// Sender half of the DnD event channel, handed to the side-channel
+/// thread once the raw Wayland handles arrive (`Message::WlHandles`).
+pub static DND_EVENT_TX: std::sync::OnceLock<
+    std::sync::Mutex<Option<dnd_wayland::EventSender>>,
+> = std::sync::OnceLock::new();
+
 fn fs_stream_builder() -> fs::EventReceiver {
     FS_STREAM_RX
         .get()
@@ -50,6 +65,13 @@ fn fs_stream_builder() -> fs::EventReceiver {
         .lock()
         .unwrap()
         .take()
+        .unwrap_or_else(|| iced::futures::channel::mpsc::unbounded().1)
+}
+
+fn dnd_stream_builder() -> dnd_wayland::EventReceiver {
+    DND_STREAM_RX
+        .get()
+        .and_then(|rx| rx.lock().unwrap().take())
         .unwrap_or_else(|| iced::futures::channel::mpsc::unbounded().1)
 }
 
@@ -127,6 +149,7 @@ fn main() -> iced::Result {
             iced::window::open_events().map(Message::WindowOpened),
             iced::event::listen().map(Message::Event),
             iced::Subscription::run(fs_stream_builder).map(Message::FsEvent),
+            iced::Subscription::run(dnd_stream_builder).map(Message::Dnd),
             iced::window::resize_events().map(|(_id, size)| Message::WindowResized(size.width, size.height)),
         ])
     })

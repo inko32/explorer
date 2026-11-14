@@ -18,6 +18,22 @@ TOOLCHAIN   ?= stable
 TARGET      ?= x86_64-unknown-linux-gnu
 # Dependency: sudo pacman -S rustup
 
+# --- local iced overlay ---------------------------------------------------
+# The Wayland DnD side-channel (src/dnd_wayland.rs) needs the window's raw
+# wl_display/wl_surface, which iced does not expose upstream. Instead of
+# maintaining a forked tree, we keep a small additive patch
+# (deps/iced-raw-handle.patch) and generate the overlay here: upstream iced
+# at ICED_REV, patched, living entirely in tmpfs. deps/iced symlinks to it
+# and Cargo.toml's [patch] section points there.
+#
+# When iced upstream updates: bump ICED_REV, `make setup-iced` re-seeds and
+# re-applies the patch. The patch is purely additive, so it should apply
+# cleanly; if not, git apply reports the conflict and it has to be
+# re-placed by hand (rare; ~30 lines).
+ICED_REV     := b2fbd3cb6289603f8cbbb2387a5242231f509d13
+ICED_PATCH   := $(CURDIR)/deps/iced-raw-handle.patch
+ICED_OVERLAY := $(TMPROOT)/iced-overlay
+
 
 export CARGO_TARGET_DIR := $(TMPROOT)/target
 export CARGO_INCREMENTAL := 0
@@ -41,7 +57,41 @@ all: build
 # 		echo "==> Adding target '$(TARGET)' for $(TOOLCHAIN)..."; \
 # 		rustup +$(TOOLCHAIN) target add $(TARGET); \
 # 	fi
-setup-env:
+.PHONY: setup-iced
+setup-iced:
+	@mkdir -p $(ICED_OVERLAY)
+	@if [ ! -d $(ICED_OVERLAY)/.git ]; then \
+		rev7=$$(echo $(ICED_REV) | cut -c1-7); \
+		cache=$$(echo $(CARGO_HOME)/git/checkouts/iced-*/$$rev7); \
+		if [ -d "$$cache" ]; then \
+			echo "==> seeding iced overlay from cargo cache"; \
+			cp -a "$$cache"/. $(ICED_OVERLAY)/; \
+		else \
+			echo "==> cloning iced $(ICED_REV)"; \
+			git clone --no-checkout https://github.com/iced-rs/iced $(ICED_OVERLAY); \
+			git -C $(ICED_OVERLAY) checkout -q $(ICED_REV); \
+		fi; \
+	fi
+	@# record the pristine baseline once (clone case has no commit yet)
+	@if ! git -C $(ICED_OVERLAY) rev-parse -q --verify HEAD >/dev/null; then \
+		git -C $(ICED_OVERLAY) add -A; \
+		git -C $(ICED_OVERLAY) -c user.email=local@explorer -c user.name=explorer \
+			commit -qm "baseline: iced @ $(ICED_REV) (upstream)"; \
+	fi
+	@# apply the patch unless already applied
+	@if git -C $(ICED_OVERLAY) apply --check $(ICED_PATCH) 2>/dev/null; then \
+		git -C $(ICED_OVERLAY) apply $(ICED_PATCH); \
+		echo "==> applied deps/iced-raw-handle.patch"; \
+	elif git -C $(ICED_OVERLAY) apply --reverse --check $(ICED_PATCH) 2>/dev/null; then \
+		echo "==> iced overlay already patched"; \
+	else \
+		echo "==> ERROR: iced patch does not apply to this revision"; \
+		echo "==> bump ICED_REV or refresh deps/iced-raw-handle.patch"; \
+		exit 1; \
+	fi
+	@ln -sfn $(ICED_OVERLAY) $(CURDIR)/deps/iced
+
+setup-env: setup-iced
 	@ln -sf $(CARGO_TARGET_DIR) target
 	@mkdir -p $(CARGO_HOME) $(RUSTUP_HOME)
 	@if ! rustup toolchain list --no-self-update 2>/dev/null | grep -q "$(TOOLCHAIN)"; then \

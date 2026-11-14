@@ -627,17 +627,25 @@ pub struct PlatformCapabilities {
 
 pub fn capabilities() -> PlatformCapabilities {
     // winit implements file drops on X11/Windows/macOS only; the pinned
-    // fork has no Wayland data-device. Wayland-first app: report by the
-    // session type.
+    // fork has no Wayland data-device. Wayland drag-in/out run through
+    // our own side-channel (`dnd_wayland`) — active when the Wayland
+    // session is up, regardless of the session type, so report drag_in
+    // by the platform: on Wayland the side-channel covers it.
     #[cfg(target_os = "linux")]
-    let drag_in = std::env::var_os("WAYLAND_DISPLAY").is_none();
+    let (drag_in, drag_out) = {
+        let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
+        // On Wayland both directions come from the side-channel once it
+        // is up; the winit FileHovered/FileDropped events never fire
+        // there, so don't double-report them.
+        (true, wayland)
+    };
     #[cfg(not(target_os = "linux"))]
-    let drag_in = true;
+    let (drag_in, drag_out) = (true, false);
     PlatformCapabilities {
         drag_in,
-        drag_out: false,
+        drag_out,
         multiple_files: true,
-        action_negotiation: false,
+        action_negotiation: drag_out,
     }
 }
 

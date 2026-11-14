@@ -124,6 +124,13 @@ pub fn builtin_svg(name: &str, s: &Skin) -> Option<svg::Handle> {
     Some(svg::Handle::from_memory(render(tpl, s).into_bytes()))
 }
 
+/// The skin-colored SVG source of a builtin icon — for off-window
+/// rasterizers (the Wayland drag-image surface) that cannot consume an
+/// iced `svg::Handle`.
+pub fn builtin_svg_xml(name: &str, s: &Skin) -> Option<String> {
+    Some(render(template(name)?, s))
+}
+
 fn render(tpl: &str, s: &Skin) -> String {
     // {folder_edge} must be substituted before its {folder} prefix
     tpl.replace("{folder_edge}", &hex(s.folder_edge))

@@ -67,7 +67,9 @@ fn boxed_caption(label: &str, skin: skin::Skin) -> Element<'_, Message> {
 /// the drag session (rebuilt on target/modifier changes only); this
 /// layer just places it at the cursor. Independent from the icon badge.
 fn drag_caption(state: &Explorer, skin: skin::Skin) -> Option<Element<'_, Message>> {
-    if !state.dnd.active() {
+    if !state.dnd.active() || state.dnd_wl_drag {
+        // Wayland drag: the compositor paints caption + badge on the
+        // drag-image surface (see dnd_wayland)
         return None;
     }
     let cap = state.dnd.caption()?;
@@ -101,7 +103,7 @@ fn drag_caption(state: &Explorer, skin: skin::Skin) -> Option<Element<'_, Messag
 /// previous, the last one on top — and the item count in the square's
 /// bottom-left corner. Square, icons and count all draw at 0.6 opacity.
 fn drag_icon_badge(state: &Explorer, skin: skin::Skin) -> Option<Element<'static, Message>> {
-    if !state.dnd.active() {
+    if !state.dnd.active() || state.dnd_wl_drag {
         return None;
     }
     let items = match state.dnd.payload()? {
