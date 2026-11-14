@@ -1522,13 +1522,15 @@ fn icon_top_cell<'a>(
         state.view_cfg.style.font_size,
         crate::fonts::primary(),
     );
-    // Each line's box is exactly the font's glyph block (measured),
-    // so consecutive lines sit flush and only the explicit gaps
-    // separate them: LABEL_LINE_GAP between lines (glyph bottom to
-    // next glyph top) and LABEL_LINE_BOTTOM below the last line.
+    // Each line's box is the font's glyph block (measured) cropped by
+    // LABEL_DESCENT_SHAVE — the descent is empty under most characters
+    // and is what made the labels look loose; real descenders (g/j/p/
+    // q/y) dip into the 1px gap / the bottom pad (nothing clips, the
+    // container keeps the LABEL_LINE_BOTTOM pad).
     let font = crate::fonts::primary();
     let block = text_metrics::line_block(state.view_cfg.style.font_size, font);
-    let line_height = iced::widget::text::LineHeight::Absolute(block.into());
+    let line_h = (block - vs::LABEL_DESCENT_SHAVE).max(1.0);
+    let line_height = iced::widget::text::LineHeight::Absolute(line_h.into());
     let label_col = column(
         label
             .iter()
