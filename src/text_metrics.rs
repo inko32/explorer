@@ -89,6 +89,50 @@ fn measure_uncached(fragment: &str, size: f32, font: Font) -> (f32, f32) {
     (size.width, size.height)
 }
 
+/// Exact vertical glyph block (max ascent + max descent) of a line at
+/// the given size/font, probed with ascender/descender extremes so the
+/// result reflects the font rather than any particular label's
+/// characters — row heights must not depend on which glyphs a name
+/// happens to contain. Cached (per size/font).
+pub fn line_block(size: f32, font: Font) -> f32 {
+    let key = (size.to_bits(), font);
+    let mut cache = LINE_BLOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let cache = cache.get_or_insert_with(HashMap::new);
+    if let Some(v) = cache.get(&key) {
+        return *v;
+    }
+    let v = line_block_uncached(size, font);
+    if cache.len() >= 1024 {
+        cache.clear();
+    }
+    cache.insert(key, v);
+    v
+}
+
+static LINE_BLOCK: Mutex<Option<HashMap<(u32, Font), f32>>> = Mutex::new(None);
+
+fn line_block_uncached(size: f32, font: Font) -> f32 {
+    let system = gfx_text::font_system();
+    let mut system = system.write().unwrap_or_else(|e| e.into_inner());
+
+    let mut buffer = cosmic_text::Buffer::new(system.raw(), cosmic_text::Metrics::new(size, size));
+    buffer.set_wrap(cosmic_text::Wrap::None);
+    // Probe with tall/depthy glyphs so ascent and descent both reach
+    // the font's real limits.
+    buffer.set_text(
+        "\u{00c1}gjpq|\u{00c1}",
+        &gfx_text::to_attributes(font),
+        cosmic_text::Shaping::Advanced,
+        None,
+    );
+    buffer.shape_until_scroll(system.raw(), false);
+    let block = buffer
+        .line_layout(system.raw(), 0)
+        .map(|ls| ls.iter().fold(0.0f32, |m, l| m.max(l.max_ascent + l.max_descent)))
+        .unwrap_or(size);
+    block.max(1.0)
+}
+
 /// Single-line cut with a tail "..." (folder-view method 3): the
 /// result is guaranteed to measure `<= max_w` at the given size/font.
 /// Returns the input unchanged when it already fits; the empty string

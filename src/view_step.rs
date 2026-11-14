@@ -349,7 +349,6 @@ pub struct IconTopCfg {
     pub label_lines_small: u8,
     pub label_lines_switch: f32,
     pub label_lines_large: u8,
-    pub label_line_h: f32,
     /// Horizontal breathing room for the elided label.
     pub label_pad: f32,
 }
@@ -369,7 +368,6 @@ impl Default for IconTopCfg {
             label_lines_small: 2,
             label_lines_switch: 96.0,
             label_lines_large: 4,
-            label_line_h: 20.0,
             label_pad: 8.0,
         }
     }
@@ -433,6 +431,19 @@ pub struct IconTopMetrics {
     pub lines: f32,
 }
 
+/// Vertical gap between two wrapped icon-top label lines (glyph
+/// bottom to next glyph top).
+pub const LABEL_LINE_GAP: f32 = 1.0;
+/// Padding below the last icon-top label line to the item chrome edge.
+pub const LABEL_LINE_BOTTOM: f32 = 2.0;
+
+/// Height of the icon-top label box for `lines` lines of `block`
+/// pixels each: the glyph blocks stack flush, `LABEL_LINE_GAP` between
+/// them, `LABEL_LINE_BOTTOM` below the last line.
+pub fn label_box_h(lines: f32, block: f32) -> f32 {
+    lines * block + (lines - 1.0).max(0.0) * LABEL_LINE_GAP + LABEL_LINE_BOTTOM
+}
+
 /// §8.3 icon-top grid with dynamic row heights: the row pitch follows
 /// the tallest label in the row, while each item's chrome (border /
 /// hover / selection area) is only as tall as its own label needs
@@ -445,7 +456,7 @@ pub struct IconTopRows {
     pub starts: Vec<f32>,
     /// total content height (drives the scrollbar extent)
     pub extent: f32,
-    /// chrome height of each item: pad + s + gap + lines*label_line_h + pad
+    /// chrome height of each item: pad + s + gap + label_box_h(lines) + pad
     pub item_h: Vec<f32>,
 }
 
@@ -598,16 +609,16 @@ impl ViewCfg {
         let c = &self.icon_top;
         let pad = (c.pad_factor * s).floor().max(c.pad_min);
         let gap = (c.gap_factor * s).floor().max(c.gap_min);
-        // a file name never wraps to more than 4 lines
         let lines = (if s >= c.label_lines_switch {
             c.label_lines_large
         } else {
             c.label_lines_small
         } as f32)
             .min(4.0);
+        let block = crate::text_metrics::line_block(self.style.font_size, crate::fonts::primary());
         IconTopMetrics {
             cell_w: (s + 2.0 * pad).max(c.w_min),
-            cell_h: pad + s + gap + lines * c.label_line_h + pad,
+            cell_h: pad + s + gap + label_box_h(lines, block) + pad,
             pad,
             gap,
             lines,
@@ -625,12 +636,12 @@ impl ViewCfg {
     ) -> IconTopRows {
         let s = self.icon_px(index);
         let m = self.icon_top(s);
-        let c = &self.icon_top;
         let n = n_items.min(label_lines.len());
         let cols = grid_cols(m.cell_w, m.gap, pane_w);
+        let block = crate::text_metrics::line_block(self.style.font_size, crate::fonts::primary());
         let item_h: Vec<f32> = label_lines[..n]
             .iter()
-            .map(|&l| m.pad + s + m.gap + (l as f32).max(1.0) * c.label_line_h + m.pad)
+            .map(|&l| m.pad + s + m.gap + label_box_h((l as f32).max(1.0), block) + m.pad)
             .collect();
         let mut starts = Vec::with_capacity(n.div_ceil(cols));
         // the first row sits below the reserved files_top strip
@@ -914,7 +925,8 @@ mod tests {
         let cfg = ViewCfg::default();
         let s = cfg.icon_px(cfg.presets.medium);
         let m = cfg.icon_top(s);
-        let one = m.pad + s + m.gap + cfg.icon_top.label_line_h + m.pad;
+        let block = crate::text_metrics::line_block(cfg.style.font_size, crate::fonts::primary());
+        let one = m.pad + s + m.gap + label_box_h(1.0, block) + m.pad;
         let lines = [1u8, 1, 3, 1];
         // a width that fits exactly 2 columns
         let w = 2.0 * (m.cell_w + m.gap) - m.gap;
@@ -927,11 +939,14 @@ mod tests {
         assert_eq!(rows.starts[1], top + one + m.gap);
         assert_eq!(
             rows.extent,
-            top + 2.0 * (one + m.gap) + 2.0 * cfg.icon_top.label_line_h
+            top + 2.0 * (one + m.gap) + (label_box_h(3.0, block) - label_box_h(1.0, block))
         );
         // each item's chrome is only as tall as its own label
         assert_eq!(rows.item_h[0], one);
-        assert_eq!(rows.item_h[2], one + 2.0 * cfg.icon_top.label_line_h);
+        assert_eq!(
+            rows.item_h[2],
+            one + (label_box_h(3.0, block) - label_box_h(1.0, block))
+        );
     }
 
     #[test]
