@@ -790,4 +790,22 @@ mod focus_tests {
         assert_eq!(e.focus_item, Some(2));
         assert!(e.focus_shown);
     }
+
+    #[test]
+    fn double_free_space_click_releases_the_idle_selector() {
+        let mut e = explorer(5);
+        e.view_index = e.view_cfg.presets.details;
+        e.selected.insert(2);
+        // first free-space click: selection released, rectangle shown
+        let _ = e.update(Message::MarqueeBegin { x: 5.0, y: 5.0 });
+        let _ = e.update(Message::MarqueeEnd);
+        assert_eq!(e.focus_item, Some(2));
+        assert!(e.focus_shown);
+        // double-click on empty space: rectangle back to the first
+        // item, hidden (the default state)
+        let _ = e.update(Message::MarqueeBegin { x: 6.0, y: 6.0 });
+        let _ = e.update(Message::MarqueeEnd);
+        assert_eq!(e.focus_item, Some(0));
+        assert!(!e.focus_shown);
+    }
 }
