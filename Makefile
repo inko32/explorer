@@ -25,7 +25,7 @@ export CARGO_HOME=$(TMPROOT)/cargo
 export RUSTUP_HOME=$(TMPROOT)/rustup
 export PATH := $(TMPROOT)/cargo/bin:$(PATH)
 
-.PHONY: all build check run test dist clean fmt size setup-toolchain bloat tree clippy clippy-json saferun%
+.PHONY: all build check run test dist dist-static clean fmt size setup-toolchain bloat tree clippy clippy-json saferun% static static-sysroot
 
 
 all: build
@@ -85,6 +85,61 @@ define CLIPPY_ENSURE
 		[ $$n -le 3 ] || exit 1; \
 	fi
 endef
+
+# --- mostly-static build (branch `static`) --------------------------------
+# Goal: the only dynamic deps left are the glibc runtime (libc/libm/
+# libgcc_s/ld-linux) — which the dlopened glibc 7z.so plugin requires
+# anyway. The whole glib stack (gio/glib/gobject/gmodule + pcre2/ffi/z/
+# mount/blkid) links statically against deps/sysroot.
+# musl is NOT usable here: a static musl binary cannot dlopen at all, and
+# two libcs (musl exe + glibc plugin) clash on the x86-64 TLS layout.
+SYSROOT   ?= $(TMPROOT)/sysroot
+STATIC_TARGET_DIR := $(CARGO_TARGET_DIR)-static
+
+# gtk-rs -sys probes fed manually (no pkg-config): full ordered archive
+# chain in gio's LIB so static link order is correct by construction.
+STATIC_DEPS_ENV := \
+	SYSTEM_DEPS_LINK=static \
+	SYSTEM_DEPS_GIO_2_0_NO_PKG_CONFIG=1 \
+	SYSTEM_DEPS_GIO_2_0_LIB="gio-2.0 gobject-2.0 gmodule-2.0 glib-2.0 ffi pcre2-8 z mount blkid sysprof-stub" \
+	SYSTEM_DEPS_GLIB_2_0_NO_PKG_CONFIG=1 \
+	SYSTEM_DEPS_GLIB_2_0_LIB="glib-2.0" \
+	SYSTEM_DEPS_GOBJECT_2_0_NO_PKG_CONFIG=1 \
+	SYSTEM_DEPS_GOBJECT_2_0_LIB="gobject-2.0" \
+	SYSTEM_DEPS_GMODULE_2_0_NO_PKG_CONFIG=1 \
+	SYSTEM_DEPS_GMODULE_2_0_LIB="gmodule-2.0"
+
+static-sysroot:
+	bash deps/build-sysroot.sh "$(SYSROOT)"
+
+static: setup-env static-sysroot
+	$(STATIC_DEPS_ENV) \
+	RUSTFLAGS="-L native=$(SYSROOT)/lib -L native=/usr/lib" \
+	CARGO_TARGET_DIR="$(STATIC_TARGET_DIR)" \
+	cargo +$(TOOLCHAIN) build --release --target $(TARGET) $(if $(FEATURES),--features $(FEATURES),)
+	@$(STATIC_TARGET_DIR)/$(TARGET)/release/$(BIN) --version >/dev/null 2>&1 || true
+	@echo "==> ldd of the mostly-static binary:"
+	@ldd $(STATIC_TARGET_DIR)/$(TARGET)/release/$(BIN) || true
+
+# dist variant of the mostly-static build; mirrors `dist` but takes the
+# binary from target-static (same strip/upx staging discipline).
+dist-static: static
+	@mkdir -p $(DIST)
+	@target="$$(realpath $(DIST)/$(BIN))"; \
+	for p in /proc/[0-9]*; do \
+		[ "$$(readlink "$${p}/exe" 2>/dev/null)" = "$$target (deleted)" ] || \
+		[ "$$(readlink -f "$${p}/exe" 2>/dev/null)" = "$$target" ] || continue; \
+		kill "$${p##*/}" 2>/dev/null || true; \
+	done; \
+	sleep 0.3
+	@mkdir -p $(STATIC_TARGET_DIR)/dist
+	cp $(STATIC_TARGET_DIR)/$(TARGET)/release/$(BIN) $(STATIC_TARGET_DIR)/dist/$(BIN)
+	@if [ "$(COMPRESS)" != "0" ]; then \
+		strip --strip-all $(STATIC_TARGET_DIR)/dist/$(BIN) 2>/dev/null || true; \
+		./tools/upx $(STATIC_TARGET_DIR)/dist/$(BIN) || true; \
+	fi
+	cp $(STATIC_TARGET_DIR)/dist/$(BIN) $(DIST)/$(BIN)
+	@ls -l $(DIST)/$(BIN)
 
 build: setup-env
 	cargo +$(TOOLCHAIN) build --release --target $(TARGET) $(if $(FEATURES),--features $(FEATURES),)
