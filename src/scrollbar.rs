@@ -8,6 +8,7 @@
 use iced::Widget as _;
 use iced::advanced::widget::{Operation, Tree, Widget, tree};
 use iced::advanced::{Layout, Renderer as _, Shell, layout, renderer};
+use iced::widget::Space;
 use iced::{Color, Element, Length, Point, Rectangle, Size, mouse};
 
 use crate::model::Message;
@@ -84,6 +85,18 @@ pub(crate) fn horizontal(
     on_scroll: fn(f32) -> Message,
 ) -> Element<'static, Message> {
     WinScrollbar { axis: Axis::Horizontal, offset, viewport, content, line, skin, on_scroll }.boxed()
+}
+
+/// The empty square where the vertical and horizontal strips meet:
+/// reserved space belonging to neither (no hover, no press). It stays
+/// transparent so the folder view background (the pane backdrop —
+/// white in light mode) shows through, like the empty area beside a
+/// short list.
+pub(crate) fn corner() -> Element<'static, Message> {
+    Space::new()
+        .width(Length::Fixed(THICKNESS))
+        .height(Length::Fixed(THICKNESS))
+        .boxed()
 }
 
 /// Axis-parallel/-perpendicular decomposition of a point/size.
