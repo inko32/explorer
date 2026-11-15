@@ -986,9 +986,12 @@ fn content_row<'a>(
     width: f32,
 ) -> Element<'a, Message> {
     let c = &state.view_cfg.layouts.content;
+    // base on the resolved primary family (fonts.yaml priority list),
+    // not Font::DEFAULT: an explicit .font() replaces the app's
+    // default_font and would drop Selawik for generic sans-serif
     let semibold = iced::Font {
         weight: iced::font::Weight::Semibold,
-        ..iced::Font::DEFAULT
+        ..crate::fonts::primary()
     };
     let text_w = (width - c.icon - c.icon_text_gap - 2.0 * c.pad_w - 8.0).max(60.0);
     let date = e.modified.map(model::format_date).unwrap_or_default();
@@ -1045,7 +1048,7 @@ fn tile_cell<'a>(i: usize, e: &Entry, state: &'a Explorer, skin: skin::Skin) -> 
     let t = &state.view_cfg.layouts.tiles;
     let semibold = iced::Font {
         weight: iced::font::Weight::Semibold,
-        ..iced::Font::DEFAULT
+        ..crate::fonts::primary()
     };
     let text_w = t.cell_w - t.icon - t.icon_text_gap - 2.0 * t.pad;
     let content = row![
