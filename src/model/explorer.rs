@@ -1423,7 +1423,6 @@ impl Explorer {
             }
             Message::CloseMenu => {
                 self.pending_drop = None;
-                self.nav_selected = None;
                 self.menu_close();
                 iced::Task::none()
             }
