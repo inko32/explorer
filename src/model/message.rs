@@ -151,6 +151,9 @@ pub enum Message {
     InvertSelection,
     /// Set the view to a step index (SPEC/FOLDER-SPEC.MD §5 preset pick).
     SetView(u8),
+    /// Gallery hover preview: temporarily switch the view step
+    /// (`Some`) and revert to the committed step on leave (`None`).
+    PreviewView(Option<u8>),
     /// Ctrl+scroll over the file view: accumulated wheel delta in §7
     /// units (Lines converted to notch deltas, Pixels as-is).
     WheelZoom(f32),

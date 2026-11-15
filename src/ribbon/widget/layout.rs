@@ -1825,15 +1825,15 @@ fn gallery_col_widths(
     text.into_iter().map(|w| icon + 3.0 + w).collect()
 }
 
-/// Width of the in-ribbon strip: 1px frame padding on both sides, a
-/// 4px gap between columns and the 16px scroll strip on the right.
+/// Width of the in-ribbon strip: 1px frame padding on both sides and
+/// the 16px scroll strip on the right; the columns sit edge to edge.
 fn gallery_width(ctx: &Ctx, g: &GallerySpec, ghide: usize) -> f32 {
     let cols = g.columns.saturating_sub(ghide).max(1);
     let Some(cmd) = resolved(g.command.as_ref()) else {
         return 60.0;
     };
     let col_ws = gallery_col_widths(ctx, g, cmd, cols);
-    2.0 + col_ws.iter().sum::<f32>() + (cols.saturating_sub(1)) as f32 * 4.0 + 16.0 + 1.0
+    2.0 + col_ws.iter().sum::<f32>() + 16.0 + 1.0
 }
 
 /// Gallery columns a cascade step may remove (never below one).
@@ -3055,20 +3055,23 @@ fn build_gallery(
                 Point::new(cx, frame.y + r as f32 * 20.0),
                 Size::new(*cw, 20.0),
             );
-            cx += cw + 4.0;
+            cx += cw;
             let target = Target::GalleryItem {
                 cmd,
                 index: idx,
                 popup: false,
             };
             if idx == selected {
+                // the activated item always shows its border (light
+                // themes leave checked_border unset)
                 quad(
                     scene,
                     cell,
                     Fill::Color(ctx.theme.checked_bg),
-                    ctx.theme
-                        .checked_border
-                        .map(|b| (b, border)),
+                    Some((
+                        ctx.theme.checked_border.unwrap_or(ctx.theme.accent),
+                        border,
+                    )),
                     0.0,
                 );
             } else if enabled && ctx.hovered(&target) {
