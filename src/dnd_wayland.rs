@@ -83,10 +83,13 @@ enum Cmd {
     /// pixels. The anchor is the thread's own tracked pointer position
     /// (parent surface-local — exact, no unit conversion). `painted` is
     /// the scale the visual's pixels were painted at (scale_dpi);
-    /// `scale` is the wl buffer scale (ceil(painted)).
+    /// `system` is the raw winit scale of the parent output. The popup
+    /// surface lives in the COMPOSITOR's coordinate space (1 unit =
+    /// 1/system physical px), so its on-screen size and crispness follow
+    /// `system`, not `painted` — with `--dpi` the two differ.
     OpenPopup {
         painted: f32,
-        scale: i32,
+        system: f32,
         visual: DragVisual,
     },
     /// Re-paint an open popup (hover changes).
@@ -150,10 +153,10 @@ impl Handle {
         self.send(Cmd::UpdateVisual(visual));
     }
 
-    pub fn open_popup(&self, painted: f32, scale: i32, visual: DragVisual) {
+    pub fn open_popup(&self, painted: f32, system: f32, visual: DragVisual) {
         self.send(Cmd::OpenPopup {
             painted,
-            scale,
+            system,
             visual,
         });
     }
@@ -580,7 +583,7 @@ impl State {
             }
             Cmd::OpenPopup {
                 painted,
-                scale,
+                system,
                 visual,
             } => {
                 // replace any open popup
@@ -588,20 +591,32 @@ impl State {
                 let anchor = (self.ptr_pos.0.round() as i32, self.ptr_pos.1.round() as i32);
                 let pos = self.xdg.xdg_wm_base().create_positioner(qh, PosData);
                 let (w, h) = (visual.width.max(1) as i32, visual.height.max(1) as i32);
-                // logical size/anchor: the parent surface-local space.
-                // Fractional-capable compositor: the viewport maps
-                // buffer/painted 1:1 into that space (what winit does
-                // for the parent) — the plain integer buffer-scale
-                // chain would shrink the menu by painted/ceil(painted)
-                // and downscale (thicken) its text.
+                // logical size/anchor: the parent surface-local space,
+                // i.e. the COMPOSITOR's coordinate system (1 unit =
+                // 1/system physical px). The buffer holds `painted` px
+                // per model unit, so it maps 1 physical px per buffer
+                // px (crisp, same on-screen size as the window
+                // content) only when the unit is `system`:
+                //     surface-local = buffer / system
+                //     to_model      = system / painted
+                // Without `--dpi` painted == system and this reduces to
+                // the model size. On integer-only compositors (no
+                // fractional globals) fall back to the plain
+                // buffer-scale chain, which matches the parent's
+                // truncated integer scale.
                 let painted = painted.max(1.0);
-                let ls = scale.max(1);
+                let system = system.max(1.0);
                 let fractional = self.fractional.is_some();
-                let (pw, ph) = if fractional {
-                    ((w as f32 / painted).round() as i32, (h as f32 / painted).round() as i32)
+                let (ls, unit) = if fractional {
+                    (system.ceil().max(1.0) as i32, system)
                 } else {
-                    (w / ls, h / ls)
+                    let ls = painted.ceil().max(1.0) as i32;
+                    (ls, ls as f32)
                 };
+                let (pw, ph) = (
+                    (w as f32 / unit).round().max(1.0) as i32,
+                    (h as f32 / unit).round().max(1.0) as i32,
+                );
                 pos.set_size(pw, ph);
                 pos.set_anchor_rect(anchor.0, anchor.1, 1, 1);
                 use smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_positioner::{
@@ -629,8 +644,6 @@ impl State {
                     &self.xdg,
                 ) {
                     popup.wl_surface().set_buffer_scale(ls);
-                    // with the viewport, popup-local input coords ARE
-                    // model-logical; without it they are buffer/scale
                     let viewport = fractional.then(|| {
                         let vp = self
                             .fractional
@@ -641,11 +654,7 @@ impl State {
                         vp.set_destination(pw.max(1), ph.max(1));
                         vp
                     });
-                    let to_model = if fractional {
-                        1.0
-                    } else {
-                        ls as f32 / painted
-                    };
+                    let to_model = unit / painted;
                     self.popup = Some(PopupState {
                         popup,
                         pending: Some(visual),
