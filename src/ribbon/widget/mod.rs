@@ -323,8 +323,8 @@ where
                     tip,
                 );
             }
-            // gallery preview from the in-ribbon strip
-            handle_strip_preview(fw, state, &new_hover, shell, on_event);
+            // gallery preview (strip + dropdown popup)
+            update_gallery_preview(state, shell, on_event.as_deref());
         };
         let press_at = |state: &mut State, position: Point, shell: &mut Shell<'_, Message>| {
             state.keytips = false;
@@ -596,6 +596,9 @@ where
             // if the pointer has stayed put long enough (no CursorMoved
             // needed).
             iced::Event::Window(iced::window::Event::RedrawRequested(_)) => {
+                // gallery preview dwell: start the armed preview once
+                // the double-click window has elapsed
+                fire_gallery_preview(state, shell, self.on_event.as_deref());
                 let Some(since) = state.hover_since else { return };
                 if state.tooltip.is_some() || state.popup.is_some() || fw.view().minimized() {
                     return;
@@ -902,44 +905,101 @@ fn format_spinner(fw: &RibbonFramework, cmd: u32) -> String {
     format.replace("{0}", &fmt)
 }
 
-fn handle_strip_preview<Message>(
-    fw: &RibbonFramework,
-    state: &mut State,
-    hover: &Option<Target>,
-    shell: &mut Shell<'_, Message>,
-    mapper: &Option<Box<dyn Fn(RibbonEvent) -> Message + '_>>,
-) {
-    let gallery_hit = match hover {
-        Some(GalleryItem { cmd, index, popup: false }) => Some((*cmd, *index)),
-        _ => None,
+/// The gallery item under the cursor: the strip hover, or the hover
+/// inside an open gallery popup.
+fn gallery_hover(state: &State) -> Option<(u32, usize)> {
+    let target = if state.popup.is_some() {
+        state.popup_hover()
+    } else {
+        state.hover.as_ref()
     };
-    if gallery_hit != state.previewed_strip {
-        if let Some((cmd, index)) = state.previewed_strip.take() {
-            publish(
-                shell,
-                mapper.as_deref(),
-                RibbonEvent::Execute {
-                    command: cmd,
-                    verb: ExecutionVerb::CancelPreview,
-                    key: Some(PropertyKey::SelectedItem),
-                    value: Some(PropValue::UInt(index as u32)),
-                },
-            );
+    match target {
+        Some(GalleryItem { cmd, index, .. }) => Some((*cmd, *index)),
+        _ => None,
+    }
+}
+
+/// Hover dwell before a preview starts: the double-click window
+/// (clicking through the gallery must not flash previews).
+fn preview_dwell() -> std::time::Duration {
+    std::time::Duration::from_millis(crate::theme::double_click_ms())
+}
+
+/// A committed gallery click suppresses previewing for the
+/// double-click window; returns whether that window is still running.
+fn preview_cooldown_active(state: &mut State) -> bool {
+    let Some(at) = state.preview_cooldown else { return false };
+    if at.elapsed() < preview_dwell() {
+        true
+    } else {
+        state.preview_cooldown = None;
+        false
+    }
+}
+
+fn preview_event(verb: ExecutionVerb, cmd: u32, index: usize) -> RibbonEvent {
+    RibbonEvent::Execute {
+        command: cmd,
+        verb,
+        key: Some(PropertyKey::SelectedItem),
+        value: Some(PropValue::UInt(index as u32)),
+    }
+}
+
+/// Gallery preview state machine (cursor-move path), shared by the
+/// in-ribbon strip and the dropdown gallery popup: entering an item
+/// arms the preview; it starts only once the double-click window has
+/// elapsed ([`fire_gallery_preview`]). While a preview is live,
+/// moving to another item previews immediately and leaving cancels.
+pub(crate) fn update_gallery_preview<Message>(
+    state: &mut State,
+    shell: &mut Shell<'_, Message>,
+    mapper: Option<&dyn Fn(RibbonEvent) -> Message>,
+) {
+    if preview_cooldown_active(state) {
+        state.gallery_dwell_since = None;
+        return;
+    }
+    let hit = gallery_hover(state);
+    if state.previewed.is_some() {
+        if hit != state.previewed {
+            if let Some((cmd, index)) = state.previewed.take() {
+                publish(shell, mapper, preview_event(ExecutionVerb::CancelPreview, cmd, index));
+            }
+            if let Some((cmd, index)) = hit {
+                state.previewed = Some((cmd, index));
+                publish(shell, mapper, preview_event(ExecutionVerb::Preview, cmd, index));
+            }
         }
-        if let Some((cmd, index)) = gallery_hit {
-            state.previewed_strip = Some((cmd, index));
-            publish(
-                shell,
-                mapper.as_deref(),
-                RibbonEvent::Execute {
-                    command: cmd,
-                    verb: ExecutionVerb::Preview,
-                    key: Some(PropertyKey::SelectedItem),
-                    value: Some(PropValue::UInt(index as u32)),
-                },
-            );
+        return;
+    }
+    match hit {
+        Some(_) => {
+            let since = state.gallery_dwell_since.get_or_insert_with(Instant::now);
+            shell.request_redraw_at(*since + preview_dwell());
         }
-        let _ = fw;
+        None => state.gallery_dwell_since = None,
+    }
+}
+
+/// Dwell expiry (RedrawRequested): start the armed preview.
+fn fire_gallery_preview<Message>(
+    state: &mut State,
+    shell: &mut Shell<'_, Message>,
+    mapper: Option<&dyn Fn(RibbonEvent) -> Message>,
+) {
+    let Some(since) = state.gallery_dwell_since else { return };
+    if since.elapsed() < preview_dwell() {
+        shell.request_redraw_at(since + preview_dwell());
+        return;
+    }
+    state.gallery_dwell_since = None;
+    if preview_cooldown_active(state) || state.previewed.is_some() {
+        return;
+    }
+    if let Some((cmd, index)) = gallery_hover(state) {
+        state.previewed = Some((cmd, index));
+        publish(shell, mapper, preview_event(ExecutionVerb::Preview, cmd, index));
     }
 }
 
@@ -1456,6 +1516,13 @@ pub(crate) fn activate<Message>(
                     value: Some(PropValue::UInt(*index as u32)),
                 },
             );
+            // a committed switch cancels a live preview and disables
+            // previewing for the double-click window
+            if let Some((c, i)) = state.previewed.take() {
+                publish(shell, mapper, preview_event(ExecutionVerb::CancelPreview, c, i));
+            }
+            state.gallery_dwell_since = None;
+            state.preview_cooldown = Some(Instant::now());
             if *popup {
                 close_all_popups(state);
             }

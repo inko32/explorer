@@ -186,10 +186,14 @@ pub struct State {
     /// `true` = tab-strip stage, `false` = ribbon-body stage.
     pub keytips_strip: bool,
     pub keytip_buffer: String,
-    /// Gallery item currently previewed.
+    /// Gallery item currently previewed (strip or dropdown popup).
     pub previewed: Option<(u32, usize)>,
-    /// Gallery item previewed from the ribbon strip.
-    pub previewed_strip: Option<(u32, usize)>,
+    /// When the hover over a gallery item began: the preview arms only
+    /// after the double-click window has elapsed.
+    pub gallery_dwell_since: Option<Instant>,
+    /// Armed by a committed gallery click: previewing stays disabled
+    /// for the double-click window.
+    pub preview_cooldown: Option<Instant>,
     /// Transient: set while a popup scene is being built — hover queries
     /// then match the popup hover instead of the main-scene hover.
     pub popup_drawing: bool,
@@ -231,7 +235,8 @@ impl Default for State {
             keytips_strip: true,
             keytip_buffer: String::new(),
             previewed: None,
-            previewed_strip: None,
+            gallery_dwell_since: None,
+            preview_cooldown: None,
             popup_drawing: false,
             overflow_hidden: std::cell::RefCell::new(None),
             overflow_tab: std::cell::RefCell::new(None),

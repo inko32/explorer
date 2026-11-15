@@ -8,7 +8,7 @@ use iced::mouse;
 use iced::advanced::Shell;
 use iced::{Color, Point, Rectangle, Size, Vector};
 
-use crate::ribbon::enums::{ExecutionVerb, SwatchColorMode};
+use crate::ribbon::enums::SwatchColorMode;
 use crate::ribbon::framework::RibbonFramework;
 use crate::ribbon::prop::{FontToggle, PropertyKey, PropValue};
 use crate::ribbon::spec::{CommandRef, ControlSpec, MenuItemSpec};
@@ -17,7 +17,7 @@ use crate::ribbon::theme::{self, Theme, STANDARD_COLORS, THEME_COLORS};
 use super::layout::{chevron, lw, text, wrap_width, Ctx};
 use super::scene::{Cmd, Fill, Node, Scene};
 use super::state::{close_all_popups, close_popup, Popup, PopupKind, State, SwatchSel, Target};
-use super::{activate, publish, RibbonEvent};
+use super::{activate, RibbonEvent};
 
 fn resolved(c: Option<&CommandRef>) -> Option<u32> {
     match c {
@@ -631,13 +631,18 @@ fn gallery_scene(ctx: &Ctx, cmd: u32, scroll: usize) -> Scene {
     let g = gallery_spec(ctx, cmd);
     let items = gallery_items(ctx, cmd);
     let cols = g.columns.max(1);
-    // caption below the icon: the widest caption drives the cell width
-    let text_w = items
-        .iter()
-        .map(|(l, _, _)| ctx.text_w(l, ctx.fonts.ribbon.menu))
-        .fold(0.0f32, f32::max);
-    let cell_w = (g.item_width + 10.0).max(text_w + 8.0);
-    let cell_h = g.item_height + 16.0;
+    // the same row layout as the in-ribbon strip: 20px lines with the
+    // 16px icon left and the caption to its right (vertically
+    // centered); each column is as wide as its longest caption plus a
+    // trailing space
+    let icon = g.item_width.max(g.item_height);
+    let trail = ctx.text_w(" ", ctx.fonts.ribbon.menu);
+    let mut col_ws = vec![icon + 3.0 + trail; cols];
+    for (i, (label, _, _)) in items.iter().enumerate() {
+        let w = icon + 3.0 + ctx.text_w(label, ctx.fonts.ribbon.menu) + trail;
+        col_ws[i % cols] = col_ws[i % cols].max(w);
+    }
+    let cell_h = 20.0;
     let header_h = 18.0f32;
 
     // categories
@@ -685,7 +690,7 @@ fn gallery_scene(ctx: &Ctx, cmd: u32, scroll: usize) -> Scene {
     let scroll = scroll.min(rows.len().saturating_sub(visible_rows));
     let shown = &rows[scroll.min(rows.len())..(scroll + visible_rows).min(rows.len())];
 
-    let width = cols as f32 * cell_w + 14.0;
+    let width = 2.0 + col_ws.iter().sum::<f32>() + 14.0;
     let height = shown.len() as f32 * cell_h
         + if categories.is_empty() { 4.0 } else { rows.iter().filter(|r| matches!(r, Row::Header(_))).count() as f32 * 0.0 }
         + 6.0;
@@ -727,37 +732,41 @@ fn gallery_scene(ctx: &Ctx, cmd: u32, scroll: usize) -> Scene {
             }
             Row::Items(r, cat) => {
                 let idxs = cat_offsets.get(cat).cloned().unwrap_or_default();
-                for c in 0..cols {
-                    let Some(&idx) = idxs.get(r * cols + c) else { continue };
+                let mut cx = 2.0f32;
+                for (c, cw) in col_ws.iter().enumerate() {
+                    let Some(&idx) = idxs.get(r * cols + c) else { break };
                     let (label, image, _) = &items[idx];
-                    let x = 7.0 + c as f32 * cell_w;
-                    let cell = Rectangle::new(
-                        Point::new(x, y),
-                        Size::new(cell_w - 4.0, cell_h - 4.0),
-                    );
+                    let cell = Rectangle::new(Point::new(cx, y), Size::new(*cw, cell_h));
+                    cx += cw;
                     if idx == selected {
                         // the activated item always shows its border
                         // (light themes leave checked_border unset)
                         let border_c = ctx.theme.checked_border.unwrap_or(ctx.theme.accent);
-                        quad(&mut scene, cell, Fill::Color(ctx.theme.checked_bg), Some((border_c, lw(ctx, 1.0))), 2.0);
+                        quad(&mut scene, cell, Fill::Color(ctx.theme.checked_bg), Some((border_c, lw(ctx, 1.0))), 0.0);
                     }
                     hover_row(ctx, &mut scene, cell, Target::GalleryItem { cmd, index: idx, popup: true }, true);
                     scene.push(Node::new(cell, Cmd::Hit).target(Target::GalleryItem { cmd, index: idx, popup: true }).tip(cmd));
                     if let Some(image) = image {
                         svg(
                             &mut scene,
-                            Rectangle::new(Point::new(x + 2.0, y + 1.0), Size::new(g.item_width, g.item_height)),
+                            Rectangle::new(
+                                Point::new(cell.x + 1.0, cell.y + (cell_h - icon) / 2.0),
+                                Size::new(icon, icon),
+                            ),
                             image.clone(),
                             1.0,
                         );
                     }
                     text(
                         &mut scene,
-                        Rectangle::new(Point::new(x - 1.0, y + g.item_height + 2.0), Size::new(cell_w - 2.0, 12.0)),
+                        Rectangle::new(
+                            Point::new(cell.x + icon + 3.0, cell.y),
+                            Size::new((cw - icon - 3.0).max(4.0), cell_h),
+                        ),
                         label.clone(),
                         ctx.fonts.ribbon.menu,
                         ctx.theme.text,
-                        Horizontal::Center,
+                        Horizontal::Left,
                         Vertical::Center,
                     );
                 }
@@ -1444,8 +1453,8 @@ where
                     }
                     p.hover = target.clone();
                 }
-                // preview on gallery item hover
-                self.handle_preview(&target, shell);
+                // preview on gallery item hover (dwell + live switch)
+                self.handle_preview(shell);
                 if let Some(node) = self.scene.hit(local(position))
                     && let Some(tip) = node.tip
                 {
@@ -1545,38 +1554,9 @@ where
 }
 
 impl<'a, Message, Th, Renderer> RibbonOverlay<'a, Message, Th, Renderer> {
-    fn handle_preview(&mut self, target: &Option<Target>, shell: &mut Shell<'_, Message>) {
-        let gallery_hit = match target {
-            Some(Target::GalleryItem { cmd, index, popup: true }) => Some((*cmd, *index)),
-            _ => None,
-        };
-        if gallery_hit != self.state.previewed {
-            if let Some((cmd, index)) = self.state.previewed.take() {
-                publish(
-                    shell,
-                    self.mapper,
-                    RibbonEvent::Execute {
-                        command: cmd,
-                        verb: ExecutionVerb::CancelPreview,
-                        key: Some(PropertyKey::SelectedItem),
-                        value: Some(PropValue::UInt(index as u32)),
-                    },
-                );
-            }
-            if let Some((cmd, index)) = gallery_hit {
-                self.state.previewed = Some((cmd, index));
-                publish(
-                    shell,
-                    self.mapper,
-                    RibbonEvent::Execute {
-                        command: cmd,
-                        verb: ExecutionVerb::Preview,
-                        key: Some(PropertyKey::SelectedItem),
-                        value: Some(PropValue::UInt(index as u32)),
-                    },
-                );
-            }
-        }
+    fn handle_preview(&mut self, shell: &mut Shell<'_, Message>) {
+        // same dwell/live-switch machine as the in-ribbon strip
+        super::update_gallery_preview(self.state, shell, self.mapper);
     }
 
     /// Press at a position (mouse or first touch finger).

@@ -1807,6 +1807,9 @@ fn gallery_col_widths(
 ) -> Vec<f32> {
     let icon = g.item_width.max(g.item_height);
     let cols = cols.max(1);
+    // a trailing space after the caption so the last character never
+    // touches the column edge
+    let trail = ctx.text_w(" ", ctx.fonts.ribbon.menu);
     let mut text: Vec<f32> = vec![0.0; cols];
     if g.show_label
         && let Some(items) = ctx
@@ -1822,7 +1825,9 @@ fn gallery_col_widths(
             text[i % cols] = text[i % cols].max(w);
         }
     }
-    text.into_iter().map(|w| icon + 3.0 + w).collect()
+    text.into_iter()
+        .map(|w| icon + 3.0 + w + trail)
+        .collect()
 }
 
 /// Width of the in-ribbon strip: 1px frame padding on both sides and
