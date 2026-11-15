@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use crate::fs::{self, FsEvent, Job};
 
 use super::dnd::PressArm;
-use super::folder::ColDrag;
+use super::folder::{ColDrag, ColReorder};
 use super::format::type_label;
 use super::message::{ClipMode, FrameStyle, Message, NavSection, Pane, SortBy};
 use super::nav::NavTree;
@@ -178,8 +178,18 @@ pub struct Explorer {
     /// Per-column visibility, parallel to `detail_cfg.columns` (the
     /// column menu toggles it).
     pub details_col_on: Vec<bool>,
+    /// Details column display order (a permutation of
+    /// `detail_cfg.columns` indices; the column-menu visibility flags
+    /// filter it). The header reorder drag rewrites it on release.
+    pub details_col_order: Vec<usize>,
     /// Details column drag in progress.
     pub(crate) col_drag: Option<ColDrag>,
+    /// Details column header reorder drag in progress.
+    pub(crate) col_reorder: Option<ColReorder>,
+    /// Armed Details header press: (column, cursor at press). Travel
+    /// past the drag threshold becomes the reorder drag; a plain
+    /// release sorts.
+    pub(crate) col_arm: Option<(usize, iced::Point)>,
     /// Hovered Details column header (index into `detail_cfg.columns`).
     pub(crate) col_hovered: Option<usize>,
     /// Details column header held pressed (drives the 75% blue tint).
@@ -294,6 +304,7 @@ impl Explorer {
         let detail_cfg = crate::details_view::DetailsViewCfg::load();
         let details_cols = detail_cfg.columns.iter().map(|c| c.width).collect();
         let details_col_on = detail_cfg.columns.iter().map(|c| c.on).collect();
+        let details_col_order: Vec<usize> = (0..detail_cfg.columns.len()).collect();
         let mut s = Self {
             window: None,
             cwd,
@@ -358,7 +369,10 @@ impl Explorer {
             detail_cfg,
             details_cols,
             details_col_on,
+            details_col_order,
             col_drag: None,
+            col_reorder: None,
+            col_arm: None,
             col_hovered: None,
             col_pressed: None,
             sort: SortBy::Name,
@@ -1495,7 +1509,8 @@ impl Explorer {
             Message::ColumnSplitBegin(col) => self.column_split_begin(col),
             Message::ColumnSplitMove(x) => self.column_split_move(x),
             // Details column header (model/folder.rs / model/menu.rs)
-            Message::ColumnSortClick(col) => self.column_sort_click(col),
+            Message::ColumnSortClick(col) => self.column_header_press(col),
+            Message::ColumnReorderTick => self.column_reorder_tick(),
             Message::ColumnFilterMenu(col) => {
                 self.column_filter_menu(col);
                 iced::Task::none()
@@ -1907,6 +1922,41 @@ impl Explorer {
                         iced::Event::Mouse(MEvent::ButtonReleased(MButton::Left)) => {
                             self.col_drag = None;
                             return iced::Task::none();
+                        }
+                        _ => {}
+                    }
+                }
+                // armed header press: travel past the threshold becomes
+                // a header reorder drag; a plain release sorts (Windows
+                // header semantics)
+                if let Some((col, at)) = self.col_arm {
+                    use iced::mouse::{Button as MButton, Event as MEvent};
+                    match &e {
+                        iced::Event::Mouse(MEvent::CursorMoved { position }) => {
+                            let d = ((position.x - at.x).powi(2)
+                                + (position.y - at.y).powi(2))
+                            .sqrt();
+                            if d >= crate::dnd::DRAG_THRESHOLD * self.dpi_multiplier() {
+                                self.column_reorder_begin(col, at);
+                            }
+                        }
+                        iced::Event::Mouse(MEvent::ButtonReleased(MButton::Left)) => {
+                            self.col_arm = None;
+                            return self.column_sort_release(col);
+                        }
+                        _ => {}
+                    }
+                }
+                // column reorder drag: the dragged header follows the
+                // cursor, the order commits on left release
+                if self.col_reorder.is_some() {
+                    use iced::mouse::{Button as MButton, Event as MEvent};
+                    match &e {
+                        iced::Event::Mouse(MEvent::CursorMoved { position }) => {
+                            return self.column_reorder_move(position.x);
+                        }
+                        iced::Event::Mouse(MEvent::ButtonReleased(MButton::Left)) => {
+                            return self.column_reorder_end();
                         }
                         _ => {}
                     }

@@ -188,9 +188,9 @@ pub enum Message {
     ColumnSplitBegin(usize),
     /// Cursor moved during a Details column drag (window-logical x).
     ColumnSplitMove(f32),
-    /// Left-clicked a Details column header: sort by its key, toggling
-    /// ascending/descending when it is already the sort column
-    /// (SPEC/detail-view.txt §9).
+    /// Pressed a Details column header title: arms a potential reorder
+    /// drag; a plain release sorts, travel past the threshold drags
+    /// (Windows header semantics).
     ColumnSortClick(usize),
     /// Clicked a Details column's dropdown button: open its filter
     /// menu (SPEC/detail-view.txt §9).
@@ -205,6 +205,9 @@ pub enum Message {
     /// or dropdown): capture only — the rubber band must never start
     /// on the title bar (SPEC/detail-view.txt §14).
     ColumnHeaderPress,
+    /// Animation tick for the Details column header reorder: eases the
+    /// base headers into the newly reserved slot while a drag is live.
+    ColumnReorderTick,
     SetSort(SortBy),
     /// A ribbon framework event (IUICommandHandler::Execute and friends).
     Ribbon(crate::ribbon::RibbonEvent),

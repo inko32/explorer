@@ -771,12 +771,17 @@ fn pane_backdrop(rainbow: bool, skin: skin::Skin) -> Element<'static, Message> {
 
 /// The resizer hit target at a column's right edge: a 1px separator
 /// line (§15) widened to 4px for the drag (the extra 3px are
-/// colorless — §10).
-const COL_RESIZER_W: f32 = 4.0;
+/// colorless — §10). The reorder drag reserves the same 4px between
+/// headers.
+pub(crate) const COL_RESIZER_W: f32 = 4.0;
 
-/// Visible Details columns (indices into `detail_cfg.columns`), in order.
+/// Visible Details columns (indices into `detail_cfg.columns`), in the
+/// user arrangement order.
 fn details_visible(state: &Explorer) -> Vec<usize> {
-    (0..state.detail_cfg.columns.len())
+    state
+        .details_col_order
+        .iter()
+        .copied()
         .filter(|&i| state.details_col_on.get(i).copied().unwrap_or(true))
         .collect()
 }
@@ -836,94 +841,23 @@ fn sort_arrow(ascending: bool, w: f32, h: f32, color: Color) -> Element<'static,
 /// pressed; the title text is dark blue. The dropdown button and its
 /// separator line are invisible until the column is hovered (they keep
 /// their space). A click sorts, the dropdown opens the filter menu, a
-/// right-click opens the column menu. The block is as wide as the
-/// columns need — no 100% fill (§7/§10).
+/// right-click opens the column menu, a drag reorders (Windows header
+/// semantics: the dragged header floats, the others shift aside, the
+/// rows follow on release). The block is as wide as the columns need —
+/// no 100% fill (§7/§10).
 fn details_header(state: &Explorer, skin: skin::Skin) -> Element<'static, Message> {
     let d = &state.view_cfg.layouts.details;
     let dc = &state.detail_cfg;
+    // a reorder drag replaces the strip: the base headers sit at their
+    // reserved slots (animated) and the dragged header floats
+    if let Some(drag) = &state.col_reorder {
+        return details_header_drag(state, skin, drag);
+    }
     let mut cols = row![Space::new().width(Length::Fixed(dc.files_left))];
     for &g in &details_visible(state) {
-        let c = &dc.columns[g];
-        let w = details_col_w(state, g);
         let hovered = state.col_hovered == Some(g);
         let pressed = state.col_pressed == Some(g);
-        // the title text is dark blue; the hover/press tints are the
-        // accent at 50% / 75% over the transparent background
-        let color = skin.accent_dark;
-        let bgc = if pressed {
-            Color { a: 0.75, ..skin.accent }
-        } else if hovered {
-            Color { a: 0.50, ..skin.accent }
-        } else {
-            Color::TRANSPARENT
-        };
-        // §2: the sort arrow sits ON TOP of the title, centered in the
-        // column (other columns reserve the same 5px so the titles
-        // stay aligned)
-        let arrow: Element<Message> = if c.sort.is_some() && state.sort == c.sort.unwrap() {
-            sort_arrow(state.sort_asc, dc.arrow_w, dc.arrow_h, color)
-        } else {
-            Space::new()
-                .width(Length::Fixed(dc.arrow_w))
-                .height(Length::Fixed(dc.arrow_h))
-                .boxed()
-        };
-        // §5/§6: the 1px line + the 15px dropdown button at the right —
-        // invisible until the column is hovered (space is reserved)
-        let dropdown = mouse_area(
-            container(sort_arrow(
-                false,
-                dc.arrow_w,
-                dc.arrow_h,
-                if hovered { color } else { Color::TRANSPARENT },
-            ))
-            .width(Length::Fixed(dc.dropdown_w))
-            .height(Length::Fill)
-            .align_x(iced::alignment::Horizontal::Center)
-            .align_y(iced::alignment::Vertical::Center),
-        )
-        .on_press(Message::ColumnFilterMenu(g))
-        .on_enter(Message::ColumnHoverEnter(g))
-        .on_exit(Message::ColumnHoverExit(g));
-        let cell = container(
-            column![
-                container(arrow)
-                    .width(Length::Fill)
-                    .align_x(iced::alignment::Horizontal::Center)
-                    .height(Length::Fixed(dc.arrow_h)),
-                row![
-                    container(text(c.label.clone()).size(dc.font_size).color(color))
-                        .padding(iced::Padding {
-                            left: dc.text_pad_left,
-                            ..Default::default()
-                        }),
-                    Space::new().width(Length::Fill),
-                    container(
-                        Space::new()
-                            .width(Length::Fixed(crate::theme::border_w(dc.sep_w)))
-                            .height(Length::Fill)
-                    )
-                    // a faint line was almost invisible on the window
-                    // background — use the darker secondary text color
-                    .style(bg(if hovered { skin.subtle } else { Color::TRANSPARENT })),
-                    dropdown,
-                ]
-                .height(Length::Fill)
-                .align_y(iced::Alignment::Center),
-            ]
-            .height(Length::Fixed(d.header_h)),
-        )
-        .width(Length::Fixed(w))
-        .style(move |_t: &iced::Theme| container::Style {
-            background: Some(bgc.into()),
-            ..Default::default()
-        });
-        let cell = mouse_area(cell)
-            .on_press(Message::ColumnSortClick(g))
-            .on_right_press(Message::ColumnSettingsMenu)
-            .on_enter(Message::ColumnHoverEnter(g))
-            .on_exit(Message::ColumnHoverExit(g));
-        cols = cols.push(cell.boxed());
+        cols = cols.push(details_header_cell(state, skin, g, hovered, pressed, true));
         // §10/§15: the column's right resizer — the 1px separator line
         // with a 4px drag target; resizes only its own column
         let resizer = mouse_area(
@@ -948,6 +882,189 @@ fn details_header(state: &Explorer, skin: skin::Skin) -> Element<'static, Messag
     // the strip background is fully transparent (the titles tint on
     // hover/press only): the pane backdrop shows through
     container(cols.height(Length::Fixed(d.header_h)).align_y(iced::Alignment::Center))
+        .width(Length::Fill)
+        .boxed()
+}
+
+/// One Details column header cell: sort arrow on top (§2), the title,
+/// the 1px line + dropdown button at the right (§5/§6). `hovered` /
+/// `pressed` drive the blue tints; `interactive` wraps the cell in the
+/// sort/right-click mouse_area — the reorder drag renders
+/// non-interactive copies that follow the cursor.
+fn details_header_cell(
+    state: &Explorer,
+    skin: skin::Skin,
+    g: usize,
+    hovered: bool,
+    pressed: bool,
+    interactive: bool,
+) -> Element<'static, Message> {
+    let d = &state.view_cfg.layouts.details;
+    let dc = &state.detail_cfg;
+    let c = &dc.columns[g];
+    let w = details_col_w(state, g);
+    // the title text is dark blue; the hover/press tints are the
+    // accent at 50% / 75% over the transparent background
+    let color = skin.accent_dark;
+    let bgc = if pressed {
+        Color { a: 0.75, ..skin.accent }
+    } else if hovered {
+        Color { a: 0.50, ..skin.accent }
+    } else {
+        Color::TRANSPARENT
+    };
+    // §2: the sort arrow sits ON TOP of the title, centered in the
+    // column (other columns reserve the same 5px so the titles
+    // stay aligned)
+    let arrow: Element<Message> = if c.sort.is_some() && state.sort == c.sort.unwrap() {
+        sort_arrow(state.sort_asc, dc.arrow_w, dc.arrow_h, color)
+    } else {
+        Space::new()
+            .width(Length::Fixed(dc.arrow_w))
+            .height(Length::Fixed(dc.arrow_h))
+            .boxed()
+    };
+    // §5/§6: the 1px line + the 15px dropdown button at the right —
+    // invisible until the column is hovered (space is reserved)
+    let dropdown = mouse_area(
+        container(sort_arrow(
+            false,
+            dc.arrow_w,
+            dc.arrow_h,
+            if hovered { color } else { Color::TRANSPARENT },
+        ))
+        .width(Length::Fixed(dc.dropdown_w))
+        .height(Length::Fill)
+        .align_x(iced::alignment::Horizontal::Center)
+        .align_y(iced::alignment::Vertical::Center),
+    )
+    .on_press(Message::ColumnFilterMenu(g))
+    .on_enter(Message::ColumnHoverEnter(g))
+    .on_exit(Message::ColumnHoverExit(g));
+    let cell = container(
+        column![
+            container(arrow)
+                .width(Length::Fill)
+                .align_x(iced::alignment::Horizontal::Center)
+                .height(Length::Fixed(dc.arrow_h)),
+            row![
+                container(text(c.label.clone()).size(dc.font_size).color(color))
+                    .padding(iced::Padding {
+                        left: dc.text_pad_left,
+                        ..Default::default()
+                    }),
+                Space::new().width(Length::Fill),
+                container(
+                    Space::new()
+                        .width(Length::Fixed(crate::theme::border_w(dc.sep_w)))
+                        .height(Length::Fill)
+                )
+                // a faint line was almost invisible on the window
+                // background — use the darker secondary text color
+                .style(bg(if hovered { skin.subtle } else { Color::TRANSPARENT })),
+                dropdown,
+            ]
+            .height(Length::Fill)
+            .align_y(iced::Alignment::Center),
+        ]
+        .height(Length::Fixed(d.header_h)),
+    )
+    .width(Length::Fixed(w))
+    .style(move |_t: &iced::Theme| container::Style {
+        background: Some(bgc.into()),
+        ..Default::default()
+    });
+    if interactive {
+        mouse_area(cell)
+            .on_press(Message::ColumnSortClick(g))
+            .on_right_press(Message::ColumnSettingsMenu)
+            .on_enter(Message::ColumnHoverEnter(g))
+            .on_exit(Message::ColumnHoverExit(g))
+            .boxed()
+    } else {
+        cell.boxed()
+    }
+}
+
+/// The header strip while a reorder drag is live: every base header
+/// sits at its reserved slot — animated from the previous slot when
+/// the drag crossed a midpoint — and the dragged header floats at the
+/// cursor on top. Headers only: the rows keep the committed order until
+/// the release commits it. Positions are header-local.
+///
+/// The base headers go into ONE `row!` with relative spacers: the gap
+/// between two base headers is `width + 4px` in every slot layout, so
+/// all spacers stay non-negative while the reservation slides across
+/// the row — a plain row can carry the animation. (A `stack!` cannot:
+/// it sizes itself from its base layer alone and clamps every other
+/// layer to that, crushing the wider pieces.)
+fn details_header_drag(
+    state: &Explorer,
+    skin: skin::Skin,
+    drag: &crate::model::ColReorder,
+) -> Element<'static, Message> {
+    let d = &state.view_cfg.layouts.details;
+    let dc = &state.detail_cfg;
+    let base = state.details_base(drag.col);
+    let w0 = details_col_w(state, drag.col);
+    // the strip is ALWAYS as wide as every visible column plus the
+    // dragged reservation — even when the slot is at the very end,
+    // where the reservation has no base column after it (deriving the
+    // width from the pushed pieces would drop it there and clamp the
+    // floating header into its neighbor)
+    let strip_w = dc.files_left
+        + base
+            .iter()
+            .map(|&g| details_col_w(state, g) + COL_RESIZER_W)
+            .sum::<f32>()
+        + w0
+        + COL_RESIZER_W;
+    // ease-out the shift between the reserved slots
+    let t = 1.0 - (1.0 - drag.anim_t.clamp(0.0, 1.0)).powi(2);
+    let from = state.col_slot_positions(drag.col, drag.from_over);
+    let to = state.col_slot_positions(drag.col, drag.over);
+    let sep_w = crate::theme::border_w(1.0);
+    let gap_rest = (COL_RESIZER_W - sep_w).max(0.0);
+    let mut line = row![];
+    let mut prev_end = 0.0f32;
+    for &g in &base {
+        let x = from[g] + (to[g] - from[g]) * t;
+        line = line.push(Space::new().width(Length::Fixed((x - prev_end).max(0.0))).boxed());
+        line = line.push(details_header_cell(state, skin, g, false, false, false));
+        line = line.push(
+            container(
+                Space::new()
+                    .width(Length::Fixed(sep_w))
+                    .height(Length::Fill),
+            )
+            .style(bg(skin.sep))
+            .boxed(),
+        );
+        line = line.push(Space::new().width(Length::Fixed(gap_rest)).boxed());
+        prev_end = x + details_col_w(state, g) + COL_RESIZER_W;
+    }
+    // the dragged header rides the cursor, clamped to the strip so the
+    // overlay never outgrows the base layer (the stack clamps layers
+    // to its size)
+    let fx = (state.col_committed_x(drag.col) + (drag.cur_x - drag.start_x))
+        .clamp(0.0, (strip_w - w0 - COL_RESIZER_W).max(0.0));
+    let dragged = row![
+        Space::new().width(Length::Fixed(fx)),
+        details_header_cell(state, skin, drag.col, true, false, false),
+        container(
+            Space::new()
+                .width(Length::Fixed(sep_w))
+                .height(Length::Fill),
+        )
+        .style(bg(skin.sep)),
+        Space::new().width(Length::Fixed(gap_rest)),
+    ]
+    .height(Length::Fixed(d.header_h));
+    let strip = stack![
+        line.height(Length::Fixed(d.header_h)).boxed(),
+        dragged.boxed(),
+    ];
+    container(strip.height(Length::Fixed(d.header_h)))
         .width(Length::Fill)
         .boxed()
 }
