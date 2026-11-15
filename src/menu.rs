@@ -711,9 +711,12 @@ fn item_row<'a>(
     skin: skin::Skin,
 ) -> Element<'a, Message> {
     let color = if item.enabled { skin.text } else { skin.disabled };
+    // base on the resolved primary family (fonts.yaml priority list),
+    // not Font::DEFAULT: an explicit .font() replaces the app's
+    // default_font and would drop Selawik for generic sans-serif
     let bold = iced::Font {
         weight: if item.bold { iced::font::Weight::Bold } else { iced::font::Weight::Normal },
-        ..iced::Font::DEFAULT
+        ..crate::fonts::primary()
     };
     let icon_el: Element<Message> = match &item.icon {
         Some(name) => crate::ui_common::icon(name, l.icon_size, skin),
