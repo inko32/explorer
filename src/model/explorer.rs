@@ -257,6 +257,9 @@ pub struct Explorer {
     /// Wayland DnD side-channel (drag-out payloads + drag-in offers;
     /// `None` off-Wayland or before the window exists).
     pub dnd_wl: Option<crate::dnd_wayland::Handle>,
+    /// Last `(location icon, dark, system icons)` pushed to the
+    /// compositor's toplevel-icon protocol; None until the first push.
+    wl_icon_key: Option<(&'static str, bool, bool)>,
     /// True while a native Wayland drag started here is live — the
     /// compositor shows the drag image, so the in-window overlays
     /// (icon badge + caption) must stay hidden.
@@ -321,6 +324,7 @@ impl Explorer {
             back: Vec::new(),
             forward: Vec::new(),
             dnd_wl: None,
+            wl_icon_key: None,
             dnd_wl_drag: false,
             menu_popup: false,
             dark: false,
@@ -972,6 +976,7 @@ impl Explorer {
         let auto = !matches!(message, Message::Ribbon(_));
         let task = self.handle(message);
         self.sync_pane();
+        self.sync_wl_icon();
         // every model change refreshes the ribbon (enablement, toggle
         // values, contextual-tab availability) — but only when the
         // snapshot CHANGED: update() runs per input event, and a mouse
@@ -981,6 +986,36 @@ impl Explorer {
             self.ribbon.auto_activate();
         }
         task
+    }
+
+    /// Push the current location icon to the compositor (taskbar /
+    /// window-switcher icon via xdg_toplevel_icon_v1) when it changed —
+    /// on navigation, theme, or icon-pack switches. No-op off Wayland
+    /// and on compositors without the global (the side-channel thread
+    /// ignores the command; rasterizing two icons is only paid on an
+    /// actual change, not per event).
+    fn sync_wl_icon(&mut self) {
+        let key = (
+            self.location_icon(),
+            self.dark,
+            crate::icon::system_active(),
+        );
+        if self.wl_icon_key == Some(key) {
+            return;
+        }
+        // only mark as sent AFTER the push: the side-channel spawns
+        // asynchronously (Message::WlHandles), and an early update must
+        // not consume the key without delivering it
+        let Some(h) = &self.dnd_wl else {
+            return;
+        };
+        self.wl_icon_key = Some(key);
+        let skin = if self.dark {
+            crate::ui_common::skin::dark()
+        } else {
+            crate::ui_common::skin::light()
+        };
+        h.set_icon(crate::dnd_wayland::paint_toplevel_icon(key.0, &skin));
     }
 
     fn handle(&mut self, message: Message) -> iced::Task<Message> {

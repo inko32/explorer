@@ -29,6 +29,7 @@ fontdb = "0.24"  # system font probing for the fonts.yaml fallback list (already
 # and drives wl_data_device itself. All of these are already in the
 # cargo tree (sctk via winit, cosmic-text via iced, image via iced).
 smithay-client-toolkit = "=0.21.1"
+wayland-protocols = { version = "0.32", features = ["staging"] }  # xdg-toplevel-icon-v1 (taskbar icon); staging is already on via sctk
 wayland-client = "0.31"
 wayland-backend = "0.3"
 rustix = { version = "1", features = ["event", "pipe", "fs"] }

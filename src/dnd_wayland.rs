@@ -23,6 +23,14 @@
 //! paints the drag image (icon theme + fonts live there) and sends the
 //! pixels over; events flow back as [`Event`]s through the same
 //! stream channel the fs worker uses.
+//!
+//! Second duty on the same connection/thread: the compositor's
+//! taskbar/window-switcher icon. winit/iced cannot set one on Wayland
+//! (`set_window_icon` is a no-op there), so the thread drives
+//! `xdg_toplevel_icon_v1` from the same registry/queue: the GUI paints
+//! the location icon onto square shm buffers and sends them over as
+//! [`Cmd::SetIcon`]. Compositors without the global (e.g. mutter) just
+//! never get an icon pushed — everything stays a silent no-op.
 
 use std::io::{Read as _, Write as _};
 use std::os::unix::io::{AsFd as _, AsRawFd as _, BorrowedFd};
@@ -48,6 +56,8 @@ use smithay_client_toolkit::shm::{Shm, ShmHandler};
 use smithay_client_toolkit::{delegate_registry, registry_handlers};
 use wayland_client::backend::{Backend, ObjectId};
 use wayland_client::globals::registry_queue_init;
+use wayland_protocols::xdg::toplevel_icon::v1::client::xdg_toplevel_icon_manager_v1::XdgToplevelIconManagerV1;
+use wayland_protocols::xdg::toplevel_icon::v1::client::xdg_toplevel_icon_v1::XdgToplevelIconV1;
 use wayland_client::protocol::wl_data_device::WlDataDevice;
 use wayland_client::protocol::wl_data_device_manager::DndAction;
 use wayland_client::protocol::wl_data_source::WlDataSource;
@@ -96,6 +106,23 @@ enum Cmd {
     UpdatePopup(DragVisual),
     /// Close the popup.
     ClosePopup,
+    /// Set the compositor's toplevel icon (taskbar/window-switcher),
+    /// replacing any previous one. Ignored when the compositor has no
+    /// `xdg_toplevel_icon_manager_v1`.
+    SetIcon(ToplevelIcon),
+}
+
+/// Pixels for one toplevel-icon assignment: one square buffer per
+/// scale, premultiplied RGBA (like [`DragVisual`]).
+pub struct ToplevelIcon {
+    pub sizes: Vec<IconSize>,
+}
+
+pub struct IconSize {
+    /// wl buffer scale the pixels were rendered for (e.g. 1, 2)
+    pub scale: i32,
+    /// square `width == height`
+    pub visual: DragVisual,
 }
 
 /// A fully painted drag image: premultiplied RGBA pixels. The hotspot
@@ -167,6 +194,10 @@ impl Handle {
 
     pub fn close_popup(&self) {
         self.send(Cmd::ClosePopup);
+    }
+
+    pub fn set_icon(&self, icon: ToplevelIcon) {
+        self.send(Cmd::SetIcon(icon));
     }
 
     fn send(&self, cmd: Cmd) {
@@ -280,6 +311,11 @@ fn run(
     // Our own registry + queue on winit's connection.
     let (globals, mut queue) = registry_queue_init::<State>(&conn).map_err(|e| e.to_string())?;
     let qh = queue.handle();
+    // taskbar/switcher icon support — absent on compositors without the
+    // staging global (e.g. mutter); SetIcon then stays a no-op
+    let icon_mgr = globals
+        .bind::<XdgToplevelIconManagerV1, _, _>(&qh, 1..=1, ())
+        .ok();
 
     let shm = Shm::bind(&globals, &qh).map_err(|e| e.to_string())?;
     let compositor = CompositorState::bind(&globals, &qh).map_err(|e| e.to_string())?;
@@ -296,6 +332,10 @@ fn run(
         _ => None,
     };
     let icon_pool = SlotPool::new(256 * 256 * 4, &shm).map_err(|e| e.to_string())?;
+    // the toplevel icon needs its own pool: its buffers must stay alive
+    // AND immutable for the icon's lifetime (protocol no_buffer error),
+    // so they may never recycle through the drag-icon pool
+    let toplevel_pool = SlotPool::new(192 * 1024, &shm).map_err(|e| e.to_string())?;
     let popup_pool = SlotPool::new(512 * 1024, &shm).map_err(|e| e.to_string())?;
     let mut state = State {
         registry_state: RegistryState::new(&globals),
@@ -306,6 +346,10 @@ fn run(
         ddm,
         xdg,
         parent,
+        toplevel,
+        icon_mgr,
+        toplevel_icon: None,
+        toplevel_pool,
         popup: None,
         popup_pool,
         fractional,
@@ -428,6 +472,14 @@ struct State {
     xdg: smithay_client_toolkit::shell::xdg::XdgShell,
     /// the window's xdg_toplevel wrapper — the popup parent chain
     parent: smithay_client_toolkit::shell::xdg::window::Window,
+    /// the raw xdg_toplevel proxy — target for xdg_toplevel_icon_v1
+    toplevel: smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::XdgToplevel,
+    /// `xdg_toplevel_icon_manager_v1`, when the compositor offers it
+    icon_mgr: Option<XdgToplevelIconManagerV1>,
+    /// the icon currently assigned to the toplevel (kept alive: its
+    /// buffers must not be destroyed or modified while assigned)
+    toplevel_icon: Option<ToplevelIconState>,
+    toplevel_pool: SlotPool,
     /// the open off-window menu popup, if any
     popup: Option<PopupState>,
     popup_pool: SlotPool,
@@ -502,6 +554,16 @@ fn commit_popup_pixels(pool: &mut SlotPool, popup: &mut PopupState, visual: Drag
     if buffer.attach_to(surface).is_ok() {
         surface.commit();
     }
+}
+
+/// The icon assigned to our toplevel. The protocol requires the
+/// wl_buffers to stay alive and unmodified until the icon object is
+/// destroyed, so both are held here and only released together when a
+/// new icon replaces this one.
+struct ToplevelIconState {
+    /// held (never read) so the icon object stays alive until replaced
+    _icon: XdgToplevelIconV1,
+    _buffers: Vec<Buffer>,
 }
 
 /// An open xdg_popup hosting an off-window menu.
@@ -671,6 +733,43 @@ impl State {
             }
             Cmd::ClosePopup => {
                 self.popup = None;
+            }
+            Cmd::SetIcon(payload) => {
+                let Some(mgr) = &self.icon_mgr else {
+                    return;
+                };
+                // buffers must be SQUARE (protocol invalid_buffer error);
+                // the GUI guarantees width == height. A fresh icon object
+                // per change: an icon is immutable once set on a toplevel.
+                let mut buffers = Vec::with_capacity(payload.sizes.len());
+                let icon = mgr.create_icon(qh, ());
+                for size in &payload.sizes {
+                    let (w, h) = (size.visual.width.max(1), size.visual.height.max(1));
+                    let Ok((buffer, canvas)) = self.toplevel_pool.create_buffer(
+                        w as i32,
+                        h as i32,
+                        w as i32 * 4,
+                        wayland_client::protocol::wl_shm::Format::Argb8888,
+                    ) else {
+                        icon.destroy();
+                        return;
+                    };
+                    let src = swizzle(&size.visual.pixels);
+                    let Some(dst) = canvas.get_mut(..src.len()) else {
+                        icon.destroy();
+                        return;
+                    };
+                    dst.copy_from_slice(&src);
+                    icon.add_buffer(buffer.wl_buffer(), size.scale.max(1));
+                    buffers.push(buffer);
+                }
+                mgr.set_icon(&self.toplevel, Some(&icon));
+                // applied on the toplevel's next commit (winit redraws);
+                // only now may the replaced icon (and its buffers) die
+                self.toplevel_icon = Some(ToplevelIconState {
+                    _icon: icon,
+                    _buffers: buffers,
+                });
             }
         }
     }
@@ -1102,6 +1201,21 @@ impl ShmHandler for State {
 delegate_registry!(State);
 wayland_client::delegate_noop!(State: WpFractionalScaleManagerV1);
 wayland_client::delegate_noop!(State: WpViewporter);
+// the icon manager's icon_size/done hints are optional preferences —
+// we ship fixed 64/128px sizes, so the events are parsed and dropped
+// (delegate_noop! is unusable here: it panics on interfaces WITH events)
+impl wayland_client::Dispatch<XdgToplevelIconManagerV1, ()> for State {
+    fn event(
+        _: &mut State,
+        _: &XdgToplevelIconManagerV1,
+        _: <XdgToplevelIconManagerV1 as wayland_client::Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<State>,
+    ) {
+    }
+}
+wayland_client::delegate_noop!(State: XdgToplevelIconV1);
 // wp_viewport has no events; the dispatch2 blanket (below) needs this
 // for the () user data attached at get_viewport
 impl smithay_client_toolkit::dispatch2::Dispatch2<WpViewport, State> for () {
@@ -1260,6 +1374,32 @@ pub fn paint_drag_visual(
         height: h,
         pixels: px,
     }
+}
+
+/// Paint the toplevel (taskbar/window-switcher) icon: the location icon
+/// centered on a transparent SQUARE canvas at each wl scale — the
+/// protocol only accepts square shm buffers. Two sizes cover common
+/// taskbars (16-32px at scale 1, hidpi at scale 2).
+pub fn paint_toplevel_icon(name: &str, skin: &crate::theme::Palette) -> ToplevelIcon {
+    let sizes = [(1, 64), (2, 128)]
+        .into_iter()
+        .map(|(scale, px)| {
+            let icon = crate::icon::raster(name, px, skin);
+            let mut visual = DragVisual {
+                width: px,
+                height: px,
+                pixels: vec![0; (px * px * 4) as usize],
+            };
+            let mut cv = Canvas {
+                px: &mut visual.pixels,
+                w: px,
+                h: px,
+            };
+            cv.blend_icon(1.0, 0.0, 0.0, px as f32, &icon, 255);
+            IconSize { scale, visual }
+        })
+        .collect();
+    ToplevelIcon { sizes }
 }
 
 fn icon_pix(skin: &crate::theme::Palette, is_dir: bool, name: &str, size: f32) -> crate::icon::IconPix {
