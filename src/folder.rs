@@ -954,10 +954,12 @@ fn details_header(state: &Explorer, skin: skin::Skin) -> Element<'static, Messag
         .on_press(Message::ColumnSplitBegin(g));
         cols = cols.push(resizer.boxed());
     }
-    // the strip background is fully transparent (the titles tint on
-    // hover/press only): the pane backdrop shows through
+    // the strip is opaque: it overlays the scrolling rows, so a
+    // transparent background would show file items sliding under it.
+    // Use the pane backdrop color so the header matches exactly
     container(cols.height(Length::Fixed(d.header_h)).align_y(iced::Alignment::Center))
         .width(Length::Fill)
+        .style(bg(skin.window_bg))
         .boxed()
 }
 
@@ -1139,8 +1141,10 @@ fn details_header_drag(
         line.height(Length::Fixed(d.header_h)).boxed(),
         dragged.boxed(),
     ];
+    // same opaque background as the resting header (see details_header)
     container(strip.height(Length::Fixed(d.header_h)))
         .width(Length::Fill)
+        .style(bg(skin.window_bg))
         .boxed()
 }
 
