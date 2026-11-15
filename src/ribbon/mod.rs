@@ -558,11 +558,32 @@ impl CommandHandler for ExplorerHandler {
         _value: Option<PropValue>,
         _props: Option<std::sync::Arc<dyn crate::ribbon::PropertySet + Send>>,
     ) -> Result<()> {
-        // gallery/combo previews are not used by the explorer ribbon
+        let snap = self.shared.borrow().snap.clone();
         if !matches!(verb, ExecutionVerb::Execute) {
+            // gallery hover preview: temporarily switch the folder view,
+            // revert when the pointer leaves the item
+            if command == cmd::VIEW_GALLERY {
+                match verb {
+                    ExecutionVerb::Preview => {
+                        if let Some(preset) = _value
+                            .as_ref()
+                            .and_then(|v| v.as_u32())
+                            .and_then(|i| snap.view_presets.get(i as usize).copied())
+                        {
+                            self.shared
+                                .borrow_mut()
+                                .out
+                                .push(Message::PreviewView(Some(preset)));
+                        }
+                    }
+                    ExecutionVerb::CancelPreview => {
+                        self.shared.borrow_mut().out.push(Message::PreviewView(None));
+                    }
+                    _ => {}
+                }
+            }
             return Ok(());
         }
-        let snap = self.shared.borrow().snap.clone();
         let mut out = Vec::new();
         match command {
             cmd::EXIT => out.push(Message::Close),

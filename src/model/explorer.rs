@@ -150,6 +150,9 @@ pub struct Explorer {
     pub view_cfg: crate::view_step::ViewCfg,
     /// View step index (SPEC/FOLDER-SPEC.MD §3).
     pub view_index: u8,
+    /// Committed view step while a gallery hover preview temporarily
+    /// overrides `view_index` (None = no preview active).
+    pub preview_view: Option<u8>,
     /// §6 enabled mask (resolved from folder-view.yaml at startup).
     #[allow(dead_code)] // the config is read via view_cfg.mask(); this
     // cache is for the future per-folder masks
@@ -360,6 +363,7 @@ impl Explorer {
             clipboard: None,
             view_cfg,
             view_index,
+            preview_view: None,
             view_mask,
             zoom_acc: 0.0,
             zoom_step_at: None,
@@ -1376,6 +1380,10 @@ impl Explorer {
                 iced::Task::none()
             }
             Message::SetView(index) => self.set_view_index(index),
+            Message::PreviewView(index) => match index {
+                Some(i) => self.preview_view_index(i),
+                None => self.end_view_preview(),
+            },
             Message::WheelZoom(delta) => self.wheel_zoom(delta),
             Message::ContextSelect(i) => {
                 self.active_pane = Pane::Folder;

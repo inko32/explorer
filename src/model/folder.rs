@@ -42,9 +42,36 @@ impl Explorer {
     /// Switch the view step index (§5 preset pick / §7 wheel step),
     /// snapping to the enabled mask, keeping the first visible item
     /// anchored in the viewport (§9) and storing the choice per folder
-    /// (§10). Selection and hover stay untouched.
+    /// (§10). Selection and hover stay untouched. A committed switch
+    /// also discards an in-flight gallery hover preview.
     pub(crate) fn set_view_index(&mut self, index: u8) -> iced::Task<Message> {
+        self.preview_view = None;
         let index = self.view_cfg.nearest_enabled(index);
+        // persist even when the preview already shows this step
+        self.folder_views.insert(self.cwd.clone(), index);
+        self.apply_view_index(index)
+    }
+
+    /// Gallery hover preview: temporarily switch the view step without
+    /// persisting it; the committed step is backed up on the first
+    /// preview and restored by [`Self::end_view_preview`].
+    pub(crate) fn preview_view_index(&mut self, index: u8) -> iced::Task<Message> {
+        let index = self.view_cfg.nearest_enabled(index);
+        if self.preview_view.is_none() {
+            self.preview_view = Some(self.view_index);
+        }
+        self.apply_view_index(index)
+    }
+
+    /// Revert a gallery hover preview to the committed view step.
+    pub(crate) fn end_view_preview(&mut self) -> iced::Task<Message> {
+        match self.preview_view.take() {
+            Some(backup) => self.apply_view_index(backup),
+            None => iced::Task::none(),
+        }
+    }
+
+    fn apply_view_index(&mut self, index: u8) -> iced::Task<Message> {
         if index == self.view_index {
             return iced::Task::none();
         }
@@ -52,7 +79,6 @@ impl Explorer {
         let old_compact = self.details_compact;
         self.view_index = index;
         self.refresh_it_label_lines();
-        self.folder_views.insert(self.cwd.clone(), index);
         self.anchor_view(old, old_compact)
     }
 

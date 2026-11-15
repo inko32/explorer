@@ -736,7 +736,10 @@ fn gallery_scene(ctx: &Ctx, cmd: u32, scroll: usize) -> Scene {
                         Size::new(cell_w - 4.0, cell_h - 4.0),
                     );
                     if idx == selected {
-                        quad(&mut scene, cell, Fill::Color(ctx.theme.checked_bg), ctx.theme.checked_border.map(|c| (c, lw(ctx, 1.0))), 2.0);
+                        // the activated item always shows its border
+                        // (light themes leave checked_border unset)
+                        let border_c = ctx.theme.checked_border.unwrap_or(ctx.theme.accent);
+                        quad(&mut scene, cell, Fill::Color(ctx.theme.checked_bg), Some((border_c, lw(ctx, 1.0))), 2.0);
                     }
                     hover_row(ctx, &mut scene, cell, Target::GalleryItem { cmd, index: idx, popup: true }, true);
                     scene.push(Node::new(cell, Cmd::Hit).target(Target::GalleryItem { cmd, index: idx, popup: true }).tip(cmd));
