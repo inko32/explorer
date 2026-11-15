@@ -75,6 +75,21 @@ fn dnd_stream_builder() -> dnd_wayland::EventReceiver {
         .unwrap_or_else(|| iced::futures::channel::mpsc::unbounded().1)
 }
 
+/// ~60fps tick stream for the Details column reorder's shift
+/// animation. The thread-pool iced executor has no timer (its
+/// `time::every` is an empty module), so a plain std thread + channel
+/// does the interval; the thread exits when the stream is dropped.
+fn reorder_tick_stream() -> impl iced::futures::Stream<Item = ()> {
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    std::thread::spawn(move || loop {
+        if tx.send(()).is_err() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(16));
+    });
+    iced::futures::stream::unfold(rx, |rx| async move { rx.recv().ok().map(|_| ((), rx)) })
+}
+
 fn main() -> iced::Result {
     // Renderer selection (D17): GPU (wgpu) is primary, CPU (tiny-skia) is the
     // reserved fallback — both are compiled in and picked at startup.
@@ -144,14 +159,28 @@ fn main() -> iced::Result {
         },
         text_color: theme.palette().background.base.text,
     })
-    .subscription(|_state: &Explorer| {
-        iced::Subscription::batch(vec![
+    .subscription(|state: &Explorer| {
+        let mut subs = vec![
             iced::window::open_events().map(Message::WindowOpened),
             iced::event::listen().map(Message::Event),
             iced::Subscription::run(fs_stream_builder).map(Message::FsEvent),
             iced::Subscription::run(dnd_stream_builder).map(Message::Dnd),
             iced::window::resize_events().map(|(_id, size)| Message::WindowResized(size.width, size.height)),
-        ])
+        ];
+        // the column reorder's shift animation ticks only while it is
+        // actually animating (a move restarts it, so the subscription
+        // resumes then)
+        if state
+            .col_reorder
+            .as_ref()
+            .is_some_and(|d| d.anim_t < 1.0)
+        {
+            subs.push(
+                iced::Subscription::run(reorder_tick_stream)
+                    .map(|_| Message::ColumnReorderTick),
+            );
+        }
+        iced::Subscription::batch(subs)
     })
     .window(iced::window::Settings {
         size: window_size(),

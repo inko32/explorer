@@ -440,9 +440,23 @@ impl Explorer {
     }
 
     /// Left-click a Details column header: sort by the column's key;
-    /// clicking the already-sorted column toggles ascending/descending
-    /// (SPEC/detail-view.txt §9).
-    pub(crate) fn column_sort_click(&mut self, col: usize) -> Task<Message> {
+    /// Press on a Details column title: arm a potential reorder drag —
+    /// the 75% press tint shows while held; travel past the drag
+    /// threshold becomes the header reorder drag, a plain release sorts
+    /// (Windows header semantics).
+    pub(crate) fn column_header_press(&mut self, col: usize) -> Task<Message> {
+        self.col_pressed = Some(col);
+        if self.col_arm.is_none() {
+            self.col_arm = Some((col, self.cursor));
+        }
+        Task::none()
+    }
+
+    /// Release of a header press that never crossed the drag threshold:
+    /// sort by the column's key, toggling ascending/descending on the
+    /// already-sorted column (SPEC/detail-view.txt §9).
+    pub(crate) fn column_sort_release(&mut self, col: usize) -> Task<Message> {
+        self.col_pressed = None;
         let Some(key) = self.detail_cfg.columns.get(col).and_then(|c| c.sort) else {
             return Task::none();
         };
@@ -452,10 +466,167 @@ impl Explorer {
             self.sort = key;
             self.sort_asc = true;
         }
-        // the 75% blue tint shows while the header is held pressed
-        self.col_pressed = Some(col);
         self.apply_sort();
         Task::none()
+    }
+
+    /// A header press travelled past the drag threshold: start the
+    /// column reorder drag.
+    pub(crate) fn column_reorder_begin(&mut self, col: usize, at: iced::Point) {
+        self.col_arm = None;
+        self.col_pressed = None;
+        // the drag starts from the column's own slot; the walk in
+        // `col_reorder_over` keeps it there until a midpoint is crossed
+        let over = self.col_reorder_over(col, at.x, at.x);
+        self.col_reorder = Some(ColReorder {
+            col,
+            start_x: at.x,
+            cur_x: at.x,
+            over,
+            from_over: over,
+            anim_t: 1.0,
+        });
+    }
+
+    /// Cursor moved during a header reorder drag: the dragged header
+    /// follows the cursor; crossing a target header's midpoint re-targets
+    /// the reserved slot and restarts the shift animation.
+    pub(crate) fn column_reorder_move(&mut self, x: f32) -> Task<Message> {
+        let Some((col, cur_x, start_x, over_now)) = self.col_reorder.as_mut().map(|d| {
+            d.cur_x = x;
+            (d.col, d.cur_x, d.start_x, d.over)
+        }) else {
+            return Task::none();
+        };
+        let over = self.col_reorder_over(col, cur_x, start_x);
+        if over != over_now
+            && let Some(d) = &mut self.col_reorder
+        {
+            d.from_over = d.over;
+            d.over = over;
+            d.anim_t = 0.0;
+        }
+        Task::none()
+    }
+
+    /// Release of a header reorder drag: move the dragged column next
+    /// to the slot the drag reserved; only now do the rows follow.
+    pub(crate) fn column_reorder_end(&mut self) -> Task<Message> {
+        let Some(drag) = self.col_reorder.take() else {
+            return Task::none();
+        };
+        let base = self.details_base(drag.col);
+        let mut order = self.details_col_order.clone();
+        order.retain(|&g| g != drag.col);
+        if let Some(&next) = base.get(drag.over) {
+            let at = order
+                .iter()
+                .position(|&g| g == next)
+                .unwrap_or(order.len());
+            order.insert(at, drag.col);
+        } else {
+            order.push(drag.col);
+        }
+        self.details_col_order = order;
+        Task::none()
+    }
+
+    /// The shift-animation tick: advance toward the settled layout.
+    pub(crate) fn column_reorder_tick(&mut self) -> Task<Message> {
+        if let Some(d) = &mut self.col_reorder {
+            d.anim_t = (d.anim_t + REORDER_TICK_MS / REORDER_SHIFT_MS).min(1.0);
+        }
+        Task::none()
+    }
+
+    /// The width of a Details column (the header resizer adjusts it).
+    fn details_col_w(&self, col: usize) -> f32 {
+        self.details_cols
+            .get(col)
+            .copied()
+            .unwrap_or(self.detail_cfg.columns[col].width)
+    }
+
+    /// The reorder drag's "base" list: the visible columns in display
+    /// order, minus the dragged one.
+    pub(crate) fn details_base(&self, col: usize) -> Vec<usize> {
+        self.details_col_order
+            .iter()
+            .copied()
+            .filter(|&g| g != col && self.details_col_on.get(g).copied().unwrap_or(true))
+            .collect()
+    }
+
+    /// Header-local x of a visible column in the committed layout.
+    pub(crate) fn col_committed_x(&self, col: usize) -> f32 {
+        let mut x = self.detail_cfg.files_left;
+        for &g in self.details_col_order.iter() {
+            if !self.details_col_on.get(g).copied().unwrap_or(true) {
+                continue;
+            }
+            if g == col {
+                return x;
+            }
+            x += self.details_col_w(g) + crate::folder::COL_RESIZER_W;
+        }
+        x
+    }
+
+    /// Header-local x of every configured column when the dragged
+    /// header reserves `slot`: the base (visible, minus the dragged)
+    /// headers compressed, the dragged width inserted at the slot (4px
+    /// resizer gaps, §15). Only base columns get entries; the result is
+    /// indexed by column index. Shared by the slot walk and the header
+    /// rendering.
+    pub(crate) fn col_slot_positions(&self, col: usize, slot: usize) -> Vec<f32> {
+        let base = self.details_base(col);
+        let mut pos = vec![0.0f32; self.detail_cfg.columns.len()];
+        let mut x = self.detail_cfg.files_left;
+        for (n, &g) in base.iter().enumerate() {
+            if n == slot {
+                x += self.details_col_w(col) + crate::folder::COL_RESIZER_W;
+            }
+            pos[g] = x;
+            x += self.details_col_w(g) + crate::folder::COL_RESIZER_W;
+        }
+        pos
+    }
+
+    /// The slot the dragged header currently reserves, walking one
+    /// header at a time from the column's own slot: each step compares
+    /// the dragged center with the neighbor's center in the CURRENT
+    /// reserved layout, so one crossing shifts exactly one header (no
+    /// cascade) and nothing moves before the first threshold.
+    pub(crate) fn col_reorder_over(&self, col: usize, cur_x: f32, start_x: f32) -> usize {
+        let base = self.details_base(col);
+        let mut over = 0;
+        for &g in &self.details_col_order {
+            if g == col {
+                break;
+            }
+            if self.details_col_on.get(g).copied().unwrap_or(true) {
+                over += 1;
+            }
+        }
+        let cx = self.col_committed_x(col) + (cur_x - start_x) + self.details_col_w(col) / 2.0;
+        loop {
+            let pos = self.col_slot_positions(col, over);
+            if over > 0 {
+                let g = base[over - 1];
+                if cx < pos[g] + self.details_col_w(g) / 2.0 {
+                    over -= 1;
+                    continue;
+                }
+            }
+            if over < base.len() {
+                let g = base[over];
+                if cx > pos[g] + self.details_col_w(g) / 2.0 {
+                    over += 1;
+                    continue;
+                }
+            }
+            return over;
+        }
     }
 
     /// Plain (no-modifier) selection of one row: collapse the selection
@@ -659,6 +830,32 @@ pub(crate) struct ColDrag {
     col: usize,
     start_x: Option<f32>,
     start_w: f32,
+}
+
+/// Shift-animation frame step and total length (the base headers slide
+/// aside when the dragged header crosses a midpoint).
+const REORDER_TICK_MS: f32 = 16.0;
+const REORDER_SHIFT_MS: f32 = 120.0;
+
+/// Details column header reorder drag (the Windows header drag): the
+/// dragged header floats with the cursor; the other headers shift
+/// aside, animated, when its center crosses a target header's
+/// midpoint; on release the column order commits and the rows follow.
+pub(crate) struct ColReorder {
+    /// dragged column (index into `detail_cfg.columns`)
+    pub col: usize,
+    /// cursor x at drag start (window-logical; deltas only — the
+    /// header's window x is never needed)
+    pub start_x: f32,
+    /// cursor x now
+    pub cur_x: f32,
+    /// the insertion slot reserved for the dragged header (index into
+    /// the visible list minus the dragged column)
+    pub over: usize,
+    /// the slot the shift animation interpolates from
+    pub from_over: usize,
+    /// shift animation progress 0..=1 (1 = settled)
+    pub anim_t: f32,
 }
 
 #[cfg(test)]
