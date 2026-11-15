@@ -1338,7 +1338,9 @@ pub fn plan_groups(
         }
         let sc = sized[gi].0.clone();
         let (_, ncols) = columns_of(&tab.groups[gi], &sc);
-        for off in (caption_cols[gi] + 1)..=ncols {
+        // gallery columns are reducible units too (3→2→1)
+        let units = ncols + gallery_reducible(&tab.groups[gi], &sc);
+        for off in (caption_cols[gi] + 1)..=units {
             if total(&sized) <= avail {
                 break 'stage2;
             }
@@ -1680,7 +1682,7 @@ pub fn width_of_scaled(
     control: &ControlSpec,
     scale: &ControlScale,
 ) -> f32 {
-    width_of_c(ctx, control, scale, false)
+    width_of_cc(ctx, control, scale, false, 0)
 }
 
 /// Width of a control with a scale applied; `caption_off` hides the
@@ -1690,6 +1692,18 @@ pub fn width_of_c(
     control: &ControlSpec,
     scale: &ControlScale,
     caption_off: bool,
+) -> f32 {
+    width_of_cc(ctx, control, scale, caption_off, 0)
+}
+
+/// [`width_of_c`] plus `ghide`: gallery columns removed by the cascade
+/// (stage 2 reduces gallery columns 3→2→1 before captions are hidden).
+pub fn width_of_cc(
+    ctx: &Ctx,
+    control: &ControlSpec,
+    scale: &ControlScale,
+    caption_off: bool,
+    ghide: usize,
 ) -> f32 {
     let scaled_size = |declared: CtrlSize| {
         scale.effective(resolved_ref(control.command()), declared)
@@ -1736,11 +1750,11 @@ pub fn width_of_c(
             CtrlSize::Large => 52.0,
             _ => 48.0,
         },
-        ControlSpec::InRibbonGallery(g) => gallery_width(ctx, g),
+        ControlSpec::InRibbonGallery(g) => gallery_width(ctx, g, ghide),
         ControlSpec::ControlGroup { controls } => {
             let max = controls
                 .iter()
-                .map(|c| width_of_c(ctx, c, scale, co))
+                .map(|c| width_of_cc(ctx, c, scale, co, ghide))
                 .fold(40.0f32, f32::max);
             max + 12.0
         }
@@ -1782,19 +1796,67 @@ fn button_width_scaled(ctx: &Ctx, b: &ButtonSpec, size: CtrlSize) -> f32 {
     }
 }
 
-fn gallery_width(ctx: &Ctx, g: &GallerySpec) -> f32 {
-    if g.popup {
-        let label_w = g
-            .command
-            .as_ref()
-            .map(|c| match c {
-                CommandRef::Id(id) => ctx.text_w(&ctx.label(*id), ctx.fonts.ribbon.button_small),
-                _ => 0.0,
-            })
-            .unwrap_or(0.0);
-        return (label_w + 40.0).max(72.0);
+/// Per-column widths of an in-ribbon gallery strip: each column is as
+/// wide as the longest caption of the items landing in it (item `i`
+/// sits in column `i % cols`), plus the icon and the icon/label gap.
+fn gallery_col_widths(
+    ctx: &Ctx,
+    g: &GallerySpec,
+    cmd: u32,
+    cols: usize,
+) -> Vec<f32> {
+    let icon = g.item_width.max(g.item_height);
+    let cols = cols.max(1);
+    let mut text: Vec<f32> = vec![0.0; cols];
+    if g.show_label
+        && let Some(items) = ctx
+            .value(cmd, PropertyKey::ItemsSource)
+            .and_then(|v| v.as_collection().cloned())
+        && let Ok(items) = items.lock()
+    {
+        for i in 0..items.get_count() {
+            let w = items
+                .label_of(i)
+                .map(|l| ctx.text_w(&l, ctx.fonts.ribbon.menu))
+                .unwrap_or(0.0);
+            text[i % cols] = text[i % cols].max(w);
+        }
     }
-    g.columns as f32 * (g.item_width + 8.0) + 22.0
+    text.into_iter().map(|w| icon + 3.0 + w).collect()
+}
+
+/// Width of the in-ribbon strip: 1px frame padding on both sides, a
+/// 4px gap between columns and the 16px scroll strip on the right.
+fn gallery_width(ctx: &Ctx, g: &GallerySpec, ghide: usize) -> f32 {
+    let cols = g.columns.saturating_sub(ghide).max(1);
+    let Some(cmd) = resolved(g.command.as_ref()) else {
+        return 60.0;
+    };
+    let col_ws = gallery_col_widths(ctx, g, cmd, cols);
+    2.0 + col_ws.iter().sum::<f32>() + (cols.saturating_sub(1)) as f32 * 4.0 + 16.0 + 1.0
+}
+
+/// Gallery columns a cascade step may remove (never below one).
+fn gallery_reducible(group: &GroupSpec, scale: &ControlScale) -> usize {
+    fn walk(controls: &[ControlSpec]) -> usize {
+        controls
+            .iter()
+            .map(|c| match c {
+                ControlSpec::InRibbonGallery(g) => g.columns.saturating_sub(1),
+                ControlSpec::ControlGroup { controls } => walk(controls),
+                _ => 0,
+            })
+            .sum()
+    }
+    let _ = scale;
+    walk(&group.controls)
+}
+
+/// Split cascade stage-2 units: galleries lose columns first (one unit
+/// = one column), then small-button captions are hidden.
+fn hide_split(group: &GroupSpec, scale: &ControlScale, units: usize) -> (usize, usize) {
+    let reducible = gallery_reducible(group, scale);
+    (units.min(reducible), units.saturating_sub(reducible))
 }
 
 pub fn measure_group_pub(ctx: &Ctx, group: &GroupSpec) -> f32 {
@@ -1805,8 +1867,9 @@ fn measure_group(ctx: &Ctx, group: &GroupSpec) -> f32 {
     measure_group_scaled(ctx, group, &ControlScale::Declared, 0)
 }
 
-/// Width of a group with a scale applied (`SizeDefinition`); the last
-/// `caption_cols` columns render captionless (cascade stage 2).
+/// Width of a group with a scale applied (`SizeDefinition`); the
+/// cascade `units` first remove gallery columns (3→2→1), then hide the
+/// captions of the last columns (cascade stage 2).
 pub fn measure_group_scaled(
     ctx: &Ctx,
     group: &GroupSpec,
@@ -1815,6 +1878,7 @@ pub fn measure_group_scaled(
 ) -> f32 {
     let per_col = rows_per_col(group, scale);
     let (cols, ncols) = columns_of(group, scale);
+    let (gh, cap) = hide_split(group, scale, caption_cols);
     let mut col_ws: Vec<f32> = Vec::new();
     let mut cur_w = 0.0f32;
     let mut used = 0usize;
@@ -1825,8 +1889,8 @@ pub fn measure_group_scaled(
             cur_w = 0.0;
             used = 0;
         }
-        let co = caption_off(&cols, ncols, caption_cols, i, control, scale);
-        cur_w = cur_w.max(width_of_c(ctx, control, scale, co));
+        let co = caption_off(&cols, ncols, cap, i, control, scale);
+        cur_w = cur_w.max(width_of_cc(ctx, control, scale, co, gh));
         used += span;
     }
     col_ws.push(cur_w);
@@ -1912,6 +1976,8 @@ fn build_group(
     }
     let scale = &plan.scale;
     let g = gap(ctx);
+    // cascade units: galleries lose columns first, then captions
+    let (gh, cap) = hide_split(group, scale, plan.caption_cols);
     // controls in columns (a stack of four single-row controls packs 2+2)
     let per_col = rows_per_col(group, scale);
     let (cols, ncols) = columns_of(group, scale);
@@ -1943,6 +2009,7 @@ fn build_group(
                 false,
                 scale,
                 co,
+                gh,
             );
         }
     };
@@ -1956,8 +2023,8 @@ fn build_group(
             used = 0;
         }
         let h = span as f32 * ROW_H;
-        let co = caption_off(&cols, ncols, plan.caption_cols, i, control, scale);
-        let w = width_of_c(ctx, control, scale, co);
+        let co = caption_off(&cols, ncols, cap, i, control, scale);
+        let w = width_of_cc(ctx, control, scale, co, gh);
         col_width = col_width.max(w);
         pending.push((control, used as f32 * ROW_H, h, w, co));
         used += span;
@@ -2042,11 +2109,14 @@ pub fn build_control(
     loc: ControlLoc,
     compact: bool,
 ) {
-    build_control_scaled(ctx, scene, control, rect, loc, compact, &ControlScale::Declared, false);
+    build_control_scaled(
+        ctx, scene, control, rect, loc, compact, &ControlScale::Declared, false, 0,
+    );
 }
 
 /// Build one control with a group scale applied (`SizeDefinition`
-/// overrides button sizes for listed commands).
+/// overrides button sizes for listed commands). `ghide` = gallery
+/// columns removed by the cascade.
 #[allow(clippy::too_many_arguments)]
 pub fn build_control_scaled(
     ctx: &Ctx,
@@ -2057,6 +2127,7 @@ pub fn build_control_scaled(
     compact: bool,
     scale: &ControlScale,
     co: bool,
+    ghide: usize,
 ) {
     let eff = |declared: CtrlSize| {
         scale.effective(resolved_ref(control.command()), declared)
@@ -2120,11 +2191,11 @@ pub fn build_control_scaled(
         }
         ControlSpec::InRibbonGallery(g) => {
             if let Some(cmd) = resolved(g.command.as_ref()) {
-                build_gallery(ctx, scene, rect, cmd, g, loc);
+                build_gallery(ctx, scene, rect, cmd, g, ghide);
             }
         }
         ControlSpec::ControlGroup { controls } => {
-            build_control_group(ctx, scene, controls, rect, loc, compact, co);
+            build_control_group(ctx, scene, controls, rect, loc, compact, co, ghide);
         }
     }
 }
@@ -2920,151 +2991,208 @@ fn build_color_picker(
     keytip_badge(ctx, scene, rect, cmd, false);
 }
 
+/// In-ribbon gallery strip: a large-button-height box (top border 3px
+/// below the control top, 60px tall = 3 x 20px lines) with 3 item
+/// columns and an always-visible scroll strip on the right (up / down /
+/// expand). The strip buttons' 1px borders overlap the gallery's outer
+/// 1px frame.
 fn build_gallery(
     ctx: &Ctx,
     scene: &mut Scene,
     rect: Rectangle,
     cmd: u32,
     g: &GallerySpec,
-    _loc: ControlLoc,
+    ghide: usize,
 ) {
-    if g.popup {
-        // dropdown gallery: button-like with chevron
-        build_split(ctx, scene, rect, cmd, CtrlSize::Small, false, false, false);
-        return;
-    }
     let enabled = ctx.enabled(cmd);
     let selected = ctx
         .value(cmd, PropertyKey::SelectedItem)
         .and_then(|v| v.as_u32())
         .unwrap_or(0) as usize;
-    let items = ctx
+    let count = ctx
         .value(cmd, PropertyKey::ItemsSource)
-        .and_then(|v| v.as_collection().cloned());
+        .and_then(|v| v.as_collection().cloned())
+        .and_then(|c| c.lock().ok().map(|l| l.get_count()))
+        .unwrap_or(0);
 
-    // frame
+    // The strip follows the large button's top border, 3px down, and
+    // is 60px tall (3 lines of 20px); the control slot is 3*ROW_H (66).
+    let frame = Rectangle::new(
+        Point::new(rect.x, rect.y + 3.0),
+        Size::new(rect.width, 60.0),
+    );
+    let border = lw(ctx, 1.0);
     quad(
         scene,
-        rect,
+        frame,
         Fill::Color(Color::WHITE),
-        Some((ctx.theme.border, lw(ctx, 1.0))),
-        ctx.theme.field_radius,
+        Some((ctx.theme.border, border)),
+        0.0,
     );
 
-    let scroll = *ctx.state.gallery_scroll.get(&cmd).unwrap_or(&0);
-    if let Some(items) = items {
-        let Ok(items) = items.lock() else { return };
-        let count = items.get_count();
-        for col in 0..g.columns {
-            let idx = scroll + col;
+    let rows = 3usize;
+    let cols = g.columns.saturating_sub(ghide).max(1);
+    let max_scroll = count.saturating_sub(rows);
+    let scroll = (*ctx.state.gallery_scroll.get(&cmd).unwrap_or(&0)).min(max_scroll);
+    let col_ws = gallery_col_widths(ctx, g, cmd, cols);
+    let icon = g.item_width.max(g.item_height);
+
+    // --- items: 20px lines, 16px icon + caption, per-column widths ---
+    let opacity = if enabled { 1.0 } else { 0.35 };
+    let text_color = if enabled {
+        ctx.theme.text
+    } else {
+        ctx.theme.text_disabled
+    };
+    for r in 0..rows {
+        let mut cx = frame.x + border;
+        for (c, cw) in col_ws.iter().enumerate() {
+            let idx = (scroll + r) * cols + c;
             if idx >= count {
                 break;
             }
-            let item = items.get_item(idx);
-            let label = item
-                .as_ref()
-                .and_then(|it| it.lock().ok()?.get_value(PropertyKey::Label))
-                .and_then(|v| v.as_str().map(str::to_owned))
-                .unwrap_or_default();
-            let image = item
-                .as_ref()
-                .and_then(|it| it.lock().ok()?.get_value(PropertyKey::ItemImage))
-                .and_then(|v| match v {
-                    PropValue::Image(i) => Some(i),
-                    _ => None,
-                });
-            let ix = rect.x + 2.0 + col as f32 * (g.item_width + 6.0);
             let cell = Rectangle::new(
-                Point::new(ix, rect.y + 2.0),
-                Size::new(g.item_width + 4.0, rect.height - 4.0),
+                Point::new(cx, frame.y + r as f32 * 20.0),
+                Size::new(*cw, 20.0),
             );
+            cx += cw + 4.0;
+            let target = Target::GalleryItem {
+                cmd,
+                index: idx,
+                popup: false,
+            };
             if idx == selected {
                 quad(
                     scene,
                     cell,
                     Fill::Color(ctx.theme.checked_bg),
-                    Some((ctx.theme.checked_border.unwrap_or(ctx.theme.border), lw(ctx, 1.0))),
-                    2.0,
+                    ctx.theme
+                        .checked_border
+                        .map(|b| (b, border)),
+                    0.0,
                 );
-            }
-            if let Some(image) = image {
-                svg_node(
+            } else if enabled && ctx.hovered(&target) {
+                quad(
                     scene,
-                    Rectangle::new(
-                        Point::new(ix + 2.0, rect.y + 4.0),
-                        Size::new(g.item_width, g.item_height),
-                    ),
-                    image,
-                    if enabled { 1.0 } else { 0.35 },
+                    cell,
+                    Fill::Color(ctx.theme.hover_bg),
+                    ctx.theme.hover_border.map(|b| (b, border)),
+                    0.0,
                 );
             }
-            text(
+            let item = ctx
+                .value(cmd, PropertyKey::ItemsSource)
+                .and_then(|v| v.as_collection().cloned())
+                .and_then(|col| col.lock().ok()?.get_item(idx));
+            if let Some(item) = item
+                && let Ok(item) = item.lock()
+            {
+                if let Some(PropValue::Image(image)) =
+                    item.get_value(PropertyKey::ItemImage)
+                {
+                    svg_node(
+                        scene,
+                        Rectangle::new(
+                            Point::new(cell.x + 1.0, cell.y + (20.0 - icon) / 2.0),
+                            Size::new(icon, icon),
+                        ),
+                        image,
+                        opacity,
+                    );
+                }
+                if g.show_label
+                    && let Some(v) = item.get_value(PropertyKey::Label)
+                    && let Some(label) = v.as_str()
+                {
+                    text(
+                        scene,
+                        Rectangle::new(
+                            Point::new(cell.x + icon + 3.0, cell.y),
+                            Size::new((cw - icon - 3.0).max(4.0), 20.0),
+                        ),
+                        label.to_string(),
+                        ctx.fonts.ribbon.menu,
+                        text_color,
+                        Horizontal::Left,
+                        Vertical::Center,
+                    );
+                }
+            }
+            scene.push(
+                Node::new(cell, Cmd::Hit)
+                    .target(target)
+                    .tip(cmd),
+            );
+        }
+    }
+
+    // --- scroll strip: up / down / expand, always visible ---
+    let sx = frame.x + frame.width - 16.0 - border;
+    for i in 0..3usize {
+        let z = Rectangle::new(
+            Point::new(sx, frame.y + i as f32 * 20.0),
+            Size::new(16.0, 20.0),
+        );
+        let (active, target) = match i {
+            0 => (scroll > 0, Some(Target::GalleryScrollH(cmd, -1))),
+            1 => (scroll < max_scroll, Some(Target::GalleryScrollH(cmd, 1))),
+            _ => (enabled && g.popup, g.popup.then_some(Target::DropDown(cmd))),
+        };
+        let target = target.filter(|_| active);
+        let hover = target.as_ref().is_some_and(|t| ctx.hovered(t));
+        let pressed = target.as_ref().is_some_and(|t| ctx.pressed(t));
+        // the button border overlaps the gallery's outer 1px frame
+        quad(
+            scene,
+            z,
+            arrow_fill(ctx.theme, hover, pressed),
+            Some((ctx.theme.border, border)),
+            0.0,
+        );
+        let color = if active {
+            ctx.theme.text
+        } else {
+            ctx.theme.text_disabled
+        };
+        match i {
+            0 | 1 => chevron(
                 scene,
                 Rectangle::new(
-                    Point::new(ix, rect.y + 6.0 + g.item_height),
-                    Size::new(g.item_width + 4.0, 12.0),
+                    Point::new(z.x + 3.0, z.y + 20.0 / 2.0 - 3.0),
+                    Size::new(10.0, 6.5),
                 ),
-                label,
-                ctx.fonts.ribbon.menu,
-                ctx.theme.text,
-                Horizontal::Center,
-                Vertical::Center,
-            );
-            scene.push(Node::new(cell, Cmd::Hit).target(Target::GalleryItem {
-                cmd,
-                index: idx,
-                popup: false,
-            }).tip(cmd));
-        }
-
-        // scroll arrows bottom-right
-        let can_left = scroll > 0;
-        let can_right = scroll + g.columns < count;
-        for (i, (can, target)) in [
-            (can_left, Target::GalleryScrollH(cmd, -1)),
-            (can_right, Target::GalleryScrollH(cmd, 1)),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            let z = Rectangle::new(
-                Point::new(
-                    rect.x + rect.width - 36.0 + i as f32 * 18.0,
-                    rect.y + rect.height - 17.0,
-                ),
-                Size::new(16.0, 15.0),
-            );
-            quad(
-                scene,
-                z,
-                if can {
-                    Fill::Color(ctx.theme.qat_bg.0)
-                } else {
-                    Fill::Color(Color::TRANSPARENT)
-                },
-                Some((ctx.theme.border, lw(ctx, 1.0))),
-                ctx.theme.button_radius,
-            );
-            let chev_up = i == 0;
-            let chev_svg = if chev_up {
-                r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M2 6.4L5 3l3 3.4" fill="none" stroke="#333" stroke-width="1.4"/></svg>"##
-            } else {
-                r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M2 3.6L5 7l3-3.4" fill="none" stroke="#333" stroke-width="1.4"/></svg>"##
-            };
-            if can {
+                i == 0,
+                color,
+            ),
+            _ => {
+                let hex = format!(
+                    "#{:02x}{:02x}{:02x}",
+                    (color.r * 255.0) as u8,
+                    (color.g * 255.0) as u8,
+                    (color.b * 255.0) as u8
+                );
+                // "pop up" glyph: a tray line with an up chevron
+                let svg = format!(
+                    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'>\
+                     <path d='M1 8.5h8' fill='none' stroke='{hex}' stroke-width='1.2'/>\
+                     <path d='M2 5.5L5 2.5l3 3' fill='none' stroke='{hex}' stroke-width='1.2'/></svg>"
+                );
                 svg_node(
                     scene,
-                    Rectangle::new(Point::new(z.x + 3.0, z.y + 2.5), Size::new(10.0, 10.0)),
-                    crate::ribbon::image::UiImage::Svg(chev_svg.into()),
-                    if enabled { 1.0 } else { 0.35 },
+                    Rectangle::new(Point::new(z.x + 3.0, z.y + 4.0), Size::new(10.0, 10.0)),
+                    crate::ribbon::image::UiImage::Svg(svg),
+                    1.0,
                 );
-                scene.push(Node::new(z, Cmd::Hit).target(target));
             }
+        }
+        if let Some(t) = target {
+            scene.push(Node::new(z, Cmd::Hit).target(t).tip(cmd));
         }
     }
     keytip_badge(ctx, scene, rect, cmd, false);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_control_group(
     ctx: &Ctx,
     scene: &mut Scene,
@@ -3073,6 +3201,7 @@ fn build_control_group(
     loc: ControlLoc,
     compact: bool,
     co: bool,
+    ghide: usize,
 ) {
     quad(
         scene,
@@ -3089,7 +3218,7 @@ fn build_control_group(
             Size::new(rect.width - 8.0, inner_h - 2.0),
         );
         build_control_scaled(
-            ctx, scene, control, crect, loc, compact, &ControlScale::Declared, co,
+            ctx, scene, control, crect, loc, compact, &ControlScale::Declared, co, ghide,
         );
     }
 }

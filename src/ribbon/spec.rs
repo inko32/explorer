@@ -535,12 +535,14 @@ pub struct GallerySpec {
     pub command: Option<CommandRef>,
     pub label: Option<String>,
     pub keytip: Option<String>,
-    /// Size of one gallery item in the ribbon strip.
+    /// Icon size of one gallery item (square, drawn left of the label).
     pub item_width: f32,
     pub item_height: f32,
     /// Visible columns in the in-ribbon strip.
     pub columns: usize,
-    /// Open a dropdown gallery popup on click (`DropDownGallery`).
+    /// Show the item label right of the icon (default on).
+    pub show_label: bool,
+    /// Show the expand button (opens the dropdown gallery popup).
     pub popup: bool,
 }
 
@@ -550,9 +552,10 @@ impl Default for GallerySpec {
             command: None,
             label: None,
             keytip: None,
-            item_width: 36.0,
-            item_height: 36.0,
+            item_width: 16.0,
+            item_height: 16.0,
             columns: 3,
+            show_label: true,
             popup: false,
         }
     }

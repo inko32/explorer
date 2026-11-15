@@ -630,8 +630,13 @@ fn gallery_spec(ctx: &Ctx, cmd: u32) -> crate::ribbon::spec::GallerySpec {
 fn gallery_scene(ctx: &Ctx, cmd: u32, scroll: usize) -> Scene {
     let g = gallery_spec(ctx, cmd);
     let items = gallery_items(ctx, cmd);
-    let cols = 4usize;
-    let cell_w = g.item_width + 10.0;
+    let cols = g.columns.max(1);
+    // caption below the icon: the widest caption drives the cell width
+    let text_w = items
+        .iter()
+        .map(|(l, _, _)| ctx.text_w(l, ctx.fonts.ribbon.menu))
+        .fold(0.0f32, f32::max);
+    let cell_w = (g.item_width + 10.0).max(text_w + 8.0);
     let cell_h = g.item_height + 16.0;
     let header_h = 18.0f32;
 
