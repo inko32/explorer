@@ -469,6 +469,10 @@ pub struct Snapshot {
     /// Current view step index (SPEC/FOLDER-SPEC.MD); the view commands
     /// light up only when it equals their preset (§5 bullet rule).
     pub view_index: u8,
+    /// The committed view step: during a gallery hover preview
+    /// `view_index` is temporarily overridden, but the activated
+    /// gallery item must keep marking this one.
+    pub committed_view: u8,
     /// View step index of each folder-layout gallery item, in item
     /// order: [xlarge, large, medium, small, list, details, tiles,
     /// content] (folder-view.yaml presets).
@@ -504,6 +508,7 @@ impl Explorer {
             has_clipboard: self.clipboard.is_some(),
             has_items: !self.entries.is_empty(),
             view_index: self.view_index,
+            committed_view: self.preview_view.unwrap_or(self.view_index),
             view_presets: [
                 self.view_cfg.presets.xlarge,
                 self.view_cfg.presets.large,
@@ -738,7 +743,7 @@ impl CommandHandler for ExplorerHandler {
                 cmd::VIEW_GALLERY => Some(PropValue::UInt(
                     snap.view_presets
                         .iter()
-                        .position(|&p| p == snap.view_index)
+                        .position(|&p| p == snap.committed_view)
                         .map(|i| i as u32)
                         .unwrap_or(u32::MAX),
                 )),
