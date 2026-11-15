@@ -135,7 +135,7 @@ impl Default for LayoutCfg {
             icon_size: 16.0,
             separator_height: 9.0,
             pad_h: 6.0,
-            font_size: 13.0,
+            font_size: 12.0,
             corner_radius: 0.0,
             popup: false,
         }
