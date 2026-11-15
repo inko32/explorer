@@ -40,6 +40,9 @@ use smithay_client_toolkit::seat::pointer::{
     PointerEvent, PointerEventKind, PointerHandler, BTN_LEFT,
 };
 use smithay_client_toolkit::seat::{Capability, SeatHandler, SeatState};
+use smithay_client_toolkit::reexports::protocols::wp::fractional_scale::v1::client::wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1;
+use smithay_client_toolkit::reexports::protocols::wp::viewporter::client::wp_viewport::WpViewport;
+use smithay_client_toolkit::reexports::protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
 use smithay_client_toolkit::shm::slot::{Buffer, SlotPool};
 use smithay_client_toolkit::shm::{Shm, ShmHandler};
 use smithay_client_toolkit::{delegate_registry, registry_handlers};
@@ -78,11 +81,11 @@ enum Cmd {
     UpdateVisual(DragVisual),
     /// Open an off-window menu popup (xdg_popup), showing the painted
     /// pixels. The anchor is the thread's own tracked pointer position
-    /// (parent surface-local — exact, no unit conversion). `to_model`
-    /// converts popup-local input coords back to model-logical units
-    /// (popup_scale / painted_scale).
+    /// (parent surface-local — exact, no unit conversion). `painted` is
+    /// the scale the visual's pixels were painted at (scale_dpi);
+    /// `scale` is the wl buffer scale (ceil(painted)).
     OpenPopup {
-        to_model: f32,
+        painted: f32,
         scale: i32,
         visual: DragVisual,
     },
@@ -147,9 +150,9 @@ impl Handle {
         self.send(Cmd::UpdateVisual(visual));
     }
 
-    pub fn open_popup(&self, to_model: f32, scale: i32, visual: DragVisual) {
+    pub fn open_popup(&self, painted: f32, scale: i32, visual: DragVisual) {
         self.send(Cmd::OpenPopup {
-            to_model,
+            painted,
             scale,
             visual,
         });
@@ -280,6 +283,15 @@ fn run(
     let ddm = DataDeviceManagerState::bind(&globals, &qh).map_err(|e| e.to_string())?;
     let xdg = smithay_client_toolkit::shell::xdg::XdgShell::bind(&globals, &qh)
         .map_err(|e| e.to_string())?;
+    // both or neither: fractional-scale compositors always pair them
+    // (wp_fractional_scale_v1 requires wp_viewporter)
+    let fractional = match (
+        globals.bind(&qh, 1..=1, ()),
+        globals.bind(&qh, 1..=1, ()),
+    ) {
+        (Ok(fsm), Ok(vp)) => Some((fsm, vp)),
+        _ => None,
+    };
     let icon_pool = SlotPool::new(256 * 256 * 4, &shm).map_err(|e| e.to_string())?;
     let popup_pool = SlotPool::new(512 * 1024, &shm).map_err(|e| e.to_string())?;
     let mut state = State {
@@ -293,6 +305,7 @@ fn run(
         parent,
         popup: None,
         popup_pool,
+        fractional,
         device: None,
         origin,
         icon_pool,
@@ -415,6 +428,11 @@ struct State {
     /// the open off-window menu popup, if any
     popup: Option<PopupState>,
     popup_pool: SlotPool,
+    /// fractional-scale globals, when the compositor offers them — the
+    /// same condition winit uses for the parent window's fractional
+    /// path; the popup then maps its buffer to model-logical units 1:1
+    /// via wp_viewport (no downscale on fractional outputs)
+    fractional: Option<(WpFractionalScaleManagerV1, WpViewporter)>,
     icon_pool: SlotPool,
     icon_surface: Option<WlSurface>,
     icon_buffer: Option<Buffer>,
@@ -490,6 +508,16 @@ struct PopupState {
     pending: Option<DragVisual>,
     /// popup-local -> model-logical factor (hover hit-testing)
     to_model: f32,
+    /// 1:1 buffer mapping on fractional-capable compositors
+    viewport: Option<WpViewport>,
+}
+
+impl Drop for PopupState {
+    fn drop(&mut self) {
+        if let Some(vp) = &self.viewport {
+            vp.destroy();
+        }
+    }
 }
 
 struct PendingRead {
@@ -551,7 +579,7 @@ impl State {
                 }
             }
             Cmd::OpenPopup {
-                to_model,
+                painted,
                 scale,
                 visual,
             } => {
@@ -560,9 +588,21 @@ impl State {
                 let anchor = (self.ptr_pos.0.round() as i32, self.ptr_pos.1.round() as i32);
                 let pos = self.xdg.xdg_wm_base().create_positioner(qh, PosData);
                 let (w, h) = (visual.width.max(1) as i32, visual.height.max(1) as i32);
-                // logical size/anchor: the parent surface-local space
+                // logical size/anchor: the parent surface-local space.
+                // Fractional-capable compositor: the viewport maps
+                // buffer/painted 1:1 into that space (what winit does
+                // for the parent) — the plain integer buffer-scale
+                // chain would shrink the menu by painted/ceil(painted)
+                // and downscale (thicken) its text.
+                let painted = painted.max(1.0);
                 let ls = scale.max(1);
-                pos.set_size(w / ls, h / ls);
+                let fractional = self.fractional.is_some();
+                let (pw, ph) = if fractional {
+                    ((w as f32 / painted).round() as i32, (h as f32 / painted).round() as i32)
+                } else {
+                    (w / ls, h / ls)
+                };
+                pos.set_size(pw, ph);
                 pos.set_anchor_rect(anchor.0, anchor.1, 1, 1);
                 use smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_positioner::{
                     Anchor, ConstraintAdjustment, Gravity,
@@ -589,10 +629,28 @@ impl State {
                     &self.xdg,
                 ) {
                     popup.wl_surface().set_buffer_scale(ls);
+                    // with the viewport, popup-local input coords ARE
+                    // model-logical; without it they are buffer/scale
+                    let viewport = fractional.then(|| {
+                        let vp = self
+                            .fractional
+                            .as_ref()
+                            .expect("fractional globals")
+                            .1
+                            .get_viewport(popup.wl_surface(), qh, ());
+                        vp.set_destination(pw.max(1), ph.max(1));
+                        vp
+                    });
+                    let to_model = if fractional {
+                        1.0
+                    } else {
+                        ls as f32 / painted
+                    };
                     self.popup = Some(PopupState {
                         popup,
                         pending: Some(visual),
                         to_model,
+                        viewport,
                     });
                 }
                 pos.destroy();
@@ -1033,6 +1091,21 @@ impl ShmHandler for State {
 }
 
 delegate_registry!(State);
+wayland_client::delegate_noop!(State: WpFractionalScaleManagerV1);
+wayland_client::delegate_noop!(State: WpViewporter);
+// wp_viewport has no events; the dispatch2 blanket (below) needs this
+// for the () user data attached at get_viewport
+impl smithay_client_toolkit::dispatch2::Dispatch2<WpViewport, State> for () {
+    fn event(
+        &self,
+        _: &mut State,
+        _: &WpViewport,
+        _: <WpViewport as wayland_client::Proxy>::Event,
+        _: &wayland_client::Connection,
+        _: &wayland_client::QueueHandle<State>,
+    ) {
+    }
+}
 impl ProvidesRegistryState for State {
     fn registry(&mut self) -> &mut RegistryState {
         &mut self.registry_state
