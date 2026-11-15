@@ -1477,6 +1477,17 @@ impl Explorer {
                     iced::widget::operation::Animation::Instant,
                 )
             }
+            Message::FileHScrollTo(target) => {
+                self.scroll_x = target.max(0.0);
+                iced::widget::operation::scrollable::scroll_to(
+                    crate::folder::details_h_scrollable_id(),
+                    iced::widget::operation::scrollable::AbsoluteOffset {
+                        x: Some(self.scroll_x),
+                        y: None,
+                    },
+                    iced::widget::operation::Animation::Instant,
+                )
+            }
             Message::NavScrollTo(target) => {
                 // the tree scrolls line by line: snap to whole row
                 // heights so the top row is always complete (a clipped
@@ -1672,9 +1683,17 @@ impl Explorer {
                 iced::Task::none()
             }
             Message::Scrolled { x, y, height } => {
-                self.scroll_x = x;
-                self.scroll_y = y;
-                self.viewport_h = height;
+                // each scrollable reports only its own axis (Details
+                // nests a horizontal one outside the vertical list)
+                if let Some(x) = x {
+                    self.scroll_x = x;
+                }
+                if let Some(y) = y {
+                    self.scroll_y = y;
+                }
+                if let Some(height) = height {
+                    self.viewport_h = height;
+                }
                 iced::Task::none()
             }
             Message::WindowResized(w, h) => {

@@ -180,6 +180,10 @@ pub enum Message {
     /// Windows scrollbar strip: absolute target offset for the file
     /// view (the x offset for List, the y offset otherwise).
     FileScrollTo(f32),
+    /// Windows scrollbar strip under the Details view: absolute target
+    /// x offset for the outer column strip (List reuses `FileScrollTo`
+    /// for its x axis — its horizontal scrollable IS the file view).
+    FileHScrollTo(f32),
     /// Same for the navigation pane (always vertical).
     NavScrollTo(f32),
     /// Toggle the side pane right of the folder view (mutually
@@ -247,10 +251,13 @@ pub enum Message {
     /// window exists; spawns the Wayland side-channel (DnD + popups).
     WlHandles(Option<(usize, usize, usize)>),
     /// Scroll offset + viewport height from the file list scrollable.
+    /// A scrollable reports only its own axis (`None` = unchanged):
+    /// Details nests the vertical list inside a horizontal scrollable
+    /// and a zero from the other axis would clobber the live offset.
     Scrolled {
-        x: f32,
-        y: f32,
-        height: f32,
+        x: Option<f32>,
+        y: Option<f32>,
+        height: Option<f32>,
     },
     /// The file-view scrollable area changed size (Sensor) — the
     /// accurate viewport height (on_scroll stays silent when the
