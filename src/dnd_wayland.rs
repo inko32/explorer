@@ -1291,7 +1291,19 @@ fn text_system() -> &'static std::sync::Mutex<(cosmic_text::FontSystem, cosmic_t
     static TS: std::sync::OnceLock<std::sync::Mutex<(cosmic_text::FontSystem, cosmic_text::SwashCache)>> =
         std::sync::OnceLock::new();
     TS.get_or_init(|| {
-        std::sync::Mutex::new((cosmic_text::FontSystem::new(), cosmic_text::SwashCache::new()))
+        let fs = cosmic_text::FontSystem::new();
+        #[cfg(feature = "embed-selawik")]
+        let mut fs = fs;
+        // the embedded UI font (feature `embed-selawik`) is loaded into
+        // the renderer's font system at startup (main.rs app.fonts) but
+        // NOT into system fontdb copies: without it, `attrs`' primary
+        // family ("Selawik") is unresolvable here and every painted
+        // menu/caption glyph falls back to a generic sans — a visibly
+        // different family from the in-window UI
+        #[cfg(feature = "embed-selawik")]
+        fs.db_mut()
+            .load_font_data(crate::fonts::EMBED_BYTES.to_vec());
+        std::sync::Mutex::new((fs, cosmic_text::SwashCache::new()))
     })
 }
 
