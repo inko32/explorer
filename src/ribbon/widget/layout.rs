@@ -3027,11 +3027,13 @@ fn build_gallery(
         Size::new(rect.width, 60.0),
     );
     let border = lw(ctx, 1.0);
+    // same surface as the dropdown popup so the in-ribbon gallery
+    // follows the skin in both themes (hardcoded white broke dark mode)
     quad(
         scene,
         frame,
-        Fill::Color(Color::WHITE),
-        Some((ctx.theme.border, border)),
+        Fill::Color(ctx.theme.popup_bg),
+        Some((ctx.theme.popup_border, border)),
         0.0,
     );
 
@@ -3154,7 +3156,7 @@ fn build_gallery(
             scene,
             z,
             arrow_fill(ctx.theme, hover, pressed),
-            Some((ctx.theme.border, border)),
+            Some((ctx.theme.popup_border, border)),
             0.0,
         );
         let color = if active {
