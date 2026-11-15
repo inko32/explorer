@@ -134,16 +134,17 @@ impl Explorer {
             return;
         };
         // unit chain: the popup buffer is painted at `painted`
-        // (= scale_dpi), and its wl buffer scale must equal the PARENT
+        // (= scale_dpi), and its wl buffer scale equals the PARENT
         // surface's — winit uses ceil(effective scale), and the
         // effective scale IS scale_dpi (system scale x the --dpi
-        // multiplier). The compositor then sizes the popup 1:1 with
-        // the window content at ANY --dpi. Input comes back in
-        // popup-local units = buffer/scale, converted to model-logical
-        // with scale/painted.
+        // multiplier). On fractional-capable compositors the side
+        // channel maps buffer/painted into the parent's surface-local
+        // space 1:1 with a wp_viewport; on integer-only compositors it
+        // falls back to the buffer/scale chain. Input arrives in
+        // popup-local units and is converted to model-logical inside
+        // the side channel.
         let popup_scale = painted.ceil().max(1.0) as i32;
-        let to_model = popup_scale as f32 / painted;
-        wl.open_popup(to_model, popup_scale, visual);
+        wl.open_popup(painted, popup_scale, visual);
         self.menu_popup = true;
     }
 
