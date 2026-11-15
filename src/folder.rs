@@ -20,6 +20,14 @@ pub(crate) fn file_scrollable_id() -> iced::widget::Id {
     ID.get_or_init(|| iced::widget::Id::new("file-view")).clone()
 }
 
+/// The Details outer horizontal scrollable (the column strip): the
+/// horizontal scrollbar strip underneath targets this id, while
+/// `file_scrollable_id` stays the inner vertical one.
+pub(crate) fn details_h_scrollable_id() -> iced::widget::Id {
+    static ID: std::sync::OnceLock<iced::widget::Id> = std::sync::OnceLock::new();
+    ID.get_or_init(|| iced::widget::Id::new("details-h-scroll")).clone()
+}
+
 /// Wrap the file view so Ctrl+wheel steps the view zoom index instead of
 /// scrolling (the event is captured before the scrollable can see it).
 /// Transparent wrapper: state/layout/draw all delegate to the content
@@ -482,9 +490,9 @@ fn file_scrollable(content: iced::Element<'_, Message>) -> iced::Element<'_, Mes
             scrollable::Scrollbar::hidden(),
         ))
         .on_scroll(|vp| Message::Scrolled {
-            x: vp.viewport.absolute_offset().x,
-            y: vp.viewport.absolute_offset().y,
-            height: vp.viewport.bounds.height,
+            x: None,
+            y: Some(vp.viewport.absolute_offset().y),
+            height: Some(vp.viewport.bounds.height),
         })
         .boxed()
 }
@@ -554,6 +562,18 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
         0.0
     };
     let inner_w = (width - strip_w).max(0.0);
+    // Details additionally overflows horizontally: the outer column
+    // strip scrolls when the visible columns are wider than the pane.
+    // The horizontal strip below shows exactly then (same collapse
+    // rule as the vertical one).
+    let details_natural = if family == vs::Family::Details && !state.loading {
+        state.detail_cfg.files_left
+            + details_cols_w(state)
+            + state.detail_cfg.chrome_pad
+    } else {
+        0.0
+    };
+    let need_h_strip = details_natural > inner_w;
     let s = cfg.icon_px(state.view_index);
     // arrow-button line step for the strip
     let line = match family {
@@ -606,10 +626,38 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
                         .on_press(Message::ColumnHeaderPress),
                     Space::new().height(Length::Fixed(d.files_gap)),
                 ];
-                stack![
-                    details_view(state, skin),
-                    container(header).width(Length::Fill),
-                ]
+                // The strip (rows + header) goes into an outer
+                // horizontal scrollable: when the visible columns are
+                // wider than the pane the whole strip scrolls sideways
+                // and the header titles stay column-aligned. A
+                // horizontal scrollable lays its content out with an
+                // infinite width limit, where Fill resolves to max —
+                // so the stack needs an explicit width: the pane width,
+                // or the column block's natural width when that is
+                // wider (which is exactly when the scrollable can
+                // scroll). It reports only the x offset — the inner
+                // vertical one reports y (see `Message::Scrolled`).
+                let natural = state.detail_cfg.files_left
+                    + details_cols_w(state)
+                    + state.detail_cfg.chrome_pad;
+                scrollable(
+                    stack![
+                        details_view(state, skin),
+                        container(header).width(Length::Fill),
+                    ]
+                    .width(Length::Fixed(inner_w.max(natural))),
+                )
+                .id(details_h_scrollable_id())
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .direction(scrollable::Direction::Horizontal(
+                    scrollable::Scrollbar::hidden(),
+                ))
+                .on_scroll(|vp| Message::Scrolled {
+                    x: Some(vp.viewport.absolute_offset().x),
+                    y: None,
+                    height: None,
+                })
                 .boxed()
             }
             vs::Family::List => list_view(state, skin, inner_w),
@@ -705,6 +753,33 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
         if need_strip {
             c = c.push(crate::scrollbar::horizontal(
                 state.scroll_x, inner_w, content, line, skin, Message::FileScrollTo,
+            ));
+        }
+        c.boxed()
+    } else if family == vs::Family::Details && !state.loading {
+        // both axes can overflow independently: the vertical strip
+        // stays beside the rows, the horizontal one runs below the
+        // pane (List only ever needs the latter)
+        let mut r = row![area];
+        if need_strip {
+            r = r.push(crate::scrollbar::vertical(
+                state.scroll_y, state.viewport_h, content, line, skin, Message::FileScrollTo,
+            ));
+        }
+        let mut c = column![r];
+        if need_h_strip {
+            // arrow buttons step one column (the first visible one)
+            let step = details_visible(state)
+                .first()
+                .map(|&g| details_col_w(state, g))
+                .unwrap_or(60.0);
+            c = c.push(crate::scrollbar::horizontal(
+                state.scroll_x,
+                inner_w,
+                details_natural,
+                step,
+                skin,
+                Message::FileHScrollTo,
             ));
         }
         c.boxed()
@@ -1485,9 +1560,9 @@ fn list_view(state: &Explorer, skin: skin::Skin, width: f32) -> Element<'_, Mess
             scrollable::Scrollbar::hidden(),
         ))
         .on_scroll(|vp| Message::Scrolled {
-            x: vp.viewport.absolute_offset().x,
-            y: vp.viewport.absolute_offset().y,
-            height: vp.viewport.bounds.height,
+            x: Some(vp.viewport.absolute_offset().x),
+            y: None,
+            height: Some(vp.viewport.bounds.height),
         })
         .boxed()
 }
