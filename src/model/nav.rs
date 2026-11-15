@@ -16,7 +16,8 @@ pub struct NavTree {
     pub network_open: bool,
     /// Expanded folder/archive paths.
     pub expanded: std::collections::BTreeSet<PathBuf>,
-    /// path -> its folder/archive children (filled from every List result).
+    /// path -> its folder/archive children (filled from every List
+    /// result; freed bottom-up when a subtree collapses).
     pub children: std::collections::HashMap<PathBuf, Vec<fs::Entry>>,
     /// Scroll offset + viewport height of the tree scrollable.
     pub scroll_y: f32,
@@ -41,7 +42,13 @@ impl NavTree {
 
     /// Keep only folders and archives, hidden entries out unless requested,
     /// sorted folders-first by name (Windows tree order).
-    pub(super) fn store(&mut self, path: &Path, entries: &[fs::Entry], show_hidden: bool) {
+    pub(super) fn store(
+        &mut self,
+        path: &Path,
+        entries: &[fs::Entry],
+        show_hidden: bool,
+        sched: &Scheduler,
+    ) {
         let mut v: Vec<fs::Entry> = entries
             .iter()
             .filter(|e| {
@@ -55,7 +62,34 @@ impl NavTree {
                 .cmp(&a.is_dir())
                 .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
         });
+        // an expanded child whose entry `drop_subtree` freed must be
+        // re-listed, otherwise it renders empty forever (nothing else
+        // re-lists a node that is already in `expanded`)
+        for k in &v {
+            if self.expanded.contains(&k.path) && !self.children.contains_key(&k.path) {
+                sched.send(Job::List(k.path.clone()));
+            }
+        }
         self.children.insert(path.to_path_buf(), v);
+    }
+
+    /// Free the listings of `path` and its whole subtree. Called when
+    /// the node collapses: the invisible subtree's cache goes back to
+    /// the allocator, bounding the cache by the visible tree. Expansion
+    /// state survives in `expanded`; `store` re-lists an expanded child
+    /// whose entry is missing, so the subtree restores on re-expansion.
+    /// Each path leaves the map at most once, so symlink cycles only
+    /// cost duplicate frontier walks.
+    pub(super) fn drop_subtree(&mut self, path: &Path) {
+        let Some(kids) = self.children.remove(path) else {
+            return;
+        };
+        let mut frontier: Vec<PathBuf> = kids.into_iter().map(|k| k.path).collect();
+        while let Some(p) = frontier.pop() {
+            if let Some(kids) = self.children.remove(&p) {
+                frontier.extend(kids.into_iter().map(|k| k.path));
+            }
+        }
     }
 
     /// Request a listing for `path` when it is not cached yet.

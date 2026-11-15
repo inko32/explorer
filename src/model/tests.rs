@@ -417,3 +417,48 @@ fn dnd_caption_banned_for_self_and_readonly() {
     }
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// Collapsing a nav node frees its whole subtree's cached listings,
+/// but the descendants keep their expansion state so re-expanding
+/// restores the tree as it was (SPEC/memory-leak.md).
+#[test]
+fn nav_collapse_frees_subtree() {
+    let mut ex = Explorer::new();
+    ex.cwd = PathBuf::from("/");
+    let toggle = |ex: &mut Explorer, p: &str| {
+        let _ = ex.update(Message::NavToggle(PathBuf::from(p)));
+    };
+    let list = |ex: &mut Explorer, p: &str, kids: Vec<fs::Entry>| {
+        let _ = ex.update(Message::FsEvent(FsEvent::Listed {
+            path: PathBuf::from(p),
+            result: Ok(kids),
+        }));
+    };
+
+    toggle(&mut ex, "/");
+    list(&mut ex, "/", vec![
+        entry("a", PathBuf::from("/a"), true),
+        entry("b", PathBuf::from("/b"), true),
+    ]);
+    toggle(&mut ex, "/a");
+    list(&mut ex, "/a", vec![entry("x", PathBuf::from("/a/x"), true)]);
+    toggle(&mut ex, "/a/x");
+    list(&mut ex, "/a/x", vec![]);
+    toggle(&mut ex, "/b");
+    list(&mut ex, "/b", vec![]);
+
+    assert_eq!(ex.nav.children.len(), 4);
+
+    // collapsing "/": the whole subtree's listings are freed
+    toggle(&mut ex, "/");
+    assert!(ex.nav.children.is_empty());
+
+    // ... but expansion state survives, for the restore on re-expansion
+    assert!(ex.nav.expanded.contains(Path::new("/a")));
+    assert!(ex.nav.expanded.contains(Path::new("/a/x")));
+
+    // re-expanding re-lists "/" and the cache fills again
+    toggle(&mut ex, "/");
+    list(&mut ex, "/", vec![entry("a", PathBuf::from("/a"), true)]);
+    assert!(ex.nav.children.contains_key(Path::new("/")));
+}
