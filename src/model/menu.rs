@@ -172,8 +172,12 @@ impl Explorer {
         }
     }
 
-    /// Close the menu wherever it is hosted (popup or in-window).
+    /// Close the menu wherever it is hosted (popup or in-window). The
+    /// nav context mark exists only while the menu is open, so closing
+    /// always releases it (covers compositor-driven popup dismissal,
+    /// which bypasses Message::CloseMenu).
     pub(crate) fn menu_close(&mut self) {
+        self.nav_selected = None;
         self.menu = None;
         if self.menu_popup {
             self.menu_popup = false;
