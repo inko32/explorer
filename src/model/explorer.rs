@@ -824,7 +824,7 @@ impl Explorer {
                     return;
                 }
                 if let Ok(entries) = &result {
-                    self.nav.store(&path, entries, self.show_hidden);
+                    self.nav.store(&path, entries, self.show_hidden, &self.sched);
                     let show_hidden = self.show_hidden;
                     let mut dirs: Vec<PathBuf> = entries
                         .iter()
@@ -844,7 +844,7 @@ impl Explorer {
             FsEvent::Listed { path, result } => {
                 // every listing also feeds the nav tree cache (folders/archives only)
                 if let Ok(entries) = &result {
-                    self.nav.store(&path, entries, self.show_hidden);
+                    self.nav.store(&path, entries, self.show_hidden, &self.sched);
                 }
                 if path == self.cwd {
                     self.loading = false;
@@ -1136,6 +1136,7 @@ impl Explorer {
             Message::NavToggle(path) => {
                 if self.nav.expanded.contains(&path) {
                     self.nav.expanded.remove(&path);
+                    self.nav.drop_subtree(&path);
                 } else {
                     self.nav.expanded.insert(path.clone());
                     self.nav.ensure_listed(&self.sched, &path);
