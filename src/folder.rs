@@ -757,23 +757,19 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
         }
         c.boxed()
     } else if family == vs::Family::Details && !state.loading {
-        // both axes can overflow independently: the vertical strip
-        // stays beside the rows, the horizontal one runs below the
-        // pane (List only ever needs the latter)
-        let mut r = row![area];
-        if need_strip {
-            r = r.push(crate::scrollbar::vertical(
-                state.scroll_y, state.viewport_h, content, line, skin, Message::FileScrollTo,
-            ));
-        }
-        let mut c = column![r];
+        // both axes can overflow independently. Each strip stops at
+        // the other's near edge: the horizontal one spans only the
+        // area's width, the vertical one only the height above it —
+        // the square where they would meet stays empty (it belongs to
+        // neither). List only ever needs the horizontal one.
+        let mut main = column![area];
         if need_h_strip {
             // arrow buttons step one column (the first visible one)
             let step = details_visible(state)
                 .first()
                 .map(|&g| details_col_w(state, g))
                 .unwrap_or(60.0);
-            c = c.push(crate::scrollbar::horizontal(
+            main = main.push(crate::scrollbar::horizontal(
                 state.scroll_x,
                 inner_w,
                 details_natural,
@@ -782,7 +778,17 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
                 Message::FileHScrollTo,
             ));
         }
-        c.boxed()
+        let mut pane = row![main];
+        if need_strip {
+            let mut side = column![crate::scrollbar::vertical(
+                state.scroll_y, state.viewport_h, content, line, skin, Message::FileScrollTo,
+            )];
+            if need_h_strip {
+                side = side.push(crate::scrollbar::corner());
+            }
+            pane = pane.push(side.boxed());
+        }
+        pane.boxed()
     } else {
         let mut r = row![area];
         if need_strip {
