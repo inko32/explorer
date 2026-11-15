@@ -1789,6 +1789,12 @@ impl Explorer {
                         if self.dnd.active() {
                             return self.update(Message::DragCancel);
                         }
+                        // window focus loss dismisses an open popup
+                        // menu just like an off-menu click (the shield
+                        // only reacts to pointer events)
+                        if self.menu.is_some() {
+                            return self.update(Message::CloseMenu);
+                        }
                     }
                     // external drag-in (§9): only delivered where winit
                     // supports file drops (see dnd::capabilities)
