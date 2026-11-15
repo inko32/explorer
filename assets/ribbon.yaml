@@ -133,6 +133,9 @@ commands:
   cmdViewDetails: 63
   cmdViewLarge: 64
   cmdCompactDetails: 78
+  # In-ribbon gallery of the 8 folder pane layouts (item index =
+  # [xlarge, large, medium, small, list, details, tiles, content])
+  cmdViewGallery: 316
 
   # ---- View / Current view ----
   cmdSortBy: 65
@@ -631,8 +634,14 @@ tabs:
         label: Layout
         image: view_details
         controls:
-          - { type: toggle_button, command: cmdViewDetails, size: large, image: view_details, label: Details, keytip: "D", tooltip: "Show items in a detailed list" }
-          - { type: toggle_button, command: cmdViewLarge, size: large, image: view_large, label: Large icons, keytip: "L", tooltip: "Show items as large icons" }
+          # in-ribbon gallery: 3x3 items (8 layout modes), scrollable;
+          # the cascade drops columns 3 -> 2 -> 1 as the window narrows
+          - type: in_ribbon_gallery
+            command: cmdViewGallery
+            label: Layout
+            keytip: "L"
+            columns: 3
+            popup: true
 
       - id: current_view
         label: Current view

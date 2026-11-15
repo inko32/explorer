@@ -239,6 +239,9 @@ pub mod cmd {
     pub const ADD_COLUMNS: u32 = 264;
     pub const SHOW_TREE_EXPANDER: u32 = 265;
     pub const HIDE_SELECTED: u32 = 266;
+    /// In-ribbon folder-layout gallery (View tab); item index maps to
+    /// [`Snapshot::view_presets`].
+    pub const VIEW_GALLERY: u32 = 316;
     pub const CHANGE_FOLDER_OPTIONS: u32 = 267;
     pub const EXPAND_TO_FOLDER: u32 = 268;
     pub const SHOW_ALL_FOLDERS: u32 = 269;
@@ -466,6 +469,10 @@ pub struct Snapshot {
     /// Current view step index (SPEC/FOLDER-SPEC.MD); the view commands
     /// light up only when it equals their preset (§5 bullet rule).
     pub view_index: u8,
+    /// View step index of each folder-layout gallery item, in item
+    /// order: [xlarge, large, medium, small, list, details, tiles,
+    /// content] (folder-view.yaml presets).
+    pub view_presets: [u8; 8],
     /// The side pane shown right of the folder view (Preview XOR Details).
     pub side_pane: crate::pane::Mode,
     /// The Details / Large-icons preset indices (folder-view.yaml §5).
@@ -497,6 +504,16 @@ impl Explorer {
             has_clipboard: self.clipboard.is_some(),
             has_items: !self.entries.is_empty(),
             view_index: self.view_index,
+            view_presets: [
+                self.view_cfg.presets.xlarge,
+                self.view_cfg.presets.large,
+                self.view_cfg.presets.medium,
+                self.view_cfg.presets.small,
+                self.view_cfg.presets.list,
+                self.view_cfg.presets.details,
+                self.view_cfg.presets.tiles,
+                self.view_cfg.presets.content,
+            ],
             side_pane: self.pane,
             preset_details: self.view_cfg.presets.details,
             preset_large: self.view_cfg.presets.large,
@@ -604,6 +621,15 @@ impl CommandHandler for ExplorerHandler {
             cmd::INVERT => out.push(Message::InvertSelection),
             cmd::VIEW_DETAILS => out.push(Message::SetView(snap.preset_details)),
             cmd::VIEW_LARGE => out.push(Message::SetView(snap.preset_large)),
+            cmd::VIEW_GALLERY => {
+                if let Some(preset) = _value
+                    .as_ref()
+                    .and_then(|v| v.as_u32())
+                    .and_then(|i| snap.view_presets.get(i as usize).copied())
+                {
+                    out.push(Message::SetView(preset));
+                }
+            }
             cmd::COMPACT_DETAILS => out.push(Message::ToggleDetailsCompact),
             cmd::PREVIEW_PANE => out.push(Message::ToggleSidePane(crate::pane::Mode::Preview)),
             cmd::DETAILS_PANE => out.push(Message::ToggleSidePane(crate::pane::Mode::Details)),
@@ -685,6 +711,18 @@ impl CommandHandler for ExplorerHandler {
                 };
                 Some(PropValue::Bool(on))
             }
+            PropertyKey::SelectedItem => match command {
+                // the layout gallery marks the item whose preset is the
+                // current view step (no mark for in-between steps)
+                cmd::VIEW_GALLERY => Some(PropValue::UInt(
+                    snap.view_presets
+                        .iter()
+                        .position(|&p| p == snap.view_index)
+                        .map(|i| i as u32)
+                        .unwrap_or(u32::MAX),
+                )),
+                _ => None,
+            },
             PropertyKey::ContextAvailable => {
                 let available = match command {
                     cmd::CTX_DRIVE => snap.ctx.is_drive,
@@ -750,6 +788,7 @@ fn command_name(command: u32) -> String {
         cmd::SELECT_NONE => "Select none",
         cmd::INVERT => "Invert selection",
         cmd::VIEW_DETAILS => "Details view",
+        cmd::VIEW_GALLERY => "Layout",
         cmd::VIEW_LARGE => "Large icons view",
         cmd::COMPACT_DETAILS => "Compact details view",
         cmd::PREVIEW_PANE => "Preview pane",
@@ -829,6 +868,25 @@ impl Ribbon {
         framework
             .load_ui(&load_yaml())
             .expect("assets/ribbon.yaml must be valid rs-ribbon markup");
+        // folder-layout gallery items, in [`Snapshot::view_presets`] order
+        framework
+            .set_ui_command_property(
+                cmd::VIEW_GALLERY,
+                PropertyKey::ItemsSource,
+                PropValue::Collection(
+                    crate::ribbon::collection::collection_from_labels(&[
+                        ("Extra large icons", Some("view_large")),
+                        ("Large icons", Some("view_large")),
+                        ("Medium icons", Some("view_large")),
+                        ("Small icons", Some("view_list")),
+                        ("List", Some("view_list")),
+                        ("Details", Some("view_details")),
+                        ("Tiles", Some("view_tiles")),
+                        ("Content", Some("view_tiles")),
+                    ]),
+                ),
+            )
+            .expect("cmdViewGallery items source");
         framework.set_modes(1).expect("modes");
         // debug hook: EXPLORER_DEBUG_POPUP=x,y opens the context popup at
         // startup (same overlay pipeline as the ribbon dropdowns)
