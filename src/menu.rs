@@ -1152,26 +1152,6 @@ pub fn paint_popup(
         }
     }
 
-    if std::env::var_os("EXPLORER_DEBUG").is_some() {
-        // straight-alpha PNG dump of exactly what gets uploaded
-        let mut straight = px.clone();
-        let (chunks, _) = straight.as_chunks_mut::<4>();
-        for b in chunks {
-            let a = b[3] as u32;
-            for c in &mut b[..3] {
-                // un-premultiply (debug dump only): a == 0 stays 0
-                *c = ((*c as u32).checked_mul(255).and_then(|v| v.checked_div(a)).unwrap_or(0)) as u8;
-            }
-        }
-        let _ = ::image::save_buffer(
-            "/tmp/menu_dump.png",
-            &straight,
-            w,
-            h,
-            ::image::ExtendedColorType::Rgba8,
-        );
-    }
-
     Some(crate::dnd_wayland::DragVisual {
         width: w,
         height: h,
