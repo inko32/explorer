@@ -20,7 +20,9 @@ mod icons;
 mod menu;
 mod model;
 mod nav_pane;
-// TODO(perf): assets/performance.yaml rate caps — disabled, see model/explorer.rs
+// TODO(perf): assets/performance.yaml rate caps — superseded by the
+// drag-live cursor gate in the subscription below (idle CursorMoved
+// events never become messages, so there is nothing left to throttle)
 #[allow(dead_code)]
 mod perf;
 mod navigation;
@@ -175,9 +177,28 @@ fn main() -> iced::Result {
         text_color: theme.palette().background.base.text,
     })
     .subscription(|state: &Explorer| {
+        // Raw window events: while a drag is live (rubber band,
+        // splitters, drag-initiation threshold, Wayland DnD handoff)
+        // the model needs every cursor move; while idle, CursorMoved
+        // is dropped BEFORE it becomes a message — ANY message makes
+        // iced rebuild the whole UI (view + diff + full layout), so
+        // idle pointer motion would relayout the entire window at
+        // pointer rate. Press-time positions arrive via CursorAt
+        // (see ui_common::cursor_seed). Non-move events always pass.
+        let events: iced::Subscription<Message> = if state.drag_live() {
+            iced::event::listen().map(Message::Event)
+        } else {
+            iced::event::listen_with(|event, status, _window| match status {
+                iced::event::Status::Captured => None,
+                iced::event::Status::Ignored => match event {
+                    iced::Event::Mouse(iced::mouse::Event::CursorMoved { .. }) => None,
+                    other => Some(Message::Event(other)),
+                },
+            })
+        };
         let mut subs = vec![
             iced::window::open_events().map(Message::WindowOpened),
-            iced::event::listen().map(Message::Event),
+            events,
             iced::Subscription::run(fs_stream_builder).map(Message::FsEvent),
             iced::Subscription::run(dnd_stream_builder).map(Message::Dnd),
             iced::window::resize_events().map(|(_id, size)| Message::WindowResized(size.width, size.height)),

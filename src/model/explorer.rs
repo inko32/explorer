@@ -978,6 +978,23 @@ impl Explorer {
         }
     }
 
+    /// True while any pointer-drag interaction is live: the raw
+    /// cursor stream must reach the model then (drag-initiation
+    /// threshold, splitter drags, the Wayland DnD handoff). While idle,
+    /// main.rs drops `CursorMoved` from the event subscription — every
+    /// message would otherwise force a full UI rebuild + layout at
+    /// pointer rate. Press-time positions arrive via `CursorAt`
+    /// (the `cursor_seed` wrapper) instead.
+    pub(crate) fn drag_live(&self) -> bool {
+        self.press.is_some()
+            || self.marquee.is_some()
+            || self.bar_split
+            || self.pane_split
+            || self.nav_split
+            || self.block_press.is_some()
+            || self.dnd.active()
+    }
+
     pub fn update(&mut self, message: Message) -> iced::Task<Message> {
         // ribbon-originated events must not re-run contextual
         // auto-activation (the user just clicked a tab)
@@ -1805,11 +1822,21 @@ impl Explorer {
                 self.status = s;
                 iced::Task::none()
             }
+            // Press-time cursor refresh: the `cursor_seed` wrapper
+            // publishes this just before the press message (FIFO bus),
+            // so drag thresholds and menu anchors see the press
+            // position even though idle cursor moves never reach the
+            // model (main.rs drops them — each one would force a full
+            // UI rebuild + layout at pointer rate).
+            Message::CursorAt(p) => {
+                self.cursor = p;
+                iced::Task::none()
+            }
             Message::Event(e) => {
-                // track the cursor (context-menu placement)
-                // TODO(perf): assets/performance.yaml input_hz throttling
-                // lived here — disabled (the high CPU on fast mouse moves
-                // was not caused by this layer; re-evaluate with a profile)
+                // Track the cursor during drags only: idle CursorMoved
+                // events are filtered out of the subscription (see
+                // `drag_live` in main.rs), so this arm only sees them
+                // while a drag is live (plus every non-move event).
                 if let iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) = &e {
                     self.cursor = *position;
                     // Wayland: a simulated drag that leaves the window
