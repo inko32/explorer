@@ -127,6 +127,12 @@ pub enum Message {
         y: f32,
     },
     MarqueeEnd,
+    /// Auto-scroll tick while a rubber-band drag is live: the content
+    /// scrolls toward the cursor whenever it sits inside the pane's
+    /// edge margin (Windows drag-select edge behaviour). Published by
+    /// the subscription in main.rs, which is gated on an active
+    /// marquee.
+    MarqueeAutoScroll,
     Hover(Option<usize>),
     Open(usize),
     ToggleDark,

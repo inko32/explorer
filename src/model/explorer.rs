@@ -47,6 +47,13 @@ pub struct Marquee {
     pub y1: f32,
     /// Selection snapshot at drag start (Ctrl+drag adds to it).
     pub(crate) base: std::collections::BTreeSet<usize>,
+    /// Last cursor position in pane-local coordinates (clamped to the
+    /// pane by the folder.rs MarqueeZone): recombined with the live
+    /// scroll whenever the content scrolls without a matching move
+    /// (wheel, edge auto-scroll), so the far corner keeps tracking the
+    /// pointer while the anchor corner rides the content.
+    pub(crate) px: f32,
+    pub(crate) py: f32,
 }
 
 pub struct Explorer {
@@ -1225,6 +1232,10 @@ impl Explorer {
                     y0: y,
                     x1: x,
                     y1: y,
+                    // pane-local cursor = content coord − live scroll
+                    // (both messages add the scroll at publish time)
+                    px: x - self.scroll_x,
+                    py: y - self.scroll_y,
                     // Ctrl+drag adds to the selection; plain drag replaces
                     base: if self.ctrl_held {
                         self.selected.clone()
@@ -1253,6 +1264,8 @@ impl Explorer {
                 if let Some(m) = &mut self.marquee {
                     m.x1 = x;
                     m.y1 = y;
+                    m.px = x - self.scroll_x;
+                    m.py = y - self.scroll_y;
                 }
                 self.marquee_update();
                 iced::Task::none()
@@ -1262,6 +1275,7 @@ impl Explorer {
                 self.marquee = None;
                 iced::Task::none()
             }
+            Message::MarqueeAutoScroll => self.marquee_auto_scroll(),
             Message::Hover(h) => {
                 // an open menu is modal for hover only: the items under
                 // it must not highlight while it is hovered (clicks and
@@ -1506,6 +1520,10 @@ impl Explorer {
                         self.scroll_y = target.max(0.0);
                         (None, Some(self.scroll_y))
                     };
+                // a wheel roll / scrollbar step during a rubber-band
+                // drag scrolls under a stationary cursor: re-anchor the
+                // far corner so the band keeps tracking the pointer
+                self.marquee_follow_scroll();
                 iced::widget::operation::scrollable::scroll_to(
                     crate::folder::file_scrollable_id(),
                     iced::widget::operation::scrollable::AbsoluteOffset { x, y },
@@ -1514,6 +1532,7 @@ impl Explorer {
             }
             Message::FileHScrollTo(target) => {
                 self.scroll_x = target.max(0.0);
+                self.marquee_follow_scroll();
                 iced::widget::operation::scrollable::scroll_to(
                     crate::folder::details_h_scrollable_id(),
                     iced::widget::operation::scrollable::AbsoluteOffset {
