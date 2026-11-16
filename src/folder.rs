@@ -1422,7 +1422,9 @@ fn selection_borders<'a>(
     pitch: f32,
     row_h: f32,
 ) -> Element<'a, Message> {
-    let w = state.detail_cfg.files_left + details_cols_w(state) + state.detail_cfg.chrome_pad;
+    // the same width the rubber-band hit test (details_row_w) and
+    // file_row's chrome use
+    let w = state.details_row_w();
     let radius = state.view_cfg.style.corner_radius;
     let mut overlay = stack![];
     for i in first..last {

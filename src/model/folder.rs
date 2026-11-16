@@ -684,6 +684,33 @@ impl Explorer {
         iced::Task::none()
     }
 
+    /// Width of a Details row's rendered element: the files margin,
+    /// the visible column block (widths + resizers) and the right
+    /// chrome pad — the same geometry `file_row` and the
+    /// selection-border overlay use. The rubber band must hit this,
+    /// not the full pane width: the background right of the column
+    /// block is empty space. Allocation-free: `marquee_update` calls
+    /// this through `item_rect` for every item.
+    pub(crate) fn details_row_w(&self) -> f32 {
+        let mut w = self.detail_cfg.files_left + self.detail_cfg.chrome_pad;
+        let mut prev_visible = false;
+        for &g in &self.details_col_order {
+            if !self.details_col_on.get(g).copied().unwrap_or(true) {
+                continue;
+            }
+            if prev_visible {
+                w += crate::folder::COL_RESIZER_W;
+            }
+            w += self
+                .details_cols
+                .get(g)
+                .copied()
+                .unwrap_or(self.detail_cfg.columns[g].width);
+            prev_visible = true;
+        }
+        w
+    }
+
     /// Item rectangle in file-view CONTENT coordinates (before scroll),
     /// shared by the Menu-key anchor and the rubber-band hit test.
     pub(crate) fn item_rect(&self, i: usize, pane_w: f32) -> (f32, f32, f32, f32) {
@@ -706,7 +733,9 @@ impl Explorer {
                     cfg.layouts.details.header_h
                         + cfg.layouts.details.files_gap
                         + i as f32 * pitch,
-                    pane_w,
+                    // the rendered row spans only the column block;
+                    // pane_w would rubber-band-select empty background
+                    self.details_row_w(),
                     row_h,
                 )
             }
