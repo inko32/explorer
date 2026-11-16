@@ -821,6 +821,156 @@ impl Explorer {
         }
     }
 
+    /// Re-anchor the rubber band's far corner to the cursor after a
+    /// scroll that came without a matching move (wheel roll, scrollbar
+    /// step, edge auto-scroll): x1/y1 are content coordinates, so a
+    /// scroll alone would leave the corner riding the items instead of
+    /// the pointer (the anchor corner x0/y0 stays content-fixed on
+    /// purpose — the band rides the content like a sheet on a canvas).
+    pub(crate) fn marquee_follow_scroll(&mut self) {
+        if let Some(m) = &mut self.marquee {
+            m.x1 = m.px + self.scroll_x;
+            m.y1 = m.py + self.scroll_y;
+        }
+        self.marquee_update();
+    }
+
+    /// Edge auto-scroll while a rubber-band drag is live (Windows
+    /// drag-select behaviour): the cursor held inside the pane's edge
+    /// margin scrolls the content toward that edge, accelerating the
+    /// deeper it sits. Each tick also re-anchors the far corner, so the
+    /// band keeps tracking the pointer while the anchor corner rides
+    /// the content. List scrolls only horizontally, Details on both
+    /// axes, every other family only vertically.
+    pub(crate) fn marquee_auto_scroll(&mut self) -> Task<Message> {
+        /// Edge margin (px) of the pane that triggers the auto-scroll.
+        const MARGIN: f32 = 24.0;
+        let Some(m) = &self.marquee else { return Task::none() };
+        let (px, py) = (m.px, m.py);
+        let cfg = &self.view_cfg;
+        let family = cfg.family(self.view_index);
+        let is_list = family == vs::Family::List;
+        let is_details = family == vs::Family::Details;
+        let pane_w = self.file_pane_width();
+        let pane_h = self.viewport_h;
+        let top = if is_details { cfg.layouts.details.header_h } else { 0.0 };
+        // per-tick scroll step, accelerating into the margin
+        let step = |gap: f32| 2.0 + (MARGIN - gap) * 0.75;
+        let mut dx = 0.0f32;
+        if is_list || is_details {
+            if px < MARGIN {
+                dx = -step(px.max(0.0));
+            } else if pane_w - px < MARGIN {
+                dx = step((pane_w - px).max(0.0));
+            }
+        }
+        let mut dy = 0.0f32;
+        if !is_list {
+            if py < top + MARGIN {
+                dy = -step((py - top).max(0.0));
+            } else if pane_h - py < MARGIN {
+                dy = step((pane_h - py).max(0.0));
+            }
+        }
+        if dx == 0.0 && dy == 0.0 {
+            return Task::none();
+        }
+        let n = self.entries.len();
+        let longest = self
+            .entries
+            .iter()
+            .map(|e| e.name.chars().count())
+            .max()
+            .unwrap_or(0);
+        // clamp each axis into its own scroll range; a pinned axis is
+        // dropped (nothing to scroll there)
+        if dx != 0.0 {
+            let natural = if is_details {
+                // the outer column strip scrolls when the visible
+                // columns are wider than the pane (same width the view
+                // uses to decide the horizontal strip)
+                self.details_natural_w()
+            } else {
+                cfg.content_extent(
+                    self.view_index,
+                    n,
+                    pane_w,
+                    pane_h,
+                    longest,
+                    &self.it_label_lines,
+                    self.details_compact,
+                )
+            };
+            let max = (natural - pane_w).max(0.0);
+            let new = (self.scroll_x + dx).clamp(0.0, max);
+            dx = new - self.scroll_x;
+            self.scroll_x = new;
+        }
+        if dy != 0.0 {
+            let extent = cfg.content_extent(
+                self.view_index,
+                n,
+                pane_w,
+                pane_h,
+                longest,
+                &self.it_label_lines,
+                self.details_compact,
+            );
+            let max = (extent - pane_h).max(0.0);
+            let new = (self.scroll_y + dy).clamp(0.0, max);
+            dy = new - self.scroll_y;
+            self.scroll_y = new;
+        }
+        if dx == 0.0 && dy == 0.0 {
+            return Task::none(); // every edge axis already at its end
+        }
+        self.marquee_follow_scroll();
+        // Details scrolls each axis on its own scrollable (the outer
+        // horizontal strip for x, the row list for y)
+        if is_details && dx != 0.0 {
+            return iced::widget::operation::scrollable::scroll_to(
+                crate::folder::details_h_scrollable_id(),
+                iced::widget::operation::scrollable::AbsoluteOffset {
+                    x: Some(self.scroll_x),
+                    y: None,
+                },
+                iced::widget::operation::Animation::Instant,
+            );
+        }
+        let (x, y) = if is_list {
+            (Some(self.scroll_x), None)
+        } else {
+            (None, Some(self.scroll_y))
+        };
+        iced::widget::operation::scrollable::scroll_to(
+            crate::folder::file_scrollable_id(),
+            iced::widget::operation::scrollable::AbsoluteOffset { x, y },
+            iced::widget::operation::Animation::Instant,
+        )
+    }
+
+    /// Width the Details strip needs (files margin + the visible
+    /// column block + the right chrome pad): when this exceeds the
+    /// pane the outer horizontal scrollable scrolls. Mirrors the view
+    /// side (`folder.rs::details_cols_w`).
+    fn details_natural_w(&self) -> f32 {
+        let vis: Vec<usize> = self
+            .details_col_order
+            .iter()
+            .copied()
+            .filter(|&g| self.details_col_on.get(g).copied().unwrap_or(true))
+            .collect();
+        let cols_w = vis.iter().enumerate().fold(0.0, |acc, (n, &g)| {
+            acc + self.details_col_w(g)
+                + if n + 1 < vis.len() {
+                    crate::folder::COL_RESIZER_W
+                } else {
+                    0.0
+                }
+        });
+        self.detail_cfg.files_left + cols_w + self.detail_cfg.chrome_pad
+    }
+
     /// Left-bottom corner of file-view item `i` in window coordinates
     /// (Menu-key anchor). Best-effort: recomputed from the same layout
     /// math as ui.rs + folder.rs.
@@ -1030,5 +1180,57 @@ mod focus_tests {
         let _ = e.update(Message::MarqueeEnd);
         assert_eq!(e.focus_item, Some(0));
         assert!(!e.focus_shown);
+    }
+
+    #[test]
+    fn marquee_edge_scrolls_toward_the_cursor() {
+        let mut e = explorer(100);
+        e.view_index = e.view_cfg.presets.details;
+        // the cursor held at the pane's bottom edge: the content
+        // scrolls down and the band's far corner tracks the pointer
+        let bottom = e.viewport_h - 1.0;
+        let _ = e.update(Message::MarqueeBegin { x: 10.0, y: 10.0 });
+        let _ = e.update(Message::MarqueeMove { x: 10.0, y: bottom });
+        let _ = e.update(Message::MarqueeAutoScroll);
+        assert!(e.scroll_y > 0.0, "bottom edge must scroll down");
+        let m = e.marquee.as_ref().expect("drag still live");
+        assert!((m.y1 - (m.py + e.scroll_y)).abs() < 0.01);
+        // the anchor corner stays content-fixed (it is NOT re-anchored)
+        assert_eq!(m.y0, 10.0);
+        // …and the anchor moved INTO the viewport as content scrolled:
+        // drawn at y0 − scroll_y, it rides the content like a canvas
+        assert!(m.y0 - e.scroll_y < 10.0);
+        // the cursor parked mid-pane: no scrolling, no task. Pane-local
+        // y is what matters: keep it clear of both 24px margins
+        // (below the Details header + margin, above the bottom margin)
+        let before = e.scroll_y;
+        let _ = e.update(Message::MarqueeMove { x: 10.0, y: before + 60.0 });
+        let _ = e.update(Message::MarqueeAutoScroll);
+        assert_eq!(e.scroll_y, before);
+        // the top edge scrolls back up (accelerating step)
+        let _ = e.update(Message::MarqueeMove { x: 10.0, y: 2.0 });
+        let _ = e.update(Message::MarqueeAutoScroll);
+        assert!(e.scroll_y < before, "top edge must scroll up");
+    }
+
+    #[test]
+    fn marquee_wheel_reanchors_the_far_corner() {
+        let mut e = explorer(100);
+        e.view_index = e.view_cfg.presets.details;
+        let _ = e.update(Message::MarqueeBegin { x: 10.0, y: 10.0 });
+        // park the corner just above row 1: only row 0 is inside the band
+        let row1_y = {
+            let (_, y, _, _) = e.item_rect(1, e.file_pane_width());
+            y
+        };
+        let _ = e.update(Message::MarqueeMove { x: 60.0, y: row1_y - 2.0 });
+        assert!(!e.selected.contains(&1));
+        // a wheel roll scrolls under the stationary cursor: the far
+        // corner must follow the pointer (content coord = pane + scroll)
+        let _ = e.update(Message::FileScrollTo(30.0));
+        let m = e.marquee.as_ref().expect("drag still live");
+        assert!((m.y1 - (m.py + e.scroll_y)).abs() < 0.01);
+        // row 1 sat below the old corner; it joins once the corner tracks
+        assert!(e.selected.contains(&1));
     }
 }

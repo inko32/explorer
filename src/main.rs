@@ -90,6 +90,21 @@ fn reorder_tick_stream() -> impl iced::futures::Stream<Item = ()> {
     iced::futures::stream::unfold(rx, |rx| async move { rx.recv().ok().map(|_| ((), rx)) })
 }
 
+/// 16ms tick stream driving the rubber-band edge auto-scroll: the
+/// subscription gate in `main` activates it only while a marquee drag
+/// is live, so it costs nothing otherwise. A separate recipe from
+/// `reorder_tick_stream` so both can run at once.
+fn marquee_tick_stream() -> impl iced::futures::Stream<Item = ()> {
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    std::thread::spawn(move || loop {
+        if tx.send(()).is_err() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(16));
+    });
+    iced::futures::stream::unfold(rx, |rx| async move { rx.recv().ok().map(|_| ((), rx)) })
+}
+
 fn main() -> iced::Result {
     // Renderer selection (D17): GPU (wgpu) is primary, CPU (tiny-skia) is the
     // reserved fallback — both are compiled in and picked at startup.
@@ -178,6 +193,14 @@ fn main() -> iced::Result {
             subs.push(
                 iced::Subscription::run(reorder_tick_stream)
                     .map(|_| Message::ColumnReorderTick),
+            );
+        }
+        // the rubber-band's edge auto-scroll ticks while a marquee
+        // drag is live (Explorer::marquee_auto_scroll)
+        if state.marquee.is_some() {
+            subs.push(
+                iced::Subscription::run(marquee_tick_stream)
+                    .map(|_| Message::MarqueeAutoScroll),
             );
         }
         iced::Subscription::batch(subs)

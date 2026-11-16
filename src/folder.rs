@@ -331,27 +331,69 @@ impl<'a> Widget<Message, iced::Theme, iced::Renderer> for MarqueeZone<'a> {
 
 /// The rubber-band rectangle (pane-local coordinates — plain
 /// spacer positioning, NOT float: float bounds are window-absolute).
-fn marquee_rect(x: f32, y: f32, w: f32, h: f32, rainbow: bool, skin: skin::Skin) -> Element<'static, Message> {
+/// `borders` picks the sides that draw their outline: a side the
+/// cursor is actively held against keeps its line; a side clipped by
+/// the viewport (the anchor corner scrolled out of view) goes
+/// colorless — the band visibly continues past it, like Windows.
+fn marquee_rect(
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    rainbow: bool,
+    skin: skin::Skin,
+    borders: [bool; 4],
+) -> Element<'static, Message> {
+    let bw = crate::theme::border_w(1.0);
+    // TEMP(rainbow): let the backdrop pass through (same 0.6
+    // convention as the item chrome border)
+    let border_color = if rainbow {
+        Color { a: 0.6, ..skin.sel_border }
+    } else {
+        skin.sel_border
+    };
+    let fill = container(Space::new().width(Length::Fixed(w)).height(Length::Fixed(h))).style(
+        move |_t: &iced::Theme| container::Style {
+            background: Some(Color { a: 0.35, ..skin.sel }.into()),
+            ..Default::default()
+        },
+    );
+    // one spacer-positioned 1px bar per visible side; the corners
+    // overlap by design (same color)
+    let bar = |bx: f32, by: f32, w_: f32, h_: f32| -> Element<'static, Message> {
+        column![
+            Space::new().height(Length::Fixed(by.max(0.0))),
+            row![
+                Space::new().width(Length::Fixed(bx.max(0.0))),
+                container(Space::new().width(Length::Fixed(w_)).height(Length::Fixed(h_)))
+                    .style(move |_t: &iced::Theme| container::Style {
+                        background: Some(border_color.into()),
+                        ..Default::default()
+                    }),
+            ],
+        ]
+        .boxed()
+    };
+    let mut rect = stack![fill.boxed()];
+    // bars are positioned relative to the rect stack's own origin
+    // (the outer spacers already place the stack at x, y)
+    if borders[0] {
+        rect = rect.push(bar(0.0, 0.0, bw, h)); // left
+    }
+    if borders[1] {
+        rect = rect.push(bar(0.0, 0.0, w, bw)); // top
+    }
+    if borders[2] {
+        rect = rect.push(bar(w - bw, 0.0, bw, h)); // right
+    }
+    if borders[3] {
+        rect = rect.push(bar(0.0, h - bw, w, bw)); // bottom
+    }
     column![
         Space::new().height(Length::Fixed(y.max(0.0))),
         row![
             Space::new().width(Length::Fixed(x.max(0.0))),
-            container(Space::new().width(Length::Fixed(w)).height(Length::Fixed(h))).style(
-                move |_t: &iced::Theme| container::Style {
-                    background: Some(Color { a: 0.35, ..skin.sel }.into()),
-                    border: iced::Border {
-                        // TEMP(rainbow): let the backdrop pass through
-                        color: if rainbow {
-                            Color { a: 0.6, ..skin.sel_border }
-                        } else {
-                            skin.sel_border
-                        },
-                        width: crate::theme::border_w(1.0),
-                        radius: 0.0.into(),
-                    },
-                    ..Default::default()
-                },
-            ),
+            rect.boxed(),
         ],
     ]
     .boxed()
@@ -695,11 +737,48 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
 
     // rubber-band selection rectangle overlay (all layouts)
     let body: Element<Message> = if let Some(m) = &state.marquee {
-        let (x0, x1) = (m.x0.min(m.x1), m.x0.max(m.x1));
-        let (y0, y1) = (m.y0.min(m.y1), m.y0.max(m.y1));
+        // content coords -> pane coords, then clamp to the visible
+        // pane: while edge-auto-scrolling (or wheel-scrolling) away
+        // from the anchor, the band's anchor corner leaves the
+        // viewport and the far corner sits at the opposite border —
+        // only the visible part is drawn. In Details the column
+        // header overlays the pane top, so the band's upper border
+        // is the header's bottom line, not the pane's top edge.
+        let top = if family == vs::Family::Details {
+            state.view_cfg.layouts.details.header_h
+        } else {
+            0.0
+        };
+        let rx0 = m.x0.min(m.x1) - state.scroll_x;
+        let rx1 = m.x0.max(m.x1) - state.scroll_x;
+        let ry0 = m.y0.min(m.y1) - state.scroll_y;
+        let ry1 = m.y0.max(m.y1) - state.scroll_y;
+        let x0 = rx0.clamp(0.0, inner_w);
+        let x1 = rx1.clamp(0.0, inner_w);
+        let y0 = ry0.clamp(top, state.viewport_h);
+        let y1 = ry1.clamp(top, state.viewport_h);
+        // a side the cursor is actively held against (raw coord still
+        // inside the pane) keeps its outline; a side clipped by the
+        // viewport (anchor scrolled off) goes colorless. The 1px
+        // slack absorbs the widget's pane-bounds rounding so an
+        // active touch at the edge never reads as clipped.
+        let borders = [
+            rx0 >= -1.0,                   // left
+            ry0 >= top - 1.0,              // top
+            rx1 <= inner_w + 1.0,          // right
+            ry1 <= state.viewport_h + 1.0, // bottom
+        ];
         stack![
             body,
-            marquee_rect(x0 - state.scroll_x, y0 - state.scroll_y, x1 - x0, y1 - y0, state.rainbow, skin),
+            marquee_rect(
+                x0,
+                y0,
+                (x1 - x0).max(0.0),
+                (y1 - y0).max(0.0),
+                state.rainbow,
+                skin,
+                borders,
+            ),
         ]
         .boxed()
     } else {
