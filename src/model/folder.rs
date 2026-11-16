@@ -816,7 +816,31 @@ impl Explorer {
             }
             return;
         }
-        if self.view_cfg.family(self.view_index) == vs::Family::IconTop {
+        let family = self.view_cfg.family(self.view_index);
+        if family == vs::Family::List {
+            // item_rect's List branch rescans every name for `longest`
+            // on EACH call — O(n²) name scanning per mouse-move tick
+            // (very slow in big folders). Hoist the column geometry
+            // once, then direct per-item math (same pattern as the
+            // IconTop branch below)
+            let longest = self
+                .entries
+                .iter()
+                .map(|e| e.name.chars().count())
+                .max()
+                .unwrap_or(0);
+            let col_w = self.view_cfg.list_col_w(longest);
+            let rows = self.view_cfg.list_rows_per_col(self.viewport_h);
+            let top = self.view_cfg.files_top(self.view_index);
+            let row_h = self.view_cfg.layouts.list.row_h;
+            for i in 0..self.entries.len() {
+                let ix = (i / rows) as f32 * col_w;
+                let iy = top + (i % rows) as f32 * row_h;
+                if ix < x1 && ix + col_w > x0 && iy < y1 && iy + row_h > y0 {
+                    hits.insert(i);
+                }
+            }
+        } else if family == vs::Family::IconTop {
             // §8.3 dynamic row heights: one geometry pass, then direct
             // per-item math (item_rect would rebuild the prefix sums
             // for every item)
