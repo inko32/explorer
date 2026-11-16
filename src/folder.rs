@@ -637,18 +637,12 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
                 + m.gap
         }
     };
-    let body: Element<Message> = if state.loading {
-        container(
-            container(text("Loading…").size(cfg.style.font_size).color(skin.subtle))
-                .width(Length::Fill)
-                .center_x(Length::Fill)
-                .center_y(Length::Fill),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .boxed()
-    } else {
-        match family {
+    // No loading special-case here: the per-family structure (the
+    // scrollable wrappers) must stay mounted while `loading` flips or
+    // iced rebuilds the scrollable subtree and its offset resets (see
+    // the overlay Stack below). The stale listing stays rendered and
+    // the loading layer covers it.
+    let body: Element<Message> = match family {
             vs::Family::Content => content_view(state, skin, inner_w),
             vs::Family::Tiles => tiles_view(state, skin, inner_w),
             vs::Family::Details => {
@@ -714,7 +708,6 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
                 let rows = cfg.icon_top_rows(state.view_index, total, inner_w, &state.it_label_lines);
                 icon_top_grid_view(state, skin, s, &rows)
             }
-        }
     };
 
     // a submitted search shows a placeholder line in the folder pane
@@ -729,56 +722,6 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
             .width(Length::Fill)
             .padding([4.0, 8.0]),
             body,
-        ]
-        .boxed()
-    } else {
-        body
-    };
-
-    // rubber-band selection rectangle overlay (all layouts)
-    let body: Element<Message> = if let Some(m) = &state.marquee {
-        // content coords -> pane coords, then clamp to the visible
-        // pane: while edge-auto-scrolling (or wheel-scrolling) away
-        // from the anchor, the band's anchor corner leaves the
-        // viewport and the far corner sits at the opposite border —
-        // only the visible part is drawn. In Details the column
-        // header overlays the pane top, so the band's upper border
-        // is the header's bottom line, not the pane's top edge.
-        let top = if family == vs::Family::Details {
-            state.view_cfg.layouts.details.header_h
-        } else {
-            0.0
-        };
-        let rx0 = m.x0.min(m.x1) - state.scroll_x;
-        let rx1 = m.x0.max(m.x1) - state.scroll_x;
-        let ry0 = m.y0.min(m.y1) - state.scroll_y;
-        let ry1 = m.y0.max(m.y1) - state.scroll_y;
-        let x0 = rx0.clamp(0.0, inner_w);
-        let x1 = rx1.clamp(0.0, inner_w);
-        let y0 = ry0.clamp(top, state.viewport_h);
-        let y1 = ry1.clamp(top, state.viewport_h);
-        // a side the cursor is actively held against (raw coord still
-        // inside the pane) keeps its outline; a side clipped by the
-        // viewport (anchor scrolled off) goes colorless. The 1px
-        // slack absorbs the widget's pane-bounds rounding so an
-        // active touch at the edge never reads as clipped.
-        let borders = [
-            rx0 >= -1.0,                   // left
-            ry0 >= top - 1.0,              // top
-            rx1 <= inner_w + 1.0,          // right
-            ry1 <= state.viewport_h + 1.0, // bottom
-        ];
-        stack![
-            body,
-            marquee_rect(
-                x0,
-                y0,
-                (x1 - x0).max(0.0),
-                (y1 - y0).max(0.0),
-                state.rainbow,
-                skin,
-                borders,
-            ),
         ]
         .boxed()
     } else {
@@ -827,7 +770,12 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
     );
     // Windows-style scrollbar strip (arrow buttons at both ends); 0px
     // when the content fits, keeping the pane edge right-aligned
-    let pane: Element<Message> = if family == vs::Family::List && !state.loading {
+    // The branch choice depends on the family ONLY. While `loading`
+    // the strips collapse via `need_strip`/`need_h_strip` (already
+    // loading-aware) — a List pane that flipped between `column!` and
+    // `row!` across the loading flip would rebuild the subtree under
+    // it and reset the scrollable (see the overlay Stack below).
+    let pane: Element<Message> = if family == vs::Family::List {
         let mut c = column![area];
         if need_strip {
             c = c.push(crate::scrollbar::horizontal(
@@ -835,7 +783,7 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
             ));
         }
         c.boxed()
-    } else if family == vs::Family::Details && !state.loading {
+    } else if family == vs::Family::Details {
         // both axes can overflow independently. Each strip stops at
         // the other's near edge: the horizontal one spans only the
         // area's width, the vertical one only the height above it —
@@ -877,6 +825,88 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
         }
         r.boxed()
     };
+    // Overlay layers on top of the assembled pane, in an ALWAYS-
+    // present Stack: iced rebuilds a widget's whole subtree — fresh
+    // State, scroll offset 0 — whenever the widget TYPE changes at a
+    // tree position, so every type on the scrollable's ancestor chain
+    // (pane → … → scrollable) must stay constant. Each layer is an
+    // inert Space when hidden: toggling rebuilds only that layer's
+    // subtree, never the scrollable's branch.
+    //
+    // Loading layer: opaque, hiding the stale listing that survives a
+    // refresh until the new listing arrives (the old code replaced
+    // the whole body with a plain container, unmounting the
+    // scrollable and resetting its offset).
+    let loading_layer: Element<Message> = if state.loading {
+        container(
+            container(text("Loading…").size(cfg.style.font_size).color(skin.subtle))
+                .width(Length::Fill)
+                .center_x(Length::Fill)
+                .center_y(Length::Fill),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(move |_t: &iced::Theme| container::Style {
+            // solid like the pane backdrop; the TEMP rainbow backdrop
+            // stays visible through the transparent layer
+            background: if state.rainbow {
+                None
+            } else {
+                Some(skin.window_bg.into())
+            },
+            ..Default::default()
+        })
+        .boxed()
+    } else {
+        Space::new().boxed()
+    };
+    // Rubber-band selection rectangle (all layouts). The rect is
+    // pane-local (clamped to inner_w × viewport_h), so it never covers
+    // the scrollbar strips beside it; while edge-auto-scrolling (or
+    // wheel-scrolling) away from the anchor, the band's anchor corner
+    // leaves the viewport and the far corner sits at the opposite
+    // border — only the visible part is drawn. In Details the column
+    // header overlays the pane top, so the band's upper border is the
+    // header's bottom line, not the pane's top edge.
+    let marquee_layer: Element<Message> = if let Some(m) = &state.marquee {
+        let top = if family == vs::Family::Details {
+            state.view_cfg.layouts.details.header_h
+        } else {
+            0.0
+        };
+        let rx0 = m.x0.min(m.x1) - state.scroll_x;
+        let rx1 = m.x0.max(m.x1) - state.scroll_x;
+        let ry0 = m.y0.min(m.y1) - state.scroll_y;
+        let ry1 = m.y0.max(m.y1) - state.scroll_y;
+        let x0 = rx0.clamp(0.0, inner_w);
+        let x1 = rx1.clamp(0.0, inner_w);
+        let y0 = ry0.clamp(top, state.viewport_h);
+        let y1 = ry1.clamp(top, state.viewport_h);
+        // a side the cursor is actively held against (raw coord still
+        // inside the pane) keeps its outline; a side clipped by the
+        // viewport (anchor scrolled off) goes colorless. The 1px
+        // slack absorbs the widget's pane-bounds rounding so an
+        // active touch at the edge never reads as clipped.
+        let borders = [
+            rx0 >= -1.0,                   // left
+            ry0 >= top - 1.0,              // top
+            rx1 <= inner_w + 1.0,          // right
+            ry1 <= state.viewport_h + 1.0, // bottom
+        ];
+        marquee_rect(
+            x0,
+            y0,
+            (x1 - x0).max(0.0),
+            (y1 - y0).max(0.0),
+            state.rainbow,
+            skin,
+            borders,
+        )
+        .boxed()
+    } else {
+        Space::new().boxed()
+    };
+    let pane: Element<Message> = stack![pane, loading_layer, marquee_layer].boxed();
     // wheel speed boost (folder-view.yaml input.scroll_speed): captures
     // plain wheel events; Ctrl+wheel zoom is handled by CtrlZoom below
     let (axis, offset) = if family == vs::Family::List {
