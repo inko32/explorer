@@ -245,8 +245,9 @@ pub struct Explorer {
     pub status: String,
     pub last_click: Option<(usize, std::time::Instant)>,
     /// Last free-space (empty-area) press: a second press within
-    /// theme.yaml `double_click_ms` is a double-click, which releases
-    /// the idle selector back to its default (first item, hidden).
+    /// theme.yaml `double_click_ms` is a double-click, which hides
+    /// the idle selector where it is until the next keyboard
+    /// navigation shows it again.
     pub(crate) last_free_click: Option<std::time::Instant>,
     pub loading: bool,
     pub volumes: Vec<fs::Volume>,
@@ -1213,8 +1214,8 @@ impl Explorer {
                     self.selected.iter().next().copied()
                 };
                 // a second free-space press within double_click_ms is a
-                // double-click: it releases the idle selector to its
-                // default instead of showing the rectangle
+                // double-click: it hides the idle selector instead of
+                // showing the rectangle
                 let now = std::time::Instant::now();
                 let double_free = self.last_free_click.is_some_and(|t| {
                     now.duration_since(t).as_millis()
@@ -1247,11 +1248,15 @@ impl Explorer {
                 // (the zero-size marquee intersects nothing)
                 self.marquee_update();
                 if double_free {
-                    // the double-click releases the idle selector to
-                    // its default: the rectangle on the first item,
-                    // hidden
-                    self.focus_item = (!self.entries.is_empty()).then_some(0);
+                    // the double-click hides the idle selector where it
+                    // is (a temporary hider); the next keyboard
+                    // navigation (arrow keys, Space) shows it again
                     self.focus_shown = false;
+                    // previously the double-click released the idle
+                    // selector back to its default: the rectangle on
+                    // the first item, hidden
+                    // self.focus_item = (!self.entries.is_empty()).then_some(0);
+                    // self.focus_shown = false;
                 } else if let Some(i) = released
                     && self.selected.is_empty()
                 {
