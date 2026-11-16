@@ -857,7 +857,11 @@ fn contextual_blocks(state: &Explorer) -> Element<'static, Message> {
             .height(Length::Fixed(bar_h))
             .align_y(iced::Alignment::End);
         r = r.push(
-            mouse_area(block).on_press(Message::BlockPress(b.first_tab)).boxed(),
+            // cursor_seed: block_press arms the caption-drag threshold
+            // at Explorer::cursor, which idle moves no longer refresh
+            mouse_area(crate::ui_common::cursor_seed(block))
+                .on_press(Message::BlockPress(b.first_tab))
+                .boxed(),
         );
     }
     r.boxed()

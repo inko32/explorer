@@ -228,7 +228,10 @@ fn tree_item(
         Some(p) => {
             // a drag & drop target (SPEC/DRAGGING.md §4.2)
             let item = crate::dnd::drop_zone(item, crate::dnd::DropTarget::NavigationDirectory(p.clone()));
-            mouse_area(item)
+            // cursor_seed: the context menu anchors at
+            // Explorer::cursor, which idle moves no longer refresh
+            // (main.rs drops them)
+            mouse_area(crate::ui_common::cursor_seed(item))
                 .on_press(Message::NavPress(p.clone()))
                 .on_right_press(Message::ContextNav(p.clone()))
                 .on_enter(Message::NavHover(Some((p.clone(), fav_shortcut))))

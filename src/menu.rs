@@ -833,8 +833,12 @@ pub fn on_right_free<'a>(
                 event,
                 iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right))
             ) && !shell.is_event_captured()
-                && cursor.is_over(layout.bounds())
+                && let Some(p) = cursor.position_over(layout.bounds())
             {
+                // CursorAt first (FIFO bus): the background menu
+                // anchors at Explorer::cursor, which idle cursor moves
+                // no longer refresh (main.rs drops them)
+                shell.publish(Message::CursorAt(p));
                 shell.publish(self.on_free.clone());
                 shell.capture_event();
             }

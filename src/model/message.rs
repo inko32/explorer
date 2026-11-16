@@ -165,6 +165,14 @@ pub enum Message {
     WheelZoom(f32),
     /// Right-click a file-view item (SPEC/MENU_SPEC.MD).
     ContextSelect(usize),
+    /// Cursor position at a press, published by the `cursor_seed`
+    /// wrapper (or `menu::on_right_free`) JUST BEFORE the press
+    /// message — the bus is FIFO, so the model's cursor is fresh when
+    /// the press message runs. Idle cursor moves no longer reach the
+    /// model (main.rs drops them), so press-time readers (drag
+    /// thresholds, menu anchors) get the position from the widget
+    /// layer instead of a stale `Explorer::cursor`.
+    CursorAt(iced::Point),
     /// Right-pressed a file-view row: arms a right-button drag — a
     /// plain release opens the row's context menu, a drag past the
     /// threshold drags with a drop-time action-choice menu.

@@ -468,7 +468,11 @@ fn item_chrome<'a>(
             crate::dnd::DropTarget::File(e.path.clone())
         }
     });
-    let el: Element<Message> = mouse_area(styled)
+    // cursor_seed (inside) publishes CursorAt(press pos) just before
+    // the mouse_area's own messages: the drag arms and the
+    // release-time context menu anchor read Explorer::cursor, which
+    // idle moves no longer refresh (main.rs drops them)
+    let el: Element<Message> = mouse_area(crate::ui_common::cursor_seed(styled))
         .on_press(Message::Select(i))
         .on_double_click(Message::Open(i))
         .on_right_press(Message::RightPress(i))
@@ -657,8 +661,12 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
                 // itself — the MarqueeZone clamps its top edge to the
                 // header's lower border)
                 let d = &cfg.layouts.details;
+                // cursor_seed covers the whole header (cells and
+                // dropdowns included): the reorder-arm threshold and
+                // the column menus read Explorer::cursor, which idle
+                // moves no longer refresh (main.rs drops them)
                 let header = column![
-                    mouse_area(details_header(state, skin))
+                    mouse_area(crate::ui_common::cursor_seed(details_header(state, skin)))
                         .on_press(Message::ColumnHeaderPress),
                     Space::new().height(Length::Fixed(d.files_gap)),
                 ];

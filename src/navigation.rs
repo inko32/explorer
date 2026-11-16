@@ -207,7 +207,7 @@ fn back_list_btn(state: &Explorer, skin: skin::Skin) -> Element<'static, Message
         TRI_IDLE
     };
     mouse_area(
-        button(triangle(Tri::Down, TRI_W, TRI_H, color))
+        button(crate::ui_common::cursor_seed(triangle(Tri::Down, TRI_W, TRI_H, color)))
             .width(Length::Fixed(BACK_LIST_W))
             .height(Length::Fixed(BTN))
             .padding([(BTN - TRI_H) / 2.0, (BACK_LIST_W - TRI_W) / 2.0])
@@ -356,7 +356,7 @@ fn crumb_group(
         let active = arrow_hovered || open;
         group = group.push(
             mouse_area(
-                button(triangle(dir_of(open), tw, th, TRI_IDLE))
+                button(crate::ui_common::cursor_seed(triangle(dir_of(open), tw, th, TRI_IDLE)))
                     .width(Length::Fixed(ARROW_W))
                     .height(Length::Fixed(BAR - 2.0))
                     .padding([(BAR - 2.0 - th) / 2.0, (ARROW_W - tw) / 2.0])
@@ -595,7 +595,7 @@ pub(crate) fn address_bar<'a>(
     // the right-list chevron always points down; only the clicked look
     // follows the open state
     let right_list = mouse_area(
-        button(triangle(Tri::Down, TRI_W, CHEVRON_H, TRI_IDLE))
+        button(crate::ui_common::cursor_seed(triangle(Tri::Down, TRI_W, CHEVRON_H, TRI_IDLE)))
             .width(Length::Fixed(RIGHT_LIST))
             .height(Length::Fixed(RIGHT_LIST))
             .padding([(RIGHT_LIST - CHEVRON_H) / 2.0, (RIGHT_LIST - TRI_W) / 2.0])

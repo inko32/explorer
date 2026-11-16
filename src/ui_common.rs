@@ -28,6 +28,132 @@ pub(crate) fn icon(name: &str, size: f32, skin: skin::Skin) -> Element<'static, 
     crate::icon::view(name, size, &skin)
 }
 
+/// Wraps content so that an uncaptured left/right press over it
+/// publishes `Message::CursorAt(position)` — and does NOT capture the
+/// press: enclosing `mouse_area`/`button` handlers fire unchanged
+/// right after. The message bus is FIFO, so the model's cursor is
+/// fresh by the time they run.
+///
+/// Why: idle cursor moves no longer reach the model (main.rs drops
+/// them before they become messages — each one would force a full UI
+/// rebuild + layout at pointer rate), so `Explorer::cursor` is stale
+/// while idle. Press-time readers (drag-initiation thresholds,
+/// context-menu and dropdown anchors) get the position from the
+/// widget layer instead. Place ONE seed at the outermost interactive
+/// container of a region (nested ones would each publish a redundant
+/// CursorAt — harmless but wasteful).
+pub(crate) fn cursor_seed<'a, W>(content: W) -> Element<'a, Message>
+where
+    W: iced::advanced::Widget<Message, iced::Theme, iced::Renderer> + 'a,
+{
+    struct CursorSeed<'a> {
+        content: Element<'a, Message>,
+    }
+
+    impl iced::advanced::widget::Meta for CursorSeed<'_> {}
+
+    impl<'a> iced::advanced::Widget<Message, iced::Theme, iced::Renderer>
+        for CursorSeed<'a>
+    {
+        fn size(&self) -> iced::Size<iced::Length> {
+            self.content.size()
+        }
+        fn tag(&self) -> iced::advanced::widget::tree::Tag {
+            self.content.tag()
+        }
+        fn state(&self) -> iced::advanced::widget::tree::State {
+            self.content.state()
+        }
+        fn diff(&mut self, tree: &mut iced::advanced::widget::Tree) {
+            self.content.diff(tree);
+        }
+        fn layout(
+            &mut self,
+            tree: &mut iced::advanced::widget::Tree,
+            renderer: &iced::Renderer,
+            limits: &iced::advanced::layout::Limits,
+        ) {
+            self.content.layout(tree, renderer, limits)
+        }
+        fn draw(
+            &self,
+            tree: &iced::advanced::widget::Tree,
+            renderer: &mut iced::Renderer,
+            theme: &iced::Theme,
+            style: &iced::advanced::renderer::Style,
+            layout: iced::advanced::Layout,
+            cursor: iced::advanced::mouse::Cursor,
+            viewport: &iced::Rectangle,
+        ) {
+            self.content
+                .draw(tree, renderer, theme, style, layout, cursor, viewport);
+        }
+        fn operate(
+            &mut self,
+            tree: &mut iced::advanced::widget::Tree,
+            layout: iced::advanced::Layout,
+            viewport: &iced::Rectangle,
+            renderer: &iced::Renderer,
+            operation: &mut dyn iced::advanced::widget::Operation,
+        ) {
+            self.content.operate(tree, layout, viewport, renderer, operation);
+        }
+        fn update(
+            &mut self,
+            tree: &mut iced::advanced::widget::Tree,
+            event: &iced::Event,
+            layout: iced::advanced::Layout,
+            cursor: iced::advanced::mouse::Cursor,
+            renderer: &iced::Renderer,
+            shell: &mut iced::advanced::Shell<'_, Message>,
+            viewport: &iced::Rectangle,
+        ) {
+            self.content
+                .update(tree, event, layout, cursor, renderer, shell, viewport);
+            if matches!(
+                event,
+                iced::Event::Mouse(
+                    iced::mouse::Event::ButtonPressed(
+                        iced::mouse::Button::Left | iced::mouse::Button::Right
+                    )
+                )
+            ) && !shell.is_event_captured()
+                && let Some(p) = cursor.position_over(layout.bounds())
+            {
+                // no capture: the enclosing mouse_area/button handles
+                // the press (and fires its own message) after us
+                shell.publish(Message::CursorAt(p));
+            }
+        }
+        fn mouse_interaction(
+            &self,
+            tree: &iced::advanced::widget::Tree,
+            layout: iced::advanced::Layout,
+            cursor: iced::advanced::mouse::Cursor,
+            viewport: &iced::Rectangle,
+            renderer: &iced::Renderer,
+        ) -> iced::mouse::Interaction {
+            self.content.mouse_interaction(tree, layout, cursor, viewport, renderer)
+        }
+        fn overlay<'b>(
+            &'b mut self,
+            tree: &'b mut iced::advanced::widget::Tree,
+            layout: iced::advanced::Layout,
+            renderer: &iced::Renderer,
+            viewport: &iced::Rectangle,
+            translation: iced::Vector,
+            window: iced::Size,
+        ) -> Vec<iced::advanced::overlay::Element<'b, Message, iced::Theme, iced::Renderer>>
+        {
+            self.content
+                .overlay(tree, layout, renderer, viewport, translation, window)
+        }
+    }
+
+    use iced::Widget as _;
+    CursorSeed { content: content._boxed() }.boxed()
+}
+
 // ---------------- title bar ----------------
 // Name-label cuts (single-line ellipsis and icon-top hard wrap) live
 // in `crate::text_metrics` — exact cosmic-text widths, not estimates.
