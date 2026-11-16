@@ -240,6 +240,33 @@ dist: build
 	@ls -l $(DIST)/$(BIN)
 	@file $(DIST)/$(BIN)
 
+	@ls -l $(DIST)/$(BIN)
+	@file $(DIST)/$(BIN)
+
+# CPU-renderer dist: builds with the `cpu-render` cargo feature so the
+# binary defaults to tiny-skia instead of wgpu. Same staging discipline
+# as `dist`, shipped as explorer-cpu so it never clobbers the
+# GPU-default dist/explorer.
+dist-cpu: FEATURES := cpu-render
+dist-cpu: build
+	@mkdir -p $(DIST)
+	@target="$$(realpath $(DIST)/explorer-cpu)"; \
+	for p in /proc/[0-9]*; do \
+		[ "$$(readlink "$${p}/exe" 2>/dev/null)" = "$$target (deleted)" ] || \
+		[ "$$(readlink -f "$${p}/exe" 2>/dev/null)" = "$$target" ] || continue; \
+		kill "$${p##*/}" 2>/dev/null || true; \
+	done; \
+	sleep 0.3
+	@mkdir -p $(CARGO_TARGET_DIR)/dist
+	cp $(CARGO_TARGET_DIR)/$(TARGET)/release/$(BIN) $(CARGO_TARGET_DIR)/dist/explorer-cpu
+	@if [ "$(COMPRESS)" != "0" ]; then \
+		strip --strip-all $(CARGO_TARGET_DIR)/dist/explorer-cpu 2>/dev/null || true; \
+		./tools/upx $(CARGO_TARGET_DIR)/dist/explorer-cpu || true; \
+	fi
+	cp $(CARGO_TARGET_DIR)/dist/explorer-cpu $(DIST)/explorer-cpu
+	@ls -l $(DIST)/explorer-cpu
+	@file $(DIST)/explorer-cpu
+
 size: dist
 	@size $(DIST)/$(BIN) 2>/dev/null || true
 

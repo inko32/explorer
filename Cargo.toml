@@ -9,6 +9,10 @@ license = "MIT"
 # Embed the UI font (assets/fonts/selawik.regular.ttf, SIL OFL).
 # Default: off (system fonts only). `make build FEATURES=embed-selawik`.
 embed-selawik = []
+# CPU-renderer build (`make dist-cpu`): tiny-skia is the startup default
+# instead of wgpu. wgpu stays compiled in; an explicit --render flag
+# still overrides this default.
+cpu-render = []
 
 [dependencies]
 iced = { git = "https://github.com/iced-rs/iced", rev = "b2fbd3cb6289603f8cbbb2387a5242231f509d13", default-features = false, features = ["wgpu", "tiny-skia", "wayland", "crisp", "thread-pool", "svg", "image", "advanced"] } # wgpu primary + tiny-skia fallback (D17); pick at runtime via --render

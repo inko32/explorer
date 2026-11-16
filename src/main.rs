@@ -113,6 +113,13 @@ fn main() -> iced::Result {
     //   explorer             -> wgpu, auto-fallback to tiny-skia if GPU init fails
     //   explorer --render gpu -> wgpu only; startup ERROR if unavailable
     //   explorer --render cpu -> tiny-skia only
+    // `cpu-render` build (`make dist-cpu`): tiny-skia is the compiled-in
+    // default instead of wgpu. An explicit `--render gpu|cpu` below still
+    // overrides this.
+    #[cfg(feature = "cpu-render")]
+    unsafe {
+        std::env::set_var("ICED_BACKEND", "tiny-skia");
+    }
     let mut want_dpi = false;
     for arg in std::env::args().skip(1) {
         if want_dpi {
