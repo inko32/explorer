@@ -1194,7 +1194,7 @@ mod focus_tests {
     }
 
     #[test]
-    fn double_free_space_click_releases_the_idle_selector() {
+    fn double_free_space_click_hides_the_idle_selector() {
         let mut e = explorer(5);
         e.view_index = e.view_cfg.presets.details;
         e.selected.insert(2);
@@ -1203,12 +1203,16 @@ mod focus_tests {
         let _ = e.update(Message::MarqueeEnd);
         assert_eq!(e.focus_item, Some(2));
         assert!(e.focus_shown);
-        // double-click on empty space: rectangle back to the first
-        // item, hidden (the default state)
+        // double-click on empty space: the rectangle hides where it
+        // is, without moving back to the first item
         let _ = e.update(Message::MarqueeBegin { x: 6.0, y: 6.0 });
         let _ = e.update(Message::MarqueeEnd);
-        assert_eq!(e.focus_item, Some(0));
+        assert_eq!(e.focus_item, Some(2));
         assert!(!e.focus_shown);
+        // the next keyboard navigation shows it again
+        let _ = e.update(Message::FocusMove(FocusDir::Down));
+        assert_eq!(e.focus_item, Some(3));
+        assert!(e.focus_shown);
     }
 
     #[test]
