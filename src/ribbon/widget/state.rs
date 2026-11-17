@@ -170,8 +170,7 @@ pub struct State {
     pub tooltip_anchor: Option<iced::Rectangle>,
     pub popup: Option<Popup>,
     /// Fade-out clock for the popup while the ribbon is inert
-    /// (unfocused window; theme.yaml `fade_ms`,
-    /// SPEC/Unfocused_Window.md §3).
+    /// (unfocused window; theme.yaml `fade_ms`).
     pub popup_fade_start: Option<Instant>,
     /// Actual on-screen bounds of the open popup overlay (window
     /// coordinates). Differs from `popup.origin/size` when a dropdown

@@ -1,4 +1,4 @@
-//! File view pane — SPEC/FOLDER-SPEC.MD: the 48-step Ctrl+scroll zoom
+//! File view pane: the 48-step Ctrl+scroll zoom
 //! scale (§3 index map, §8 layout metrics). Index 0 Content, 1 Tiles,
 //! 2 Details, 3 List, 4..=14 small icons (name right), 15..=47 icon on
 //! top (name below).
@@ -427,7 +427,7 @@ fn item_chrome<'a>(
     // selection fades to gray while the folder pane is inactive
     // (window unfocused, nav pane active, or a ribbon popup open);
     // hovering a grayed item (or an active drop target) restores the
-    // live colors (SPEC/Unfocused_Window.md §4)
+    // live colors
     let popup_open = state.ribbon.framework().view().popup_open();
     let pane_live = state.focused
         && !popup_open
@@ -504,7 +504,7 @@ fn item_chrome<'a>(
 }
 
 /// Selection fill color: the live accent while the folder pane is
-/// active, the grayed one when it is not (SPEC/Unfocused_Window.md §4),
+/// active, the grayed one when it is not,
 /// rainbow-tinted like the chrome fill. The color a selected item's
 /// border repaints to while the data-column highlight walks the row.
 fn selection_fill(state: &Explorer, skin: skin::Skin) -> Color {
@@ -521,8 +521,8 @@ fn selection_fill(state: &Explorer, skin: skin::Skin) -> Color {
 }
 
 /// Selection border color of an item chrome: the live accent while
-/// the folder pane is active, the grayed pair when it is not
-/// (SPEC/Unfocused_Window.md §4), transparent for unselected items.
+/// the folder pane is active, the grayed pair when it is not,
+/// transparent for unselected items.
 /// Shared with the Details overlay that redraws selected borders on
 /// top of the row fills.
 fn chrome_border(state: &Explorer, skin: skin::Skin, selected: bool) -> Color {
@@ -786,7 +786,7 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
     .on_resize(|size| Message::FileAreaResized(size.width, size.height))
     .boxed();
     // right-click on empty space (items capture their own first) opens
-    // the background menu (SPEC/MENU_SPEC.MD)
+    // the background menu
     let area = crate::menu::on_right_free(area, Message::ContextBackground);
     // a left press on empty space starts the rubber-band selection.
     // In Details the header overlays the pane top (the content reserves
@@ -804,8 +804,8 @@ pub(crate) fn file_view(state: &Explorer, skin: skin::Skin, width: f32) -> Eleme
         scroll_y: state.scroll_y,
         top,
     }.boxed();
-    // the empty area of the current directory is a drop target
-    // (SPEC/DRAGGING.md §4.2; the item zones above outrank it by §6
+    // the empty area of the current directory is a drop target;
+    // the item zones above outrank it by §6
     // nesting)
     let area = crate::dnd::drop_zone(
         area,
@@ -1039,7 +1039,7 @@ fn details_col_w(state: &Explorer, col: usize) -> f32 {
         .unwrap_or(state.detail_cfg.columns[col].width)
 }
 
-/// SPEC/detail-view.txt §2: the sort arrow — 9px wide, 5px tall,
+/// the sort arrow — 9px wide, 5px tall,
 /// sitting on top of the column title, touching the header's top line.
 /// Drawn as an inline SVG so the hover state can tint it blue (§9).
 fn sort_arrow(ascending: bool, w: f32, h: f32, color: Color) -> Element<'static, Message> {
@@ -1067,7 +1067,7 @@ fn sort_arrow(ascending: bool, w: f32, h: f32, color: Color) -> Element<'static,
         .boxed()
 }
 
-/// SPEC/detail-view.txt column header. Every visible column is
+/// column header. Every visible column is
 /// `16px space + title + fill + 1px line + 15px dropdown button`
 /// (§4/§6), followed by its right-edge resizer (§10/§15). The title
 /// background is fully transparent, 50% blue on hover, 75% while

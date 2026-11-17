@@ -2,7 +2,7 @@
 
 mod border;
 mod commands;
-// SPEC/DRAGGING.md core. The UriList/Text/Custom payloads, the native
+// Drag & drop core. The UriList/Text/Custom payloads, the native
 // adapter DragSources, the bounds-based registry API and the
 // Open/Import/Run actions are the Phase 1/3 surface — consumed by the
 // future platform adapter (external DnD) and targets (tabs,

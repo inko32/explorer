@@ -137,9 +137,8 @@ pub enum RibbonEvent {
         commands: Vec<u32>,
     },
     /// Explorer extension: a ribbon popup opened or closed. Published
-    /// so app views rebuild (open popups gray the folder/nav panes,
-    /// SPEC/Unfocused_Window.md); the flag itself lives on
-    /// [`RibbonView::popup_open`].
+    /// so app views rebuild (open popups gray the folder/nav panes);
+    /// the flag itself lives on [`RibbonView::popup_open`].
     PopupVisibility {
         open: bool,
     },
@@ -172,8 +171,7 @@ pub struct ViewState {
     /// `IUIContextualUI` request, consumed by the widget.
     pub(crate) pending_popup: Option<(u32, f32, f32)>,
     /// A ribbon popup is currently open, published by the widget (read
-    /// by app views: open popups gray the folder/nav panes,
-    /// SPEC/Unfocused_Window.md).
+    /// by app views: open popups gray the folder/nav panes
     pub(crate) popup_open: bool,
     /// Last laid-out tab rectangles (spec tab index, x, width), written
     /// by the widget on every layout — the window chrome (title bar)
@@ -241,8 +239,7 @@ impl RibbonView {
         h as u32
     }
 
-    /// Whether a ribbon popup is currently open (widget-published;
-    /// SPEC/Unfocused_Window.md).
+    /// Whether a ribbon popup is currently open (widget-published)
     pub fn popup_open(&self) -> bool {
         self.inner.borrow().popup_open
     }

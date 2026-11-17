@@ -52,7 +52,7 @@ pub struct Ribbon<'a, Message, Th = IcedTheme, Renderer = iced::Renderer> {
     fonts: crate::fonts::FontSizes,
     on_event: Option<Box<dyn Fn(RibbonEvent) -> Message + 'a>>,
     /// When false the ribbon is inert: no input, no hover feedback, no
-    /// overlays (unfocused window, SPEC/Unfocused_Window.md).
+    /// overlays (unfocused window).
     responsive: bool,
     _phantom: std::marker::PhantomData<(Th, Renderer)>,
 }
@@ -205,8 +205,8 @@ where
         let bounds = layout.bounds();
 
         // publish popup-visibility transitions to the framework handle:
-        // app views gray the folder/nav panes while a popup is open
-        // (SPEC/Unfocused_Window.md §4); the message forces a view
+        // app views gray the folder/nav panes while a popup is open;
+        // the message forces a view
         // rebuild. Checked here so every open/close path is covered.
         let popup_open = state.popup.is_some();
         if popup_open != self.fw.view().popup_open() {
@@ -218,7 +218,7 @@ where
 
         // Unfocused window (ribbon.yaml `ignore_input_when_unfocused`):
         // the ribbon is fully inert — no input, no hover work, no
-        // tooltip arming (CPU saving, SPEC/Unfocused_Window.md).
+        // tooltip arming (CPU saving).
         if !self.responsive {
             // stale transient state is dropped on the first event
             if state.hover.is_some()

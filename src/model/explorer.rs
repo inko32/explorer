@@ -93,10 +93,10 @@ pub struct Explorer {
     /// TEMP: rainbow gradient on the folder-view backdrop rectangle.
     pub rainbow: bool,
     /// Window has keyboard focus; when false, selections fade to gray
-    /// and the ribbon goes inert (SPEC/Unfocused_Window.md).
+    /// and the ribbon goes inert.
     pub focused: bool,
     /// Pane that last received a click: its selection keeps the live
-    /// colors, the other pane's fades (SPEC/Unfocused_Window.md §4).
+    /// colors, the other pane's fades.
     pub active_pane: Pane,
     /// `--dpi=N`: absolute UI scale factor (percent of 96 dpi, or direct).
     /// None = follow the system scale.
@@ -117,13 +117,13 @@ pub struct Explorer {
     pub(crate) right_list_hover: bool,
     /// Hovered breadcrumb member: `(segment index, is_arrow)`. The
     /// text and its arrow are tracked separately — arrow hover greys
-    /// the text, text hover lights both (SPEC/Address_bar.md).
+    /// the text, text hover lights both.
     pub(crate) crumb_hover: Option<(usize, bool)>,
     /// Breadcrumb segment whose subfolder listing is in flight (the
     /// BarListed event with this path opens the dropdown).
     bar_listing: Option<PathBuf>,
     /// Address edit mode: `Some(buffer)` while the address bar shows an
-    /// editable full path (SPEC/Address_bar.md).
+    /// editable full path.
     pub(crate) address_edit: Option<String>,
     /// The search box is editable (clicked / focused).
     pub(crate) search_active: bool,
@@ -158,9 +158,9 @@ pub struct Explorer {
     pub frame_style: FrameStyle,
     pub clipboard: Option<(ClipMode, Vec<PathBuf>)>,
     /// Folder view configuration (`assets/folder-view.yaml`,
-    /// SPEC/FOLDER-SPEC.MD): step sizes, layout metrics, enabled mask.
+    /// step sizes, layout metrics, enabled mask.
     pub view_cfg: crate::view_step::ViewCfg,
-    /// View step index (SPEC/FOLDER-SPEC.MD §3).
+    /// View step index.
     pub view_index: u8,
     /// Committed view step while a gallery hover preview temporarily
     /// overrides `view_index` (None = no preview active).
@@ -184,7 +184,7 @@ pub struct Explorer {
     /// resizes.
     pub it_label_lines: Vec<u8>,
     /// Details-view column configuration (`assets/details-view.yaml`,
-    /// SPEC/detail-view.txt): the header metrics and the available
+    /// the header metrics and the available
     /// columns.
     pub detail_cfg: crate::details_view::DetailsViewCfg,
     /// Per-column widths, parallel to `detail_cfg.columns`; adjusted by
@@ -265,7 +265,7 @@ pub struct Explorer {
     pending_rename: Option<String>,
     /// Left-press on a file-view row that may become a drag.
     pub(crate) press: Option<PressArm>,
-    /// The active drag session manager (SPEC/DRAGGING.md).
+    /// The active drag session manager.
     pub dnd: crate::dnd::Session,
     /// Wayland DnD side-channel (drag-out payloads + drag-in offers;
     /// `None` off-Wayland or before the window exists).
@@ -465,7 +465,7 @@ impl Explorer {
     /// full system scale applies (iced total = system x multiplier and
     /// `dpi_multiplier()` is 1.0 then). Returns 1.0 before the system
     /// scale is learned. This is `scale_dpi` for the border-width
-    /// factor (SPEC/Border_DPI.md).
+    /// factor.
     pub fn scale_dpi(&self) -> f32 {
         if let Some(t) = self.dpi_target.filter(|t| *t > 0.0) {
             t
@@ -542,7 +542,7 @@ impl Explorer {
     }
 
     /// Window-logical anchor for the address-bar dropdowns: the cursor
-    /// x, just below the navigation band (SPEC/Address_bar.md — the
+    /// x, just below the navigation band (the
     /// selector shows "just below the address bar, not like a menu").
     fn bar_anchor(&self) -> (f32, f32) {
         let (ft, fr, _, fl) =
@@ -1226,7 +1226,7 @@ impl Explorer {
             Message::FocusSpace => self.focus_space(),
             Message::MarqueeBegin { x, y } => {
                 // a press on the pane's empty space focuses the folder
-                // pane, same as pressing an item (SPEC/Unfocused_Window.md §1)
+                // pane, same as pressing an item
                 self.active_pane = Pane::Folder;
                 // a plain click on free space releases the selection;
                 // the idle selector then shows its border on the first
@@ -1854,7 +1854,7 @@ impl Explorer {
                         self.wayland_handoff();
                     }
                 }
-                // ---- drag & drop lifecycle (SPEC/DRAGGING.md §5) ----
+                // ---- drag & drop lifecycle ----
                 use iced::keyboard::{Event as KeyEvent, Key, key::Named};
                 match &e {
                     iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {

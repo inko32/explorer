@@ -14,7 +14,7 @@
 border_opacity: 0.9
 
 # All colors are #RRGGBB (a trailing alpha pair #RRGGBBAA also parses).
-# Defaults are the SPEC/win8_border.md "colour for example" set; every
+# Defaults are the "colour for example" set; every
 # key falls back to its default, so a partial override file works.
 
 # window accent: border fill + title bar

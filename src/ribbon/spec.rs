@@ -84,8 +84,7 @@ pub struct RibbonSpec {
     /// How unavailable (disabled) buttons are rendered.
     pub disabled_style: DisabledStyle,
     /// Explorer extension: when the window is unfocused the ribbon
-    /// ignores all input and shows no hover feedback (CPU saving,
-    /// SPEC/Unfocused_Window.md).
+    /// ignores all input and shows no hover feedback (CPU saving).
     #[serde(default = "default_true")]
     pub ignore_input_when_unfocused: bool,
     /// Window-size sacrifices (explorer extension): below

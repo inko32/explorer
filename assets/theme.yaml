@@ -11,12 +11,11 @@
 # Border widths and the DPI: when border_follow_dpi is 0/false (the
 # default), every border element keeps a constant PHYSICAL width (a
 # "1px" border is 1 physical pixel at any UI scale); when 1/true,
-# borders scale with the DPI like everything else. See
-# SPEC/Border_DPI.md.
+# borders scale with the DPI like everything else.
 border_follow_dpi: 0
 
 # Fade-out duration (milliseconds) for ribbon popups when the window
-# loses focus (SPEC/Unfocused_Window.md). 0 = close instantly. Kept as
+# loses focus. 0 = close instantly. Kept as
 # a general animation token; future fades should reuse it.
 fade_ms: 300
 
@@ -25,8 +24,8 @@ fade_ms: 300
 # exposed cross-platform).
 double_click_ms: 400
 #
-# Token names follow SPEC/File_Operation_UI_Spec.md §2 where a mapping
-# exists (commented per group); app-specific chrome keeps its own names.
+# Token names follow a mapping where one exists (commented per group);
+# app-specific chrome keeps its own names.
 # The `dialog` and `state` groups are not consumed by any view yet —
 # they are the palette the future file-operation dialogs (D1-D6) draw
 # from, so their values come straight from the spec.
@@ -37,7 +36,7 @@ light:
   accent_dark: "#368BE9"     # deeper accent (pressed, gradients)
   sel: "#CCE8FF"             # list selection fill (spec: accent.tint.selected)
   sel_border: "#1979CA"      # list selection border
-  sel_inactive: "#E5E5E5"    # selection fill, window unfocused (SPEC/Unfocused_Window.md)
+  sel_inactive: "#E5E5E5"    # selection fill, window unfocused
   sel_inactive_border: "#D9D9D9" # selection border, window unfocused
 
   # ---- surfaces (spec: surface.*) ----
@@ -158,7 +157,7 @@ dark:
   file_tab_hover: "#2B87D8"
   sel: "#2F5480"
   sel_border: "#4A90D9"
-  sel_inactive: "#3A3A3A"    # selection fill, window unfocused (SPEC/Unfocused_Window.md)
+  sel_inactive: "#3A3A3A"    # selection fill, window unfocused
   sel_inactive_border: "#4A4A4A" # selection border, window unfocused
   sep: "#454545"
   group_sep: "#505050"

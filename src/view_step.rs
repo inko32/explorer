@@ -1,4 +1,4 @@
-//! Folder view configuration — SPEC/FOLDER-SPEC.MD as data, not code.
+//! Folder view configuration as data, not code.
 //!
 //! Everything the spec fixes is configurable: the §3/§4 step→size map,
 //! the §3 layout families (per-index ranges), the §5 presets, the §6
@@ -232,10 +232,10 @@ pub struct DetailsCfg {
     /// rows so adjacent item borders coincide (-1 shares a 1px
     /// border); positive is looser.
     pub row_gap: f32,
-    /// Column header strip height (SPEC/detail-view.txt §1: 25px).
+    /// Column header strip height (25px).
     /// The header metrics themselves live in details-view.yaml.
     pub header_h: f32,
-    /// SPEC/detail-view.txt §12: the space below the title bar,
+    /// the space below the title bar,
     /// before the file rows (the file area starts below both).
     pub files_gap: f32,
     pub icon: f32,

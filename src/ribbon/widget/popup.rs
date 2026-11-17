@@ -1361,7 +1361,7 @@ pub struct RibbonOverlay<'a, Message, Th, Renderer> {
     pub layout: iced::advanced::Layout,
     pub window: Size,
     /// Opacity multiplier (1.0 = opaque); the unfocused-window popup
-    /// fade-out animates this (SPEC/Unfocused_Window.md §3).
+    /// fade-out animates this.
     pub alpha: f32,
     pub mapper: Option<&'a dyn Fn(RibbonEvent) -> Message>,
     pub _phantom: std::marker::PhantomData<(Th, Renderer)>,
@@ -1522,7 +1522,6 @@ where
             // capturing them hides them from the app's event
             // subscription — iced::event::listen forwards only Ignored
             // events — and locks the unfocused fade
-            // (SPEC/Unfocused_Window.md §1)
             iced::Event::Window(_) => {}
             _ => shell.capture_event(),
         }

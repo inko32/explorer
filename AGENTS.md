@@ -1,6 +1,6 @@
 Important info
 1. check out Makefile before you want to use cargo. always use make, not cargo. if you need extra cargo operations, update Makefile.
-2. files in SPEC/ are good reference, but not up-to-date. the code is always the source of fact.
+2. SPEC/ is private design history and is NOT part of the published project — never reference it from code, README, or assets. the code is always the source of fact.
 
 This is a native desktop GUI application written in Rust with iced.
 

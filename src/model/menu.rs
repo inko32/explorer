@@ -58,7 +58,7 @@ impl Explorer {
     }
 
     /// Right-click a Details column header: the column menu — one
-    /// checkable entry per available column (SPEC/detail-view.txt §9).
+    /// checkable entry per available column.
     pub(crate) fn column_settings_menu(&mut self) {
         let entries = self
             .detail_cfg

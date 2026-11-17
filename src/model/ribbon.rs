@@ -78,5 +78,5 @@ impl Explorer {
             .replace("{selection_count}", &self.selected.len().to_string())
     }
 
-    // ---- context menus (SPEC/MENU_SPEC.MD) ----
+    // ---- context menus ----
 }

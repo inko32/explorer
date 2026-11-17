@@ -398,7 +398,7 @@ fn push_button(
 
 /// Border/1px-line width in the ribbon's logical units, honoring the
 /// DPI-independent border scale: `lw(ctx, 1.0)` is always 1 physical
-/// pixel when borders don't follow the DPI (SPEC/Border_DPI.md).
+/// pixel when borders don't follow the DPI.
 pub(super) fn lw(ctx: &Ctx, w: f32) -> f32 {
     w * ctx.theme.border_scale
 }

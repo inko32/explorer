@@ -1,4 +1,4 @@
-# SPEC/detail-view.txt — the Details-view column header + columns as data.
+# The Details-view column header + columns as data.
 font_size: 13.0        # §3 column header font size
 text_pad_left: 16.0    # §4 space left of the header title text
 dropdown_w: 15.0       # §5 the column's right dropdown button width
