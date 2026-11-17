@@ -284,17 +284,31 @@ fn copy_tree(
         collect_plan(backend, src, dest_dir, &mut plan, &mut total)?;
     }
     let mut done = 0u64;
-    for (src, dst, bytes) in &plan {
+    // When a directory is auto-renamed on conflict, its children (planned
+    // under the old path) must follow — otherwise they merge into the
+    // pre-existing folder and a cut then deletes the merged copies.
+    let mut renamed_dirs: Vec<(PathBuf, PathBuf)> = Vec::new();
+    for (src, planned_dst, bytes) in &plan {
+        let mut dst = planned_dst.clone();
+        for (old, new) in &renamed_dirs {
+            if let Ok(rest) = dst.strip_prefix(old) {
+                dst = new.join(rest);
+            }
+        }
         if let Some(parent) = dst.parent()
             && !backend.is_dir(parent)
         {
             // create intermediate dirs (best effort, errors surface at copy)
             let _ = std::fs::create_dir_all(parent);
         }
-        let dst = if backend.is_dir(dst) || dst.exists() {
-            auto_rename(dst)
+        let dst = if backend.is_dir(&dst) || dst.exists() {
+            let renamed = auto_rename(&dst);
+            if backend.is_dir(src) {
+                renamed_dirs.push((planned_dst.clone(), renamed.clone()));
+            }
+            renamed
         } else {
-            dst.clone()
+            dst
         };
         // directory entries are created, not copied: g_file_copy cannot
         // copy directories ("Can't recursively copy directory")
@@ -379,4 +393,71 @@ fn auto_rename(dst: &Path) -> PathBuf {
         }
     }
     dst.to_path_buf()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write as _;
+
+    /// Unique scratch dir under the system temp dir; removed on drop.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(tag: &str) -> Self {
+            let p = std::env::temp_dir().join(format!(
+                "explorer-copy-tree-{tag}-{}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&p);
+            std::fs::create_dir_all(&p).unwrap();
+            Self(p)
+        }
+
+        fn file(&self, rel: &str, content: &str) {
+            let p = self.0.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::File::create(&p).unwrap().write_all(content.as_bytes()).unwrap();
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn run_copy(sources: &[PathBuf], dest_dir: &Path, cut: bool) -> Result<(), String> {
+        let (tx, _rx) = mpsc::unbounded();
+        copy_tree(&VfsBackend::new(), sources, dest_dir, cut, &tx)
+    }
+
+    fn read(p: &Path) -> String {
+        std::fs::read_to_string(p).unwrap()
+    }
+
+    /// Copying a dir onto an existing same-named dir must send the
+    /// children into the renamed folder, not merge them into the
+    /// pre-existing one.
+    #[test]
+    fn copy_dir_conflict_children_follow_rename() {
+        let s = Scratch::new("copy-conflict");
+        s.file("a/f/x.txt", "hello");
+        s.file("b/f/y.txt", "keep");
+        run_copy(&[s.0.join("a/f")], &s.0.join("b"), false).unwrap();
+        assert_eq!(read(&s.0.join("b/f/y.txt")), "keep");
+        assert_eq!(read(&s.0.join("b/f (2)/x.txt")), "hello");
+    }
+
+    /// Cut-paste of a folder into its own parent (the Ctrl+X Ctrl+V
+    /// repro): the renamed copy must carry the children and the
+    /// original must be removed — no merged-then-deleted data loss.
+    #[test]
+    fn cut_paste_same_folder_keeps_content() {
+        let s = Scratch::new("cut-same");
+        s.file("a/f/x.txt", "hello");
+        run_copy(&[s.0.join("a/f")], &s.0.join("a"), true).unwrap();
+        assert!(!s.0.join("a/f").exists());
+        assert_eq!(read(&s.0.join("a/f (2)/x.txt")), "hello");
+    }
 }

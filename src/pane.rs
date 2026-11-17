@@ -9,6 +9,7 @@
 //! The preview payload is loaded by the MODEL on selection change
 //! (`Explorer::sync_pane`) and cached — view() never touches the disk.
 
+use std::io::Read as _;
 use std::path::Path;
 
 use iced::Widget as _;
@@ -68,12 +69,21 @@ pub fn load(path: &Path, is_dir: bool) -> Content {
     }
     let ext = ext_of(path);
     if TEXT_EXTS.contains(&ext.as_str()) {
-        return match std::fs::read(path) {
-            Ok(bytes) => {
-                let cut = bytes.len().min(TEXT_CAP);
-                // don't split a UTF-8 sequence at the cap
-                let mut s = String::from_utf8_lossy(&bytes[..cut]).into_owned();
-                if bytes.len() > TEXT_CAP {
+        // capped read: `read` would pull a huge file into memory just to
+        // truncate it to TEXT_CAP
+        return match std::fs::File::open(path) {
+            Ok(file) => {
+                let total = file.metadata().map(|m| m.len()).unwrap_or(0);
+                let mut bytes = Vec::new();
+                if std::io::Read::take(file, TEXT_CAP as u64)
+                    .read_to_end(&mut bytes)
+                    .is_err()
+                {
+                    return Content::None;
+                }
+                // from_utf8_lossy absorbs a UTF-8 sequence split at the cap
+                let mut s = String::from_utf8_lossy(&bytes).into_owned();
+                if total > TEXT_CAP as u64 {
                     s.push_str("\n…");
                 }
                 Content::Text(s)

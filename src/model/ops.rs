@@ -26,10 +26,20 @@ impl Explorer {
         let Some((mode, sources)) = self.clipboard.clone() else {
             return;
         };
+        let cut = mode == ClipMode::Cut;
+        // same-folder sources would copy onto themselves and, for cut,
+        // delete the original — the same relationship dnd rejects (§5.4)
+        let sources: Vec<_> = sources
+            .into_iter()
+            .filter(|src| crate::dnd::sources_fit(std::slice::from_ref(src), &self.cwd))
+            .collect();
         if sources.is_empty() {
+            self.status = "The selection is already in this folder".into();
+            if cut {
+                self.clipboard = None;
+            }
             return;
         }
-        let cut = mode == ClipMode::Cut;
         self.sched.send(Job::Copy {
             sources,
             dest_dir: self.cwd.clone(),
