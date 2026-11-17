@@ -10,7 +10,7 @@
 # ContextAvailable=NotAvailable so they stay hidden (see mod.rs).
 #
 # Structure mirrors the real Windows 10 File Explorer ribbon
-# (SPEC/RIBBON-LIST.TXT). Custom explorer-only commands that have no Win10
+# Custom explorer-only commands that have no Win10
 # equivalent are kept on purpose: dark mode, custom border, Win8 frame,
 # open terminal, paste symbolic link, delete as sudo, filters, tree expander.
 
@@ -23,7 +23,7 @@ disabled_style: faded
 
 # When the window is unfocused the ribbon goes inert: it ignores all
 # input and shows no hover visuals (CPU saving,
-# SPEC/Unfocused_Window.md). The gray fade of checked buttons is part
+# The gray fade of checked buttons is part
 # of the theme and always applies.
 ignore_input_when_unfocused: true
 
@@ -292,7 +292,7 @@ sacrifice:
 
 # UI metrics (explorer extension)
 metrics:
-  # nav band: 6px top + 24px buttons + 6px bottom (SPEC/Address_bar.md)
+# nav band: 6px top + 24px buttons + 6px bottom
   band_height: 36
   tree_item_height: 22
   tree_indention: 8

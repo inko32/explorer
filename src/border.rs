@@ -98,7 +98,7 @@ pub fn frame_insets_pub(
         return (0.0, 0.0, 0.0, 0.0);
     }
     // the frame border keeps a constant physical width (see
-    // SPEC/Border_DPI.md): scale the insets like any 1px border
+    // scale the insets like any 1px border
     let w = crate::theme::border_w;
     match style {
         // Win8: the top stays a 1px hairline, but the thick sizing
@@ -106,7 +106,7 @@ pub fn frame_insets_pub(
         // follows the DPI
         crate::model::FrameStyle::Win8 => (w(1.0), 6.0, 6.0, 6.0),
         crate::model::FrameStyle::Win10 => (w(1.0), w(1.0), w(1.0), w(1.0)),
-        // Win8.1 (SPEC/win8_border.md): per side 1px outer outline +
+        // Win8.1: per side 1px outer outline +
         // 6px border + 1px inner outline. The 1px outlines keep a
         // constant physical width (never DPI-scaled, like every 1px
         // border in the app); the 6px border follows the DPI. The top
@@ -193,7 +193,7 @@ static CAPTION_GLYPHS: [CaptionGlyph; 3] = [
 /// Win8.1 frame chrome (colors + border opacity), owned by
 /// win81theme.yaml — a user copy at ~/.config/explorer/win81theme.yaml
 /// overrides the embedded one (same pattern as theme.yaml). The
-/// defaults are the SPEC/win8_border.md "colour for example" set; every
+/// defaults are the "colour for example" set; every
 /// key falls back to its default, so a partial override file works.
 pub(crate) mod win81 {
     use iced::Color;
@@ -250,7 +250,7 @@ pub(crate) mod win81 {
         ))
     }
 
-    // defaults: SPEC/win8_border.md "colour for example"
+    // defaults: "colour for example"
     fn default_opacity() -> f32 {
         0.9
     }
@@ -377,7 +377,7 @@ pub(crate) mod win81 {
             assert!(t.title_size >= 1.0);
         }
 
-        // The embedded defaults must stay the SPEC/win8_border.md
+        // The embedded defaults must stay the
         // "colour for example" set (a user override may change them,
         // but the shipped theme is the spec's reference).
         #[test]
@@ -396,7 +396,7 @@ pub(crate) mod win81 {
     }
 }
 
-/// Win8.1 caption glyphs (SPEC/win8_border.md): proper stroke paths in a
+/// Win8.1 caption glyphs: proper stroke paths in a
 /// viewBox spanning the WHOLE button area (25x20 / 45x20), so the glyphs
 /// keep the exact centering the spec measures (e.g. 8+8+9 = 25px for the
 /// minimize glyph). `{glyph}` = the minimize/maximize fill color (black at
@@ -453,7 +453,7 @@ pub(crate) fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'st
     let (mw, cw, h, glyph, y, right_pad) = match state.frame_style {
         crate::model::FrameStyle::Win8 => (28.0, 47.0, 21.0, 13.0, 1.0, 6.0),
         crate::model::FrameStyle::Win10 => (46.0, 46.0, 29.0, 15.0, 1.0, 1.0),
-        // SPEC/win8_border.md (measured at 100% dpi): 20px buttons just
+        // (measured at 100% dpi): 20px buttons just
         // below the 1px outer outline; 6px in front of the right inner
         // outline; 25/25/45 widths with 1px (never DPI-scaled) gaps.
         // The Win8.1 SVGs span the whole button area (their viewBox
@@ -480,7 +480,7 @@ pub(crate) fn caption_overlay(state: &Explorer, skin: skin::Skin) -> Element<'st
         crate::model::FrameStyle::Win81 => [
             CAPTION_GLYPHS_81[0],
             // the maximize button shows the restore glyph on a
-            // maximized window (SPEC/win8_border.md)
+            // maximized window
             if state.maximized {
                 CAPTION_GLYPHS_81[3]
             } else {
@@ -742,7 +742,7 @@ pub(crate) fn resize_frame(margin: f32, top_zones: bool) -> Element<'static, Mes
 pub(crate) const TITLEBAR_H: f32 = 30.0;
 
 /// Height of the Win8.1 title-bar region between the outlines
-/// (SPEC/win8_border.md): 20px caption buttons + the space below them —
+/// 20px caption buttons + the space below them —
 /// 9px normally, 3px maximized (the bar's bottom line rises when the
 /// outer outline is omitted).
 pub(crate) fn win81_bar_h(maximized: bool) -> f32 {

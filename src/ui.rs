@@ -59,7 +59,7 @@ fn boxed_caption(label: &str, skin: skin::Skin) -> Element<'_, Message> {
         .boxed()
 }
 
-/// The drag cursor caption (SPEC/DRAGGING.md §5.1): a small bordered
+/// The drag cursor caption: a small bordered
 /// label floating right-lower of the cursor — "Move to …", "Copy to …",
 /// "Link here", "Run with …", "…" while the action is undecided, the
 /// banned glyph when nothing can happen here, or nothing at all while
@@ -346,7 +346,7 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
                     ..Default::default()
                 })
                 .boxed(),
-            // Win8.1 (SPEC/win8_border.md): 1px outer outline + 6px border
+            // Win8.1: 1px outer outline + 6px border
             // + 1px inner outline per side; the top inner outline is the
             // 1px row directly below the 29px title bar. The 1px outlines
             // keep a constant physical width (never DPI-scaled).
@@ -546,7 +546,7 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
         if let Some(el) = drag_caption(state, skin) {
             s = s.push(el);
         }
-        // context menu above everything (SPEC/MENU_SPEC.MD): in-window
+        // context menu above everything: in-window
         // by default, overlay layer with menu.yaml layout.popup; the
         // Wayland xdg_popup host replaces both (menu drawn off-window)
         if let Some(open) = &state.menu {

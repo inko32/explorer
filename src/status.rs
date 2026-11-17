@@ -32,7 +32,6 @@ pub(crate) fn statusbar(state: &Explorer, skin: skin::Skin) -> Element<'_, Messa
             .style(move |_t, status| {
                 // unfocused window: the active button fades to gray;
                 // hovering restores the live colors
-                // (SPEC/Unfocused_Window.md §4)
                 let live = focused || matches!(status, button::Status::Hovered);
                 button::Style {
                 background: if active {
@@ -64,7 +63,7 @@ pub(crate) fn statusbar(state: &Explorer, skin: skin::Skin) -> Element<'_, Messa
         row![
             text(left).size(state.fonts.statusbar).color(skin.subtle),
             Space::new().width(Length::Fill),
-            // SPEC/FOLDER-SPEC.MD §5: a view button is active only when
+            // a view button is active only when
             // the current step index is exactly its preset
             view_btn("view_details", state.view_index == state.view_cfg.presets.details, Message::SetView(state.view_cfg.presets.details)),
             view_btn("view_large", state.view_index == state.view_cfg.presets.large, Message::SetView(state.view_cfg.presets.large)),

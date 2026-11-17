@@ -1,4 +1,4 @@
-//! End-to-end drag & drop through the MVU loop (SPEC/DRAGGING.md):
+//! End-to-end drag & drop through the MVU loop:
 //! multi-selection + folder drags with the default Move action, and
 //! the Ctrl override to Copy.
 
@@ -420,7 +420,7 @@ fn dnd_caption_banned_for_self_and_readonly() {
 
 /// Collapsing a nav node frees its whole subtree's cached listings,
 /// but the descendants keep their expansion state so re-expanding
-/// restores the tree as it was (SPEC/memory-leak.md).
+/// restores the tree as it was.
 #[test]
 fn nav_collapse_frees_subtree() {
     let mut ex = Explorer::new();

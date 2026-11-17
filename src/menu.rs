@@ -1,4 +1,4 @@
-//! Context menus — SPEC/MENU_SPEC.MD. ONE YAML file
+//! Context menus. ONE YAML file
 //! (`assets/menu.yaml`; user override ~/.config/explorer/menu.yaml)
 //! defines the menus (selection / background / archive / nav), the
 //! file-type groups, the open backend and the Windows-style layout.
@@ -402,7 +402,7 @@ pub struct Open {
     pub bar: Option<BarMenu>,
 }
 
-/// An address-bar dropdown (SPEC/Address_bar.md): which one is open,
+/// An address-bar dropdown: which one is open,
 /// the folder whose children are listed (Subdirs) and the entry paths
 /// (parallel to `Open.entries`).
 #[derive(Clone, Debug)]

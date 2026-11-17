@@ -1,4 +1,4 @@
-//! Cross-platform drag-and-drop core — SPEC/DRAGGING.md.
+//! Cross-platform drag-and-drop core
 //!
 //! Phase 1 (internal model, registry, policy, normalized events) and
 //! Phase 2 (internal file dragging) live here. Everything in this file

@@ -4,7 +4,7 @@
 //! dark token sets; a complete copy at `~/.config/explorer/theme.yaml`
 //! overrides the embedded one (same pattern as `ribbon.yaml`). Ribbon
 //! buttons, folder view, nav pane, menus, the title bar and the future
-//! file-operation dialogs (SPEC/File_Operation_UI_Spec.md §2, token
+//! file-operation dialogs (token
 //! groups `dialog` and `state`) all draw from [`light`]/[`dark`].
 //!
 //! Token names mirror the spec where a mapping exists (`text` =
@@ -27,7 +27,6 @@ pub struct Palette {
     pub sel: Color,
     pub sel_border: Color,
     /// Selection fill/border when the window is unfocused
-    /// (SPEC/Unfocused_Window.md).
     pub sel_inactive: Color,
     pub sel_inactive_border: Color,
     pub window_bg: Color,
@@ -52,8 +51,8 @@ pub struct Palette {
     pub sel_btn_border: Color,
     pub nav_hover: Color,
     pub nav_hover_border: Color,
-    /// Breadcrumb text fill while its dropdown arrow is hovered
-    /// (SPEC/Address_bar.md: the pair shows grey text + blue arrow).
+    /// Breadcrumb text fill while its dropdown arrow is hovered;
+    /// the pair shows grey text + blue arrow.
     pub nav_grey: Color,
     pub plate_hover: Color,
     pub plate_hover_border: Color,
@@ -131,12 +130,12 @@ pub struct State {
 #[derive(Deserialize)]
 pub struct Theme {
     /// When false (default) border widths ignore the UI scale: a "1px"
-    /// border is always 1 physical pixel (see SPEC/Border_DPI.md).
+    /// border is always 1 physical pixel.
     /// Accepts `true`/`false` or `1`/`0`.
     #[serde(default, deserialize_with = "de_bool01")]
     pub border_follow_dpi: bool,
     /// Fade-out duration for overlays (ms): ribbon popups fade out on
-    /// focus loss (SPEC/Unfocused_Window.md). 0 disables the
+    /// focus loss. 0 disables the
     /// animation. General animation token; future fades reuse it.
     #[serde(default = "default_fade_ms")]
     pub fade_ms: u32,

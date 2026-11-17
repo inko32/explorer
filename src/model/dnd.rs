@@ -1,4 +1,4 @@
-//! Drag & drop update logic (SPEC/DRAGGING.md): drag start from a
+//! Drag & drop update logic: drag start from a
 //! press past the threshold, and the drop commit that dispatches the
 //! file operation to the fs worker. The `handle` match delegates here.
 
@@ -366,7 +366,7 @@ impl Explorer {
     }
 }
 
-/// A file-view press that may still become a drag (SPEC/DRAGGING.md §5):
+/// A file-view press that may still become a drag:
 /// the row, the cursor at press, and whether the release must collapse
 /// a multi-selection down to that row (press-without-drag on a selected
 /// row of a multi-selection). `right` marks a right-button drag: its

@@ -138,7 +138,6 @@ pub struct Theme {
     pub grayscale_disabled: bool,
     /// Border/1px-line width factor: `1.0` when borders follow the DPI,
     /// else `1 / scale` so borders keep a constant physical width
-    /// (SPEC/Border_DPI.md).
     pub border_scale: f32,
     pub group_label: Color,
     pub border: Color,

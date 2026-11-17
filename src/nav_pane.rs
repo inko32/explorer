@@ -162,7 +162,7 @@ fn tree_item(
     // selection fades to gray while the nav pane is inactive (window
     // unfocused, folder pane active, or a ribbon popup open);
     // hovering a grayed row (or an active drop target) restores the
-    // live colors (SPEC/Unfocused_Window.md §4)
+    // live colors
     let popup_open = state.ribbon.framework().view().popup_open();
     let pane_live = state.focused
         && !popup_open
@@ -226,7 +226,7 @@ fn tree_item(
     .boxed();
     match navigate {
         Some(p) => {
-            // a drag & drop target (SPEC/DRAGGING.md §4.2)
+            // a drag & drop target
             let item = crate::dnd::drop_zone(item, crate::dnd::DropTarget::NavigationDirectory(p.clone()));
             // cursor_seed: the context menu anchors at
             // Explorer::cursor, which idle moves no longer refresh

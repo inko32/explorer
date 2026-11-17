@@ -6,7 +6,6 @@ use std::path::PathBuf;
 use crate::fs::FsEvent;
 
 /// Click-focus between the two selection panes
-/// (SPEC/Unfocused_Window.md §1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pane {
     Folder,
@@ -44,14 +43,14 @@ pub enum Message {
     /// Hover state of the address/search splitter (drives tint + cursor).
     SplitterHover(bool),
     /// Hover state of the back/forward history chevron (drives its
-    /// glyph color, #808080 -> #50ACFF; SPEC/Address_bar.md).
+    /// glyph color, #808080 -> #50ACFF).
     BackListHover(bool),
     /// Hover state of the address bar's right-list button (shows its
     /// left divider line only while hovered).
     RightListHover(bool),
     /// Breadcrumb member hover: a text element and its arrow are
     /// tracked separately — hovering the arrow greys the text while
-    /// hovering the text lights both blue (SPEC/Address_bar.md). The
+    /// hovering the text lights both blue. The
     /// exit clears only when that same member is still hovered
     /// (enter-before-exit event order between neighbors).
     CrumbHoverEnter {
@@ -94,7 +93,7 @@ pub enum Message {
     CancelSearch,
     Navigate(PathBuf),
     /// Nav-pane row clicked: marks the nav pane as the active pane,
-    /// then navigates (SPEC/Unfocused_Window.md §1).
+    /// then navigates.
     NavPress(PathBuf),
     Back,
     Forward,
@@ -155,7 +154,7 @@ pub enum Message {
     SelectAll,
     SelectNone,
     InvertSelection,
-    /// Set the view to a step index (SPEC/FOLDER-SPEC.MD §5 preset pick).
+    /// Set the view to a step index (preset pick).
     SetView(u8),
     /// Gallery hover preview: temporarily switch the view step
     /// (`Some`) and revert to the committed step on leave (`None`).
@@ -163,7 +162,7 @@ pub enum Message {
     /// Ctrl+scroll over the file view: accumulated wheel delta in §7
     /// units (Lines converted to notch deltas, Pixels as-is).
     WheelZoom(f32),
-    /// Right-click a file-view item (SPEC/MENU_SPEC.MD).
+    /// Right-click a file-view item.
     ContextSelect(usize),
     /// Cursor position at a press, published by the `cursor_seed`
     /// wrapper (or `menu::on_right_free`) JUST BEFORE the press
@@ -214,7 +213,7 @@ pub enum Message {
     /// (Windows header semantics).
     ColumnSortClick(usize),
     /// Clicked a Details column's dropdown button: open its filter
-    /// menu (SPEC/detail-view.txt §9).
+    /// menu.
     ColumnFilterMenu(usize),
     /// Right-clicked a Details column header: open the column menu.
     ColumnSettingsMenu,
@@ -224,7 +223,7 @@ pub enum Message {
     ColumnHoverExit(usize),
     /// A press on the Details header background (not a title, resizer
     /// or dropdown): capture only — the rubber band must never start
-    /// on the title bar (SPEC/detail-view.txt §14).
+    /// on the title bar.
     ColumnHeaderPress,
     /// Animation tick for the Details column header reorder: eases the
     /// base headers into the newly reserved slot while a drag is live.
@@ -307,7 +306,7 @@ pub enum Message {
     ToggleRainbow,
     /// Toggle the QAT between the title bar ("above") and below the ribbon.
     ToggleQatDock,
-    // ---- drag & drop (SPEC/DRAGGING.md) ----
+    // ---- drag & drop ----
     /// The pointer entered a registered drop target while dragging.
     DragTargetEnter(crate::dnd::DropTarget),
     /// The pointer left a registered drop target.
@@ -332,7 +331,7 @@ pub enum FrameStyle {
     /// Win10: single 1px border
     Win10,
     /// Win8.1: 1px outer outline + 6px border + 1px inner outline
-    /// (SPEC/win8_border.md; the 1px outlines are never DPI-scaled)
+    /// (the 1px outlines are never DPI-scaled)
     Win81,
 }
 

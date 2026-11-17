@@ -466,7 +466,7 @@ pub struct Snapshot {
     pub ctx: Context,
     pub has_clipboard: bool,
     pub has_items: bool,
-    /// Current view step index (SPEC/FOLDER-SPEC.MD); the view commands
+    /// Current view step index; the view commands
     /// light up only when it equals their preset (§5 bullet rule).
     pub view_index: u8,
     /// The committed view step: during a gallery hover preview
@@ -1208,7 +1208,7 @@ fn load_yaml() -> String {
 /// dark: recolored chrome). Every color comes from the theme file
 /// (`crate::theme`): ribbon-specific tokens from the `ribbon` group,
 /// everything else derived from the shared palette tokens.
-/// `focused = false` (window in background, SPEC/Unfocused_Window.md):
+/// `focused = false` (window in background):
 /// no hover feedback at all and checked/pressed marks fade to the
 /// inactive gray.
 pub fn theme(dark: bool, gray_disabled: bool, scale_dpi: f32, focused: bool) -> Theme {

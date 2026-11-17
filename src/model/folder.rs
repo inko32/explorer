@@ -581,7 +581,7 @@ impl Explorer {
 
     /// Release of a header press that never crossed the drag threshold:
     /// sort by the column's key, toggling ascending/descending on the
-    /// already-sorted column (SPEC/detail-view.txt §9).
+    /// already-sorted column.
     pub(crate) fn column_sort_release(&mut self, col: usize) -> Task<Message> {
         self.col_pressed = None;
         let Some(key) = self.detail_cfg.columns.get(col).and_then(|c| c.sort) else {

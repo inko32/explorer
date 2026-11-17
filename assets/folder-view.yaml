@@ -1,4 +1,4 @@
-# Folder view configuration — SPEC/FOLDER-SPEC.MD as data.
+# Folder view configuration as data.
 # Everything the spec fixes lives here: the step→size map (§3/§4), the
 # layout families and their index ranges (§3, §12 FlipIndex), the View
 # menu presets (§5), the enabled mask (§6/§12), the Ctrl+scroll input
@@ -70,9 +70,9 @@ layouts:
     row_gap: -1.0           # gap between rows, in border pixels (follows the
                             # border DPI unscale): -1 overlaps rows so adjacent
                             # item borders share one line; raise it for a looser list
-    header_h: 25.0          # column header strip (SPEC/detail-view.txt §1);
+    header_h: 25.0          # column header strip;
                             # the header metrics live in details-view.yaml
-    files_gap: 6.0          # SPEC/detail-view.txt §12: space below the title bar
+    files_gap: 6.0          # space below the title bar
     icon: 16.0
   list:                     # index 3: name-only columns flowing top to bottom
     index: 3

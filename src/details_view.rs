@@ -1,4 +1,4 @@
-//! Details-view configuration — SPEC/detail-view.txt as data, not code.
+//! Details-view configuration as data, not code.
 //! Loaded from `assets/details-view.yaml` by [`DetailsViewCfg::load`];
 //! a user copy at ~/.config/explorer/details-view.yaml overrides it
 //! (same override path as folder-view.yaml). The serde defaults mirror

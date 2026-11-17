@@ -2,7 +2,7 @@
 //! breadcrumb address bar, the search box, and the (invisible)
 //! splitter between the two bars.
 //!
-//! Layout: SPEC/Address_bar.md — 6px top/bottom, 8px left, 12px right
+//! Layout: 6px top/bottom, 8px left, 12px right
 //! band spaces; 24px buttons with the 22px address bar centered; the
 //! 12px gap between the bars is the draggable splitter. All sizes are
 //! logical (DPI-scaled with the UI); only border widths keep a constant
@@ -20,7 +20,7 @@ use crate::border::frame_insets;
 use crate::model::{Explorer, Message};
 use crate::ui_common::{bg, icon, skin};
 
-// logical sizes (SPEC/Address_bar.md)
+// logical sizes
 const BTN: f32 = 24.0; // back / forward / up buttons
 const BAR: f32 = 22.0; // address bar height, border included
 const BACK_LIST_W: f32 = 13.0; // history chevron between forward and up
@@ -48,7 +48,7 @@ pub(crate) const ADDRESS_INPUT_ID: &str = "address-input";
 /// mode starts).
 pub(crate) const SEARCH_INPUT_ID: &str = "search-input";
 
-/// 1px logical border at a constant physical width (SPEC/Border_DPI.md).
+/// 1px logical border at a constant physical width.
 fn border1(color: iced::Color) -> iced::Border {
     iced::Border {
         color,
@@ -98,7 +98,7 @@ fn triangle(dir: Tri, w: f32, h: f32, color: &str) -> Element<'static, Message> 
 /// adjacent elements touch — connected borders); hovered it draws the
 /// light-blue background + 1px border. `grey` is the special
 /// arrow-hovered state: the text element then shows a plain grey fill
-/// (grey border) while its arrow stays blue (SPEC/Address_bar.md).
+/// (grey border) while its arrow stays blue.
 fn crumb_btn(skin: skin::Skin, hovered: bool, grey: bool) -> button::Style {
     let (fill, border) = if hovered {
         (skin.nav_hover, skin.nav_hover_border)
@@ -259,8 +259,8 @@ fn up_btn(enabled: bool, skin: skin::Skin) -> Element<'static, Message> {
 }
 
 /// A breadcrumb text element plus its dropdown arrow. The two members
-/// are separate hover targets with asymmetric feedback (SPEC/
-/// Address_bar.md): hovering the text lights both members blue;
+/// are separate hover targets with asymmetric feedback: hovering the
+/// text lights both members blue;
 /// hovering the arrow keeps the arrow blue but greys the text. Each
 /// member is a 20px-tall (bar height minus the bar border) button with
 /// its own 1px border so the pair shares connected borders. The arrow

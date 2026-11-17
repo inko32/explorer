@@ -1,4 +1,4 @@
-# Context menus — SPEC/MENU_SPEC.MD. ONE file for everything: menu
+# Context menus. ONE file for everything: menu
 # definitions, file-type groups, open behavior and the menu layout.
 # A user copy at ~/.config/explorer/menu.yaml overrides this file (same
 # override path as ribbon.yaml / folder-view.yaml); missing keys fall
