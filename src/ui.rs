@@ -203,7 +203,12 @@ fn drag_icon_badge(state: &Explorer, skin: skin::Skin) -> Option<Element<'static
         );
     }
     // same origin as the Wayland drag surface: badge top-left at
-    // cursor+(2,2) — the handoff at the window edge must not jump
+    // cursor+(2,2) — the handoff at the window edge must not jump.
+    // Clamp both ends: near the left/top the padding pins at 0 (the
+    // cursor reaches the border first); near the right/bottom it is
+    // the BADGE's far edge that reaches the border while the cursor
+    // is still 52px inside — without the upper clamp the Fill content
+    // box shrinks below the badge and the badge gets cut.
     const DX: f32 = 2.0;
     const DY: f32 = 2.0;
     Some(
@@ -211,8 +216,8 @@ fn drag_icon_badge(state: &Explorer, skin: skin::Skin) -> Option<Element<'static
             .width(Length::Fill)
             .height(Length::Fill)
             .padding(iced::Padding {
-                top: (state.cursor.y + DY).max(0.0),
-                left: (state.cursor.x + DX).max(0.0),
+                top: (state.cursor.y + DY).clamp(0.0, (state.win_h - BADGE).max(0.0)),
+                left: (state.cursor.x + DX).clamp(0.0, (state.win_w - BADGE).max(0.0)),
                 ..Default::default()
             })
             .boxed(),
