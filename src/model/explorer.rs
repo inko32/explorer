@@ -922,7 +922,7 @@ impl Explorer {
                 }
                 self.request_listing();
             }
-            FsEvent::Trashed { result } => {
+            FsEvent::Trashed { result } | FsEvent::Deleted { result } => {
                 if let Err(e) = result {
                     self.status = format!("Delete failed: {e}");
                 }
@@ -1658,25 +1658,22 @@ impl Explorer {
                     self.status = "move/copy inside archives is not supported yet".into();
                     return iced::Task::none();
                 }
-                let mut ok = 0usize;
-                for p in &paths {
-                    let Some(name) = p.file_name() else { continue };
-                    let dst = dest.join(name);
-                    let r = if cut {
-                        std::fs::rename(p, &dst).is_ok()
-                    } else {
-                        super::ops::copy_rec(p, &dst)
-                    };
-                    if r {
-                        ok += 1;
-                    }
+                // same-folder targets are a pointless "name (2)" no-op —
+                // the same relationship paste and dnd reject
+                let paths: Vec<PathBuf> = paths
+                    .into_iter()
+                    .filter(|p| crate::dnd::sources_fit(std::slice::from_ref(p), &dest))
+                    .collect();
+                if paths.is_empty() {
+                    self.status = "The selection is already in that folder".into();
+                    return iced::Task::none();
                 }
-                self.status = format!(
-                    "{ok} item(s) {} {}",
-                    if cut { "moved to" } else { "copied to" },
-                    dest.display()
-                );
-                self.request_listing();
+                self.sched.send(Job::Copy {
+                    sources: paths,
+                    dest_dir: dest,
+                    cut,
+                });
+                self.status = "Copying…".into();
                 iced::Task::none()
             }
             // ribbon custom command (model/ribbon.rs)
@@ -1704,19 +1701,8 @@ impl Explorer {
                 if fs::archive::resolve(&self.cwd).is_some() {
                     self.status = "delete inside archives is not supported yet".into();
                 } else {
-                    let mut ok = 0usize;
-                    for p in &paths {
-                        let r = if p.is_dir() {
-                            std::fs::remove_dir_all(p)
-                        } else {
-                            std::fs::remove_file(p)
-                        };
-                        if r.is_ok() {
-                            ok += 1;
-                        }
-                    }
-                    self.status = format!("permanently deleted {ok} item(s)");
-                    self.request_listing();
+                    self.sched.send(Job::DeletePermanent(paths));
+                    self.status = "Deleting…".into();
                 }
                 iced::Task::none()
             }
