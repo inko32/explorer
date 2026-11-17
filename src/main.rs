@@ -121,14 +121,20 @@ fn main() -> iced::Result {
         std::env::set_var("ICED_BACKEND", "tiny-skia");
     }
     let mut want_dpi = false;
+    let mut want_render = false;
     for arg in std::env::args().skip(1) {
         if want_dpi {
             want_dpi = false;
             set_dpi(&arg);
             continue;
         }
+        if want_render {
+            want_render = false;
+            set_renderer(&arg);
+            continue;
+        }
         match arg.as_str() {
-            "--render" => {}
+            "--render" => want_render = true,
             "--dpi" => want_dpi = true,
             v if v.starts_with("--dpi=") => set_dpi(&v["--dpi=".len()..]),
             v if v.starts_with("--size=") => set_size(&v["--size=".len()..]),
@@ -142,6 +148,10 @@ fn main() -> iced::Result {
             }
             _ => {}
         }
+    }
+    if want_render {
+        eprintln!("--render expects a value (gpu|cpu)");
+        std::process::exit(2);
     }
     // The Win8.1 frame can be translucent (win81theme.yaml
     // border_opacity): the frame accent/outlines draw with alpha and

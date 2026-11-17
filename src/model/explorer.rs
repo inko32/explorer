@@ -304,7 +304,7 @@ impl Explorer {
                 skip_next = false;
                 continue;
             }
-            if arg == "--render" {
+            if arg == "--render" || arg == "--dpi" {
                 skip_next = true;
                 continue;
             }
