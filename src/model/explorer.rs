@@ -606,6 +606,7 @@ impl Explorer {
                 prefix: PathBuf::new(),
                 paths,
             }),
+            scroll: None,
         });
     }
 
@@ -640,6 +641,7 @@ impl Explorer {
                 prefix,
                 paths: dirs,
             }),
+            scroll: None,
         });
     }
 
@@ -1493,6 +1495,7 @@ impl Explorer {
                     hover: None,
                     nav_target: None,
                     bar: None,
+                    scroll: None,
                 });
                 self.menu_popup_open();
                 iced::Task::none()
@@ -1511,8 +1514,13 @@ impl Explorer {
                     hover: None,
                     nav_target: Some(path),
                     bar: None,
+                    scroll: None,
                 });
                 self.menu_popup_open();
+                iced::Task::none()
+            }
+            Message::ScrollbarMenu { pos, axis, targets, on_scroll } => {
+                self.scrollbar_menu(pos, axis, targets, on_scroll);
                 iced::Task::none()
             }
             Message::MenuPick(i) => self.menu_dispatch(i),

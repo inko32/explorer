@@ -3,7 +3,9 @@
 //! track press. The strip remote-controls the iced scrollable next to
 //! it: it publishes an absolute target offset (`Message::FileScrollTo` /
 //! `Message::NavScrollTo`), the model issues `operation::scroll_to` and
-//! the scrollable reports its position back via on_scroll.
+//! the scrollable reports its position back via on_scroll. A right press
+//! opens the strip context menu ("Scroll here" / edges / pages / lines)
+//! with the targets precomputed from the track geometry.
 
 use iced::Widget as _;
 use iced::advanced::widget::{Operation, Tree, Widget, tree};
@@ -21,8 +23,8 @@ const BUTTON: f32 = 16.0;
 /// Minimum thumb length along the axis.
 const MIN_THUMB: f32 = 20.0;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Axis {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Axis {
     Vertical,
     Horizontal,
 }
@@ -39,6 +41,22 @@ enum Zone {
     Thumb,
     TrackDec,
     TrackInc,
+}
+
+/// Scroll targets precomputed at right-press time for the strip
+/// context menu (absolute offsets along the axis, px).
+#[derive(Clone, Copy, Debug)]
+pub struct MenuTargets {
+    /// "Scroll here": the thumb start jumps to the cursor.
+    pub here: f32,
+    /// Top / Left Edge.
+    pub start: f32,
+    /// Bottom / Right Edge.
+    pub end: f32,
+    pub page_dec: f32,
+    pub page_inc: f32,
+    pub line_dec: f32,
+    pub line_inc: f32,
 }
 
 #[derive(Default)]
@@ -169,6 +187,37 @@ impl WinScrollbar {
         ((thumb_start - BUTTON) / free).clamp(0.0, 1.0) * self.max_scroll()
     }
 
+    /// Right-press: the Windows strip menu ("Scroll here" / edges /
+    /// pages / lines). Nothing to scroll: swallow the press so no
+    /// menu opens behind the strip.
+    fn right_press(&self, position: Point, bounds: Rectangle, shell: &mut Shell<'_, Message>) {
+        if self.max_scroll() <= 0.0 {
+            shell.capture_event();
+            return;
+        }
+        let start = self.along(position) - self.along(bounds.position());
+        let targets = MenuTargets {
+            here: self.thumb_to_offset(start, bounds),
+            start: 0.0,
+            end: self.max_scroll(),
+            page_dec: (self.offset - self.viewport).max(0.0),
+            page_inc: (self.offset + self.viewport).min(self.max_scroll()),
+            line_dec: (self.offset - self.line).max(0.0),
+            line_inc: (self.offset + self.line).min(self.max_scroll()),
+        };
+        // CursorAt first (FIFO bus, like menu::on_right_free): the menu
+        // anchors at Explorer::cursor, which idle cursor moves no longer
+        // refresh (main.rs drops them)
+        shell.publish(Message::CursorAt(position));
+        shell.publish(Message::ScrollbarMenu {
+            pos: position,
+            axis: self.axis,
+            targets,
+            on_scroll: self.on_scroll,
+        });
+        shell.capture_event();
+    }
+
     /// Press at a position (mouse or first touch finger).
     fn press_at(
         &self,
@@ -286,6 +335,11 @@ impl Widget<Message, iced::Theme, iced::Renderer> for WinScrollbar {
             iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 if let Some(position) = cursor.position() {
                     self.press_at(state, position, bounds, shell);
+                }
+            }
+            iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) => {
+                if let Some(position) = cursor.position_over(bounds) {
+                    self.right_press(position, bounds, shell);
                 }
             }
             iced::Event::Touch(iced::touch::Event::FingerPressed { position, .. }) => {

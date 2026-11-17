@@ -313,6 +313,7 @@ impl Explorer {
             hover: None,
             nav_target: None,
             bar: None,
+            scroll: None,
         });
         self.menu_popup_open();
     }

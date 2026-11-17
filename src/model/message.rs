@@ -199,6 +199,16 @@ pub enum Message {
     FileHScrollTo(f32),
     /// Same for the navigation pane (always vertical).
     NavScrollTo(f32),
+    /// Right-click a Windows scrollbar strip: open the strip menu
+    /// ("Scroll here" / edges / page steps / line steps) at the cursor.
+    /// The strip precomputes the target offsets (it owns the track
+    /// geometry) and passes its own scroll-request callback along.
+    ScrollbarMenu {
+        pos: iced::Point,
+        axis: crate::scrollbar::Axis,
+        targets: crate::scrollbar::MenuTargets,
+        on_scroll: fn(f32) -> Message,
+    },
     /// Toggle the side pane right of the folder view (mutually
     /// exclusive: Preview XOR Details XOR none).
     ToggleSidePane(crate::pane::Mode),
