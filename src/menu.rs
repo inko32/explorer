@@ -400,6 +400,18 @@ pub struct Open {
     /// picks index straight into `paths`, bypassing the yaml command
     /// dispatch below.
     pub bar: Option<BarMenu>,
+    /// Scrollbar-strip menu: the strip's scroll-request callback and
+    /// its precomputed targets (`sb_*` item ids dispatch through this).
+    pub scroll: Option<ScrollMenu>,
+}
+
+/// Scrollbar-strip menu context: which scroller the menu drives (the
+/// strip's own `on_scroll` callback) and the target offsets the strip
+/// precomputed at right-press time (it owns the track geometry).
+#[derive(Clone, Debug)]
+pub struct ScrollMenu {
+    pub on_scroll: fn(f32) -> Message,
+    pub targets: crate::scrollbar::MenuTargets,
 }
 
 /// An address-bar dropdown: which one is open,

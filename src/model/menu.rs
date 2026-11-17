@@ -53,6 +53,50 @@ impl Explorer {
             hover: None,
             nav_target: None,
             bar: None,
+            scroll: None,
+        });
+        self.menu_popup_open();
+    }
+
+    /// Right-click a Windows scrollbar strip: the strip menu — "Scroll
+    /// here", the two edges, page steps, line steps. Vertical labels;
+    /// horizontal strips read Left/Right Edge, Page Left/Right, Scroll
+    /// Left/Right. The targets were precomputed by the strip; its own
+    /// `on_scroll` callback (stored in the menu) drives the picks.
+    pub(crate) fn scrollbar_menu(
+        &mut self,
+        pos: iced::Point,
+        axis: crate::scrollbar::Axis,
+        targets: crate::scrollbar::MenuTargets,
+        on_scroll: fn(f32) -> Message,
+    ) {
+        let v = axis == crate::scrollbar::Axis::Vertical;
+        let item = |id: &str, label: &str| {
+            crate::menu::Entry::Item(crate::menu::Item::plain(id, label.into()))
+        };
+        let entries = vec![
+            item("sb_here", "Scroll here"),
+            crate::menu::Entry::Sep,
+            item("sb_start", if v { "Top" } else { "Left Edge" }),
+            item("sb_end", if v { "Bottom" } else { "Right Edge" }),
+            crate::menu::Entry::Sep,
+            item("sb_page_dec", if v { "Page Up" } else { "Page Left" }),
+            item("sb_page_inc", if v { "Page Down" } else { "Page Right" }),
+            crate::menu::Entry::Sep,
+            item("sb_line_dec", if v { "Scroll Up" } else { "Scroll Left" }),
+            item("sb_line_inc", if v { "Scroll Down" } else { "Scroll Right" }),
+        ];
+        // the menu shields the view behind it: drop the live hover
+        self.hovered = None;
+        self.nav_hover = None;
+        self.menu = Some(crate::menu::Open {
+            entries,
+            x: pos.x,
+            y: pos.y,
+            hover: None,
+            nav_target: None,
+            bar: None,
+            scroll: Some(crate::menu::ScrollMenu { on_scroll, targets }),
         });
         self.menu_popup_open();
     }
@@ -110,6 +154,7 @@ impl Explorer {
             hover: None,
             nav_target: None,
             bar: None,
+            scroll: None,
         });
     }
 
@@ -230,6 +275,23 @@ impl Explorer {
         let Some(crate::menu::Entry::Item(item)) = open.entries.get(idx).cloned() else {
             return iced::Task::none();
         };
+        // scrollbar strip menu (ids sb_*): the target offset was
+        // precomputed by the strip; its own callback issues the scroll
+        // request (FileScrollTo / FileHScrollTo / NavScrollTo)
+        if let Some(ctx) = &open.scroll {
+            let t = ctx.targets;
+            let target = match item.id.as_str() {
+                "sb_here" => t.here,
+                "sb_start" => t.start,
+                "sb_end" => t.end,
+                "sb_page_dec" => t.page_dec,
+                "sb_page_inc" => t.page_inc,
+                "sb_line_dec" => t.line_dec,
+                "sb_line_inc" => t.line_inc,
+                _ => return iced::Task::none(),
+            };
+            return self.update((ctx.on_scroll)(target));
+        }
         match item.id.as_str() {
             // drag drop-behavior menu (PendingDrop was stashed when the
             // ambiguous drop opened it): the pick becomes the drop action
