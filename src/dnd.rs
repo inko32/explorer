@@ -283,7 +283,7 @@ pub enum DragCaption {
 /// `validate_commit`): a drop into the item itself, into its own
 /// descendant, or back into its current parent folder can never
 /// complete — the hover caption shows the banned glyph for these.
-fn sources_fit(sources: &[PathBuf], dest: &Path) -> bool {
+pub(crate) fn sources_fit(sources: &[PathBuf], dest: &Path) -> bool {
     sources
         .iter()
         .all(|src| dest != src && !dest.starts_with(src) && src.parent() != Some(dest))

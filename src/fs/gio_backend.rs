@@ -118,14 +118,17 @@ impl Backend for GioBackend {
     }
 
     fn trash(&self, path: &Path) -> Result<(), FsError> {
-        // Fall back to permanent delete when no trash is available (rare).
         let file = gio::File::for_path(path);
         match file.trash(None::<&gio::Cancellable>) {
             Ok(()) => Ok(()),
-            Err(_) => {
+            // Permanent delete is only acceptable when no trash exists at
+            // all; permission, I/O or D-Bus errors must reach the user
+            // instead of silently destroying data.
+            Err(e) if e.kind::<gio::IOErrorEnum>() == Some(gio::IOErrorEnum::NotSupported) => {
                 file.delete(None::<&gio::Cancellable>)?;
                 Ok(())
             }
+            Err(e) => Err(e.into()),
         }
     }
 
