@@ -15,7 +15,7 @@ embed-selawik = []
 cpu-render = []
 
 [dependencies]
-iced = { git = "https://github.com/iced-rs/iced", rev = "b2fbd3cb6289603f8cbbb2387a5242231f509d13", default-features = false, features = ["wgpu", "tiny-skia", "wayland", "crisp", "thread-pool", "svg", "image", "advanced"] } # wgpu primary + tiny-skia fallback (D17); pick at runtime via --render
+iced = { git = "https://github.com/iced-rs/iced", rev = "e5c350f271a8046f875c6662d452fde9e462d486", default-features = false, features = ["wgpu", "tiny-skia", "wayland", "crisp", "thread-pool", "svg", "image", "advanced"] } # wgpu primary + tiny-skia fallback (D17); pick at runtime via --render
 # 2026.11.2 iced git
 gio  = "0.22"  # GIO backend for the VFS (local fs, volumes, trash)
 glib = "0.22"  # gio companion
