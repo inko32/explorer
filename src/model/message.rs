@@ -256,12 +256,13 @@ pub enum Message {
     Status(String),
     Event(iced::Event),
     FsEvent(FsEvent),
-    /// Wayland DnD side-channel event (drag-in hover/drop, drag-out
-    /// finish) — see `dnd_wayland`.
+    /// Wayland side-channel event (drag-in hover/drop, drag-out
+    /// finish, menu-popup input) — see `dnd_wayland` + `popup_wayland`.
     Dnd(crate::dnd_wayland::Event),
     /// Raw Wayland window handles `(wl_surface, wl_display,
     /// xdg_toplevel)` delivered by `iced::window::raw_handle` once the
-    /// window exists; spawns the Wayland side-channel (DnD + popups).
+    /// window exists; spawns the Wayland side-channel (DnD + popups +
+    /// icon) via `raw_handle_wayland::wrap`.
     WlHandles(Option<(usize, usize, usize)>),
     /// Scroll offset + viewport height from the file list scrollable.
     /// A scrollable reports only its own axis (`None` = unchanged):

@@ -563,8 +563,14 @@ pub fn view(state: &Explorer) -> Element<'_, Message> {
         }
         s.boxed()
     } else {
-        // drag cursor caption above the content, below the menu
-        if let Some(open) = &state.menu {
+        // context menu above everything: in-window unless hosted by
+        // the side-channel popup — same rule as the self_border branch
+        // above. The in-window host flips at the WINDOW's right edge
+        // while the xdg_popup flips only at the OUTPUT's edge; drawing
+        // both near the window edge shows a duplicated menu.
+        if let Some(open) = &state.menu
+            && !state.menu_popup
+        {
             let el = if state.menu_cfg.layout.popup {
                 crate::menu::host(open, &state.menu_cfg, skin)
             } else {

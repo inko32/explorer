@@ -1,16 +1,23 @@
-//! Wayland drag & drop side-channel.
+//! Wayland side-channel: one thread on winit's connection.
 //!
 //! iced/winit have no Wayland data-device (drag-out payloads, drag-in
-//! offers, action negotiation). This module fills the gap without
-//! touching winit: a thread owns a second event queue *on winit's
-//! Wayland connection* (same client — the protocol requires it; the
-//! compositor routes drop events only to the surface's client and
-//! validates the drag origin against the focused surface).
+//! offers, action negotiation), no off-window popups, and no toplevel
+//! icon. This module fills the gaps without touching winit: a thread
+//! owns a second event queue *on winit's Wayland connection* (same
+//! client — the protocol requires it; see `raw_handle_wayland.rs`)
+//! and drives `wl_data_device` from it.
 //!
-//! The two raw pointers come from the tiny local iced patch
-//! (`deps/iced-raw-handle.patch`, `iced::window::raw_handle`); see the
-//! Makefile "local iced overlay" section. Design + protocol behavior
-//! were validated with the /tmp/dnd-spike prototype on KWin:
+//! Module map (all on the same thread/connection):
+//! - `raw_handle_wayland`: wrap the raw handles from the iced patch
+//!   into typed Wayland objects
+//! - `dnd_wayland` (this file): the thread, drag-out/drag-in, the drag
+//!   image surface, the shared raster/text paint helpers
+//! - `popup_wayland`: off-window menu popups (xdg_popup)
+//! - `icon_wayland`: the compositor taskbar/window-switcher icon
+//!   (xdg_toplevel_icon_v1)
+//!
+//! Design + protocol behavior were validated with the /tmp/dnd-spike
+//! prototype on KWin:
 //! - a second seat binding on the same client receives the full pointer
 //!   stream (enter/button serials included) while the app's surface is
 //!   focused — no winit serial plumbing needed;
@@ -23,14 +30,6 @@
 //! paints the drag image (icon theme + fonts live there) and sends the
 //! pixels over; events flow back as [`Event`]s through the same
 //! stream channel the fs worker uses.
-//!
-//! Second duty on the same connection/thread: the compositor's
-//! taskbar/window-switcher icon. winit/iced cannot set one on Wayland
-//! (`set_window_icon` is a no-op there), so the thread drives
-//! `xdg_toplevel_icon_v1` from the same registry/queue: the GUI paints
-//! the location icon onto square shm buffers and sends them over as
-//! [`Cmd::SetIcon`]. Compositors without the global (e.g. mutter) just
-//! never get an icon pushed — everything stays a silent no-op.
 
 use std::io::{Read as _, Write as _};
 use std::os::unix::io::{AsFd as _, AsRawFd as _, BorrowedFd};
@@ -49,15 +48,11 @@ use smithay_client_toolkit::seat::pointer::{
 };
 use smithay_client_toolkit::seat::{Capability, SeatHandler, SeatState};
 use smithay_client_toolkit::reexports::protocols::wp::fractional_scale::v1::client::wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1;
-use smithay_client_toolkit::reexports::protocols::wp::viewporter::client::wp_viewport::WpViewport;
 use smithay_client_toolkit::reexports::protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
 use smithay_client_toolkit::shm::slot::{Buffer, SlotPool};
 use smithay_client_toolkit::shm::{Shm, ShmHandler};
 use smithay_client_toolkit::{delegate_registry, registry_handlers};
-use wayland_client::backend::{Backend, ObjectId};
 use wayland_client::globals::registry_queue_init;
-use wayland_protocols::xdg::toplevel_icon::v1::client::xdg_toplevel_icon_manager_v1::XdgToplevelIconManagerV1;
-use wayland_protocols::xdg::toplevel_icon::v1::client::xdg_toplevel_icon_v1::XdgToplevelIconV1;
 use wayland_client::protocol::wl_data_device::WlDataDevice;
 use wayland_client::protocol::wl_data_device_manager::DndAction;
 use wayland_client::protocol::wl_data_source::WlDataSource;
@@ -74,8 +69,9 @@ use wayland_client::{Connection, Proxy as _, QueueHandle};
 pub type EventSender = iced::futures::channel::mpsc::UnboundedSender<Event>;
 pub type EventReceiver = iced::futures::channel::mpsc::UnboundedReceiver<Event>;
 
-/// Commands GUI -> side-channel thread.
-enum Cmd {
+/// Commands GUI -> side-channel thread. DnD commands are handled here;
+/// popup/icon commands are forwarded to their modules.
+pub(crate) enum Cmd {
     /// Start a drag with the given file:// URIs. The serial is the one
     /// the thread captured from the press that armed the drag (the
     /// compositor validates it against the implicit grab).
@@ -89,40 +85,10 @@ enum Cmd {
     /// Re-paint the drag image while a drag is live (caption changes
     /// when the modifier-derived action changes).
     UpdateVisual(DragVisual),
-    /// Open an off-window menu popup (xdg_popup), showing the painted
-    /// pixels. The anchor is the thread's own tracked pointer position
-    /// (parent surface-local — exact, no unit conversion). `painted` is
-    /// the scale the visual's pixels were painted at (scale_dpi);
-    /// `system` is the raw winit scale of the parent output. The popup
-    /// surface lives in the COMPOSITOR's coordinate space (1 unit =
-    /// 1/system physical px), so its on-screen size and crispness follow
-    /// `system`, not `painted` — with `--dpi` the two differ.
-    OpenPopup {
-        painted: f32,
-        system: f32,
-        visual: DragVisual,
-    },
-    /// Re-paint an open popup (hover changes).
-    UpdatePopup(DragVisual),
-    /// Close the popup.
-    ClosePopup,
-    /// Set the compositor's toplevel icon (taskbar/window-switcher),
-    /// replacing any previous one. Ignored when the compositor has no
-    /// `xdg_toplevel_icon_manager_v1`.
-    SetIcon(ToplevelIcon),
-}
-
-/// Pixels for one toplevel-icon assignment: one square buffer per
-/// scale, premultiplied RGBA (like [`DragVisual`]).
-pub struct ToplevelIcon {
-    pub sizes: Vec<IconSize>,
-}
-
-pub struct IconSize {
-    /// wl buffer scale the pixels were rendered for (e.g. 1, 2)
-    pub scale: i32,
-    /// square `width == height`
-    pub visual: DragVisual,
+    /// see `popup_wayland`
+    Popup(crate::popup_wayland::Cmd),
+    /// see `icon_wayland`
+    Icon(crate::icon_wayland::Cmd),
 }
 
 /// A fully painted drag image: premultiplied RGBA pixels. The hotspot
@@ -135,7 +101,8 @@ pub struct DragVisual {
     pub pixels: Vec<u8>,
 }
 
-/// Side-channel events, delivered as `Message::Dnd`.
+/// Side-channel events, delivered as `Message::Dnd`. The popup variants
+/// are emitted by `popup_wayland`.
 #[derive(Debug, Clone)]
 pub enum Event {
     /// An external drag entered our window with these MIME types.
@@ -161,9 +128,9 @@ pub enum Event {
 
 /// GUI-side handle to the side-channel thread.
 pub struct Handle {
-    tx: std::sync::mpsc::Sender<Cmd>,
+    pub(crate) tx: std::sync::mpsc::Sender<Cmd>,
     /// writing a byte wakes the thread's poll loop
-    wake: std::fs::File,
+    pub(crate) wake: std::fs::File,
 }
 
 impl Handle {
@@ -180,27 +147,10 @@ impl Handle {
         self.send(Cmd::UpdateVisual(visual));
     }
 
-    pub fn open_popup(&self, painted: f32, system: f32, visual: DragVisual) {
-        self.send(Cmd::OpenPopup {
-            painted,
-            system,
-            visual,
-        });
-    }
-
-    pub fn update_popup(&self, visual: DragVisual) {
-        self.send(Cmd::UpdatePopup(visual));
-    }
-
-    pub fn close_popup(&self) {
-        self.send(Cmd::ClosePopup);
-    }
-
-    pub fn set_icon(&self, icon: ToplevelIcon) {
-        self.send(Cmd::SetIcon(icon));
-    }
-
-    fn send(&self, cmd: Cmd) {
+    /// the popup/icon commands (`open_popup`, `set_icon`, ...) are
+    /// implemented next to their modules: `popup_wayland` and
+    /// `icon_wayland` both `impl Handle`
+    pub(crate) fn send(&self, cmd: Cmd) {
         let _ = self.tx.send(cmd);
         let _ = (&self.wake).write_all(&[1]);
     }
@@ -216,11 +166,11 @@ pub fn init_channel() -> EventSender {
     ev_tx
 }
 
-/// Wrap winit's Wayland objects and spawn the side-channel thread.
-/// `handles` is `(wl_surface, wl_display, xdg_toplevel)` from
-/// `iced::window::raw_handle`; `ev_tx` comes from [`init_channel`].
-/// `None` when the platform is not Wayland or the wrap fails (the app
-/// then simply has no native DnD/popups).
+/// Wrap winit's Wayland objects (via `raw_handle_wayland`) and spawn
+/// the side-channel thread. `handles` is `(wl_surface, wl_display,
+/// xdg_toplevel)` from `iced::window::raw_handle`; `ev_tx` comes from
+/// [`init_channel`]. `None` when the platform is not Wayland or the
+/// wrap fails (the app then simply has no native DnD/popups/icon).
 ///
 /// The thread must never panic: the release profile aborts the process
 /// on any panic, so every fallible call in it is handled.
@@ -233,7 +183,7 @@ pub fn spawn(handles: (usize, usize, usize), ev_tx: EventSender) -> Option<Handl
     let (wake_r, wake_w) = rustix::pipe::pipe().ok()?;
 
     std::thread::Builder::new()
-        .name("explorer-dnd".into())
+        .name("explorer-wl".into())
         .spawn(move || thread_main(surface, display, toplevel, cmd_rx, ev_tx, wake_r))
         .ok()?;
 
@@ -268,7 +218,7 @@ fn thread_main(
 ) {
     let result = run(surface_ptr, display_ptr, toplevel_ptr, &cmds, &ev_tx, &wake_r);
     if let Err(e) = result {
-        eprintln!("dnd-wayland: side-channel stopped: {e}");
+        eprintln!("wayland side-channel stopped: {e}");
     }
     // keep the sender alive-owner informed: a silent stop means no more
     // drag-out; drag-in events just stop arriving
@@ -283,30 +233,13 @@ fn run(
     ev_tx: &EventSender,
     wake_r: &std::os::unix::io::OwnedFd,
 ) -> Result<(), String> {
-    // SAFETY: both objects belong to this process (winit owns them);
-    // wrapping does not take ownership — winit keeps driving the
-    // connection's main queue while we only use OUR event queue on it.
-    // opaque pointer: the exact foreign type is named by wayland-sys,
-    // which we don't depend on — `.cast()` infers it
-    let backend = unsafe {
-        Backend::from_foreign_display((display_ptr as *mut std::ffi::c_void).cast())
-    };
-    let conn = Connection::from_backend(backend);
-    // SAFETY: the surface exists and belongs to the same client.
-    // SAFETY: the surface exists and belongs to the same client.
-    let origin_id = unsafe { ObjectId::from_ptr(WlSurface::interface(), surface_ptr as *mut _) }
-        .map_err(|e| e.to_string())?;
-    let origin = WlSurface::from_id(&conn, origin_id).map_err(|e| e.to_string())?;
-    // the window's xdg_toplevel, wrapped for the popup parent chain
-    // SAFETY: same — winit owns it, same client, outlives the thread's
-    // use of it (the window never goes away in this app)
-    use smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::XdgToplevel;
-    let toplevel_id =
-        unsafe { ObjectId::from_ptr(XdgToplevel::interface(), toplevel_ptr as *mut _) }
-        .map_err(|e| e.to_string())?;
-    let toplevel = XdgToplevel::from_id(&conn, toplevel_id).map_err(|e| e.to_string())?;
-    let parent = smithay_client_toolkit::shell::xdg::window::Window::from_xdg_toplevel(&toplevel)
-        .ok_or("xdg_toplevel is not an sctk-managed window")?;
+    let raw = crate::raw_handle_wayland::wrap((surface_ptr, display_ptr, toplevel_ptr))?;
+    let crate::raw_handle_wayland::RawHandles {
+        conn,
+        origin,
+        parent,
+        toplevel,
+    } = raw;
 
     // Our own registry + queue on winit's connection.
     let (globals, mut queue) = registry_queue_init::<State>(&conn).map_err(|e| e.to_string())?;
@@ -314,7 +247,7 @@ fn run(
     // taskbar/switcher icon support — absent on compositors without the
     // staging global (e.g. mutter); SetIcon then stays a no-op
     let icon_mgr = globals
-        .bind::<XdgToplevelIconManagerV1, _, _>(&qh, 1..=1, ())
+        .bind::<smithay_client_toolkit::reexports::protocols::xdg::toplevel_icon::v1::client::xdg_toplevel_icon_manager_v1::XdgToplevelIconManagerV1, _, _>(&qh, 1..=1, ())
         .ok();
 
     let shm = Shm::bind(&globals, &qh).map_err(|e| e.to_string())?;
@@ -459,35 +392,37 @@ fn run(
     }
 }
 
-struct State {
-    registry_state: RegistryState,
-    seat_state: SeatState,
-    output_state: OutputState,
-    compositor: CompositorState,
-    shm: Shm,
-    ddm: DataDeviceManagerState,
-    device: Option<DataDevice>,
+pub(crate) struct State {
+    pub(crate) registry_state: RegistryState,
+    pub(crate) seat_state: SeatState,
+    pub(crate) output_state: OutputState,
+    pub(crate) compositor: CompositorState,
+    pub(crate) shm: Shm,
+    pub(crate) ddm: DataDeviceManagerState,
+    pub(crate) device: Option<DataDevice>,
     /// the explorer window surface (wrapped foreign object) — drag origin
-    origin: WlSurface,
-    xdg: smithay_client_toolkit::shell::xdg::XdgShell,
+    pub(crate) origin: WlSurface,
+    pub(crate) xdg: smithay_client_toolkit::shell::xdg::XdgShell,
     /// the window's xdg_toplevel wrapper — the popup parent chain
-    parent: smithay_client_toolkit::shell::xdg::window::Window,
+    pub(crate) parent: smithay_client_toolkit::shell::xdg::window::Window,
     /// the raw xdg_toplevel proxy — target for xdg_toplevel_icon_v1
-    toplevel: smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::XdgToplevel,
+    pub(crate) toplevel: smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::XdgToplevel,
     /// `xdg_toplevel_icon_manager_v1`, when the compositor offers it
-    icon_mgr: Option<XdgToplevelIconManagerV1>,
+    pub(crate) icon_mgr: Option<
+        smithay_client_toolkit::reexports::protocols::xdg::toplevel_icon::v1::client::xdg_toplevel_icon_manager_v1::XdgToplevelIconManagerV1,
+    >,
     /// the icon currently assigned to the toplevel (kept alive: its
     /// buffers must not be destroyed or modified while assigned)
-    toplevel_icon: Option<ToplevelIconState>,
-    toplevel_pool: SlotPool,
+    pub(crate) toplevel_icon: Option<crate::icon_wayland::ToplevelIconState>,
+    pub(crate) toplevel_pool: SlotPool,
     /// the open off-window menu popup, if any
-    popup: Option<PopupState>,
-    popup_pool: SlotPool,
+    pub(crate) popup: Option<crate::popup_wayland::PopupState>,
+    pub(crate) popup_pool: SlotPool,
     /// fractional-scale globals, when the compositor offers them — the
     /// same condition winit uses for the parent window's fractional
     /// path; the popup then maps its buffer to model-logical units 1:1
     /// via wp_viewport (no downscale on fractional outputs)
-    fractional: Option<(WpFractionalScaleManagerV1, WpViewporter)>,
+    pub(crate) fractional: Option<(WpFractionalScaleManagerV1, WpViewporter)>,
     icon_pool: SlotPool,
     icon_surface: Option<WlSurface>,
     icon_buffer: Option<Buffer>,
@@ -502,87 +437,12 @@ struct State {
     /// last pointer position over the window, in PARENT SURFACE-LOCAL
     /// coordinates — the only exact anchor for popups (model-logical
     /// units differ from surface-local under DPI)
-    ptr_pos: (f64, f64),
+    pub(crate) ptr_pos: (f64, f64),
     /// MIMEs of the drag currently hovering our window
     hover_mimes: Vec<String>,
     /// accepted drops being read from their pipes
     pending: Vec<PendingRead>,
-    ev_tx: EventSender,
-}
-
-/// xdg_positioner userdata: the positioner has no events, but
-/// wayland-client still wants a Dispatch impl — a local type keeps it
-/// off the delegate_dispatch2 blanket (and the orphan rule blocks
-/// implementing sctk's Dispatch2 for sctk's GlobalData).
-struct PosData;
-
-impl<D> smithay_client_toolkit::dispatch2::Dispatch2<
-    smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_positioner::XdgPositioner,
-    D,
-> for PosData
-{
-    fn event(
-        &self,
-        _: &mut D,
-        _: &smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_positioner::XdgPositioner,
-        _: smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_positioner::Event,
-        _: &Connection,
-        _: &QueueHandle<D>,
-    ) {
-    }
-}
-
-/// Copy menu pixels into a fresh buffer on the popup surface (new
-/// slot every paint; the compositor may hold the previous one).
-fn commit_popup_pixels(pool: &mut SlotPool, popup: &mut PopupState, visual: DragVisual) {
-    let (w, h) = (visual.width.max(1), visual.height.max(1));
-    let Ok((buffer, canvas)) = pool.create_buffer(
-        w as i32,
-        h as i32,
-        w as i32 * 4,
-        wayland_client::protocol::wl_shm::Format::Argb8888,
-    ) else {
-        return;
-    };
-    let src = swizzle(&visual.pixels);
-    let Some(dst) = canvas.get_mut(..src.len()) else {
-        return;
-    };
-    dst.copy_from_slice(&src);
-    let surface = popup.popup.wl_surface();
-    surface.damage_buffer(0, 0, w as i32, h as i32);
-    if buffer.attach_to(surface).is_ok() {
-        surface.commit();
-    }
-}
-
-/// The icon assigned to our toplevel. The protocol requires the
-/// wl_buffers to stay alive and unmodified until the icon object is
-/// destroyed, so both are held here and only released together when a
-/// new icon replaces this one.
-struct ToplevelIconState {
-    /// held (never read) so the icon object stays alive until replaced
-    _icon: XdgToplevelIconV1,
-    _buffers: Vec<Buffer>,
-}
-
-/// An open xdg_popup hosting an off-window menu.
-struct PopupState {
-    popup: smithay_client_toolkit::shell::xdg::popup::Popup,
-    /// pixels waiting for the first configure before they can attach
-    pending: Option<DragVisual>,
-    /// popup-local -> model-logical factor (hover hit-testing)
-    to_model: f32,
-    /// 1:1 buffer mapping on fractional-capable compositors
-    viewport: Option<WpViewport>,
-}
-
-impl Drop for PopupState {
-    fn drop(&mut self) {
-        if let Some(vp) = &self.viewport {
-            vp.destroy();
-        }
-    }
+    pub(crate) ev_tx: EventSender,
 }
 
 struct PendingRead {
@@ -643,134 +503,8 @@ impl State {
                     self.ensure_icon(qh, &visual);
                 }
             }
-            Cmd::OpenPopup {
-                painted,
-                system,
-                visual,
-            } => {
-                // replace any open popup
-                self.popup = None;
-                let anchor = (self.ptr_pos.0.round() as i32, self.ptr_pos.1.round() as i32);
-                let pos = self.xdg.xdg_wm_base().create_positioner(qh, PosData);
-                let (w, h) = (visual.width.max(1) as i32, visual.height.max(1) as i32);
-                // logical size/anchor: the parent surface-local space,
-                // i.e. the COMPOSITOR's coordinate system (1 unit =
-                // 1/system physical px). The buffer holds `painted` px
-                // per model unit, so it maps 1 physical px per buffer
-                // px (crisp, same on-screen size as the window
-                // content) only when the unit is `system`:
-                //     surface-local = buffer / system
-                //     to_model      = system / painted
-                // Without `--dpi` painted == system and this reduces to
-                // the model size. On integer-only compositors (no
-                // fractional globals) fall back to the plain
-                // buffer-scale chain, which matches the parent's
-                // truncated integer scale.
-                let painted = painted.max(1.0);
-                let system = system.max(1.0);
-                let fractional = self.fractional.is_some();
-                let (ls, unit) = if fractional {
-                    (system.ceil().max(1.0) as i32, system)
-                } else {
-                    let ls = painted.ceil().max(1.0) as i32;
-                    (ls, ls as f32)
-                };
-                let (pw, ph) = (
-                    (w as f32 / unit).round().max(1.0) as i32,
-                    (h as f32 / unit).round().max(1.0) as i32,
-                );
-                pos.set_size(pw, ph);
-                pos.set_anchor_rect(anchor.0, anchor.1, 1, 1);
-                use smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_positioner::{
-                    Anchor, ConstraintAdjustment, Gravity,
-                };
-                pos.set_anchor(Anchor::TopLeft);
-                // the surface is placed TOWARDS the gravity: bottom_right
-                // puts the menu's top-left at the cursor (extends
-                // down-right); the constraint adjustment flips it at
-                // screen edges
-                pos.set_gravity(Gravity::BottomRight);
-                // let the compositor flip/slide the menu to stay on screen
-                pos.set_constraint_adjustment(
-                    ConstraintAdjustment::FlipX
-                        | ConstraintAdjustment::FlipY
-                        | ConstraintAdjustment::SlideX
-                        | ConstraintAdjustment::SlideY,
-                );
-                use smithay_client_toolkit::shell::xdg::XdgSurface as _;
-                if let Ok(popup) = smithay_client_toolkit::shell::xdg::popup::Popup::new(
-                    self.parent.xdg_surface(),
-                    &pos,
-                    qh,
-                    &self.compositor,
-                    &self.xdg,
-                ) {
-                    popup.wl_surface().set_buffer_scale(ls);
-                    let viewport = fractional.then(|| {
-                        let vp = self
-                            .fractional
-                            .as_ref()
-                            .expect("fractional globals")
-                            .1
-                            .get_viewport(popup.wl_surface(), qh, ());
-                        vp.set_destination(pw.max(1), ph.max(1));
-                        vp
-                    });
-                    let to_model = unit / painted;
-                    self.popup = Some(PopupState {
-                        popup,
-                        pending: Some(visual),
-                        to_model,
-                        viewport,
-                    });
-                }
-                pos.destroy();
-            }
-            Cmd::UpdatePopup(visual) => {
-                if let Some(p) = &mut self.popup {
-                    commit_popup_pixels(&mut self.popup_pool, p, visual);
-                }
-            }
-            Cmd::ClosePopup => {
-                self.popup = None;
-            }
-            Cmd::SetIcon(payload) => {
-                let Some(mgr) = &self.icon_mgr else {
-                    return;
-                };
-                // buffers must be SQUARE (protocol invalid_buffer error);
-                // the GUI guarantees width == height. A fresh icon object
-                // per change: an icon is immutable once set on a toplevel.
-                let mut buffers = Vec::with_capacity(payload.sizes.len());
-                let icon = mgr.create_icon(qh, ());
-                for size in &payload.sizes {
-                    let (w, h) = (size.visual.width.max(1), size.visual.height.max(1));
-                    let Ok((buffer, canvas)) = self.toplevel_pool.create_buffer(
-                        w as i32,
-                        h as i32,
-                        w as i32 * 4,
-                        wayland_client::protocol::wl_shm::Format::Argb8888,
-                    ) else {
-                        icon.destroy();
-                        return;
-                    };
-                    let src = swizzle(&size.visual.pixels);
-                    let Some(dst) = canvas.get_mut(..src.len()) else {
-                        icon.destroy();
-                        return;
-                    };
-                    dst.copy_from_slice(&src);
-                    icon.add_buffer(buffer.wl_buffer(), size.scale.max(1));
-                    buffers.push(buffer);
-                }
-                mgr.set_icon(&self.toplevel, Some(&icon));
-                // applied on the toplevel's next commit (winit redraws);
-                // only now may the replaced icon (and its buffers) die
-                self.toplevel_icon = Some(ToplevelIconState {
-                    _icon: icon,
-                    _buffers: buffers,
-                });
-            }
+            Cmd::Popup(c) => crate::popup_wayland::apply(self, c, qh),
+            Cmd::Icon(c) => crate::icon_wayland::apply(self, c, qh),
         }
     }
 
@@ -831,7 +565,7 @@ impl State {
 }
 
 /// RGBA -> BGRA (in place copy).
-fn swizzle(rgba: &[u8]) -> Vec<u8> {
+pub(crate) fn swizzle(rgba: &[u8]) -> Vec<u8> {
     let (chunks, _) = rgba.as_chunks::<4>();
     let mut out = Vec::with_capacity(rgba.len());
     for px in chunks {
@@ -949,21 +683,7 @@ impl PointerHandler for State {
             // menu popup input (the popup is our client's surface, so
             // our pointer binding receives its events while the grab
             // lasts; the main window never sees them)
-            if let Some(p) = &self.popup
-                && &e.surface == p.popup.wl_surface()
-            {
-                // popup-local -> model-logical for hit-testing
-                let f = p.to_model;
-                let (x, y) = (e.position.0 as f32 * f, e.position.1 as f32 * f);
-                match e.kind {
-                    Motion { .. } => {
-                        let _ = self.ev_tx.unbounded_send(Event::PopupMotion { x, y });
-                    }
-                    Press { button, .. } if button == BTN_LEFT => {
-                        let _ = self.ev_tx.unbounded_send(Event::PopupPress { x, y });
-                    }
-                    _ => {}
-                }
+            if crate::popup_wayland::on_pointer(self, e) {
                 continue;
             }
             match e.kind {
@@ -979,39 +699,12 @@ impl PointerHandler for State {
                         // a press on the main window while the popup is
                         // open is an outside click (popup_done is not
                         // guaranteed on all compositors)
-                        if self.popup.is_some() {
-                            self.popup = None;
-                            let _ = self.ev_tx.unbounded_send(Event::PopupDone);
-                        }
+                        crate::popup_wayland::dismiss(self);
                         self.last_serial = serial;
                     }
                 }
                 _ => {}
             }
-        }
-    }
-}
-
-impl smithay_client_toolkit::shell::xdg::popup::PopupHandler for State {
-    fn configure(
-        &mut self,
-        _: &Connection,
-        _: &QueueHandle<Self>,
-        _: &smithay_client_toolkit::shell::xdg::popup::Popup,
-        _: smithay_client_toolkit::shell::xdg::popup::PopupConfigure,
-    ) {
-        // first configure: attach the waiting pixels
-        if let Some(p) = &mut self.popup
-            && let Some(visual) = p.pending.take()
-        {
-            commit_popup_pixels(&mut self.popup_pool, p, visual);
-        }
-    }
-
-    fn done(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &smithay_client_toolkit::shell::xdg::popup::Popup) {
-        if self.popup.is_some() {
-            self.popup = None;
-            let _ = self.ev_tx.unbounded_send(Event::PopupDone);
         }
     }
 }
@@ -1047,11 +740,7 @@ impl smithay_client_toolkit::seat::keyboard::KeyboardHandler for State {
         _: u32,
         event: smithay_client_toolkit::seat::keyboard::KeyEvent,
     ) {
-        if self.popup.is_some() {
-            let _ = self.ev_tx.unbounded_send(Event::PopupKey {
-                keysym: event.keysym.raw(),
-            });
-        }
+        crate::popup_wayland::on_key(self, event.keysym.raw());
     }
 
     fn repeat_key(
@@ -1201,29 +890,14 @@ impl ShmHandler for State {
 delegate_registry!(State);
 wayland_client::delegate_noop!(State: WpFractionalScaleManagerV1);
 wayland_client::delegate_noop!(State: WpViewporter);
-// the icon manager's icon_size/done hints are optional preferences —
-// we ship fixed 64/128px sizes, so the events are parsed and dropped
-// (delegate_noop! is unusable here: it panics on interfaces WITH events)
-impl wayland_client::Dispatch<XdgToplevelIconManagerV1, ()> for State {
-    fn event(
-        _: &mut State,
-        _: &XdgToplevelIconManagerV1,
-        _: <XdgToplevelIconManagerV1 as wayland_client::Proxy>::Event,
-        _: &(),
-        _: &Connection,
-        _: &QueueHandle<State>,
-    ) {
-    }
-}
-wayland_client::delegate_noop!(State: XdgToplevelIconV1);
 // wp_viewport has no events; the dispatch2 blanket (below) needs this
 // for the () user data attached at get_viewport
-impl smithay_client_toolkit::dispatch2::Dispatch2<WpViewport, State> for () {
+impl smithay_client_toolkit::dispatch2::Dispatch2<smithay_client_toolkit::reexports::protocols::wp::viewporter::client::wp_viewport::WpViewport, State> for () {
     fn event(
         &self,
         _: &mut State,
-        _: &WpViewport,
-        _: <WpViewport as wayland_client::Proxy>::Event,
+        _: &smithay_client_toolkit::reexports::protocols::wp::viewporter::client::wp_viewport::WpViewport,
+        _: <smithay_client_toolkit::reexports::protocols::wp::viewporter::client::wp_viewport::WpViewport as wayland_client::Proxy>::Event,
         _: &wayland_client::Connection,
         _: &wayland_client::QueueHandle<State>,
     ) {
@@ -1376,32 +1050,6 @@ pub fn paint_drag_visual(
     }
 }
 
-/// Paint the toplevel (taskbar/window-switcher) icon: the location icon
-/// centered on a transparent SQUARE canvas at each wl scale — the
-/// protocol only accepts square shm buffers. Two sizes cover common
-/// taskbars (16-32px at scale 1, hidpi at scale 2).
-pub fn paint_toplevel_icon(name: &str, skin: &crate::theme::Palette) -> ToplevelIcon {
-    let sizes = [(1, 64), (2, 128)]
-        .into_iter()
-        .map(|(scale, px)| {
-            let icon = crate::icon::raster(name, px, skin);
-            let mut visual = DragVisual {
-                width: px,
-                height: px,
-                pixels: vec![0; (px * px * 4) as usize],
-            };
-            let mut cv = Canvas {
-                px: &mut visual.pixels,
-                w: px,
-                h: px,
-            };
-            cv.blend_icon(1.0, 0.0, 0.0, px as f32, &icon, 255);
-            IconSize { scale, visual }
-        })
-        .collect();
-    ToplevelIcon { sizes }
-}
-
 fn icon_pix(skin: &crate::theme::Palette, is_dir: bool, name: &str, size: f32) -> crate::icon::IconPix {
     crate::icon::raster_for(is_dir, name, size.round().max(1.0) as u32, skin)
 }
@@ -1415,7 +1063,8 @@ fn raster_svg_str(svg: &str, size: f32) -> crate::icon::IconPix {
 }
 
 // --- tiny raster helpers (all coordinates physical px unless *scale) ---
-// pub(crate): shared with the off-window menu painter (menu popup)
+// pub(crate): shared with the off-window menu painter (menu.rs) and the
+// toplevel-icon painter (icon_wayland.rs)
 
 pub(crate) fn rgba255(c: iced::Color) -> [u8; 4] {
     [

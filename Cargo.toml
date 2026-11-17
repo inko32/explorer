@@ -27,11 +27,13 @@ serde_yaml = "0.9"  # ribbon.yaml parsing (D12)
 resvg = { version = "0.48", default-features = false, features = ["raster-images"] }
 libloading = "0.9"  # dlopen 7z.so for the native archive backend (D16)
 fontdb = "0.24"  # system font probing for the fonts.yaml fallback list (already in the tree via cosmic-text)
-# --- Wayland DnD side-channel (src/dnd_wayland.rs) -------------------------
-# winit/iced have no Wayland data-device; the side-channel thread wraps
-# winit's connection (via the raw handles from deps/iced-raw-handle.patch)
-# and drives wl_data_device itself. All of these are already in the
-# cargo tree (sctk via winit, cosmic-text via iced, image via iced).
+# --- Wayland side-channel (src/dnd_wayland.rs + popup_wayland.rs +
+# --- icon_wayland.rs + raw_handle_wayland.rs; see deps/iced-raw-handle.md)
+# winit/iced have no Wayland data-device, xdg_popup hosting, or toplevel
+# icon; the side-channel thread wraps winit's connection (via the raw
+# handles from deps/iced-raw-handle.patch) and drives wl_data_device,
+# xdg_popup and xdg_toplevel_icon_v1 itself. All of these are already in
+# the cargo tree (sctk via winit, cosmic-text via iced, image via iced).
 smithay-client-toolkit = "=0.21.1"
 wayland-protocols = { version = "0.32", features = ["staging"] }  # xdg-toplevel-icon-v1 (taskbar icon); staging is already on via sctk
 wayland-client = "0.31"
