@@ -28,6 +28,8 @@ impl Explorer {
     /// current folder (snapped to the enabled mask); unknown folders use
     /// the default.
     pub(crate) fn restore_folder_view(&mut self) {
+        // the data-column highlight is Details-only state
+        self.detail_col_focus = None;
         let stored = self.folder_views.get(&self.cwd).copied();
         self.view_index = self
             .view_cfg
@@ -46,6 +48,8 @@ impl Explorer {
     /// also discards an in-flight gallery hover preview.
     pub(crate) fn set_view_index(&mut self, index: u8) -> iced::Task<Message> {
         self.preview_view = None;
+        // the data-column highlight is Details-only state
+        self.detail_col_focus = None;
         let index = self.view_cfg.nearest_enabled(index);
         // persist even when the preview already shows this step
         self.folder_views.insert(self.cwd.clone(), index);
@@ -202,6 +206,9 @@ impl Explorer {
     /// collapse on release) — see PressArm in model/dnd.rs.
     pub(crate) fn select_press(&mut self, i: usize) -> Task<Message> {
         self.active_pane = crate::model::Pane::Folder;
+        // a manual click releases the data-column highlight (keyboard
+        // releases go through the arrow keys)
+        self.detail_col_focus = None;
         if i >= self.entries.len() {
             return Task::none();
         }
@@ -266,6 +273,27 @@ impl Explorer {
             return Task::none();
         }
         self.active_pane = crate::model::Pane::Folder;
+        // Details: while the idle selector is shown (or a selection
+        // exists), Left/Right walk the data-column highlight across
+        // the focused row — a no-function selector that lets keyboard
+        // users scroll wide columns into view. It never touches the
+        // idle selector's visibility or the selection. Up/Down keep
+        // the highlighted column and move normally: the highlight
+        // follows the focus to the next line, like a click on another
+        // row (only a mouse press or the Menu key releases it).
+        let details = self.view_cfg.family(self.view_index) == vs::Family::Details;
+        if !details {
+            self.detail_col_focus = None;
+        }
+        if details && matches!(dir, FocusDir::Left | FocusDir::Right) {
+            if self.focus_shown || !self.selected.is_empty() {
+                return self.detail_col_step(dir == FocusDir::Right);
+            }
+            // nothing shown yet: reveal the idle selector only (a
+            // rectangle-only move) — Left/Right must never select
+            self.focus_shown = true;
+            return Task::none();
+        }
         let next = self.neighbor(self.focus_or_default(), dir).unwrap_or_else(|| self.focus_or_default());
         self.focus_item = Some(next);
         self.focus_shown = true;
@@ -279,6 +307,79 @@ impl Explorer {
             self.sel_anchor = Some(next);
         }
         self.scroll_item_into_view(next)
+    }
+
+    /// Left/Right step of the Details data-column highlight: engage
+    /// past the leftmost visible column, then walk right/left, clamped
+    /// at both ends. The column strip scrolls so the highlighted
+    /// column stays fully visible (the point of the selector).
+    /// Position 0 (the leftmost visible column, whatever the header
+    /// order) is never drawn: the whole idle selector covers it.
+    fn detail_col_step(&mut self, right: bool) -> Task<Message> {
+        let vis: Vec<usize> = self
+            .details_col_order
+            .iter()
+            .copied()
+            .filter(|&g| self.details_col_on.get(g).copied().unwrap_or(true))
+            .collect();
+        if vis.is_empty() {
+            return Task::none();
+        }
+        let cur = self.detail_col_focus.unwrap_or(0).min(vis.len() - 1);
+        let next = if self.detail_col_focus.is_none() {
+            // engage: Right jumps past the leftmost column — position
+            // 0 IS the whole idle selector, already on screen (Left
+            // engages there by stepping down to it)
+            (if right { 1 } else { 0 }).min(vis.len() - 1)
+        } else if right {
+            (cur + 1).min(vis.len() - 1)
+        } else {
+            cur.saturating_sub(1)
+        };
+        self.detail_col_focus = Some(next);
+        self.scroll_detail_col_into_view(vis[next])
+    }
+
+    /// Scroll the outer Details column strip so column `col` (index
+    /// into `detail_cfg.columns`) is fully visible horizontally.
+    /// Mirrors `scroll_item_into_view`'s clamp: an instant scroll_to
+    /// stores the offset unclamped, which would leave scroll_x ahead
+    /// of the real viewport.
+    fn scroll_detail_col_into_view(&mut self, col: usize) -> Task<Message> {
+        // the column's content-x range: the files margin, then every
+        // visible column before it plus its resizer (§13/§15)
+        let mut x = self.detail_cfg.files_left;
+        for &g in &self.details_col_order {
+            if !self.details_col_on.get(g).copied().unwrap_or(true) {
+                continue;
+            }
+            if g == col {
+                break;
+            }
+            x += self.details_col_w(g) + crate::folder::COL_RESIZER_W;
+        }
+        let w = self.details_col_w(col);
+        let pane_w = self.file_pane_width();
+        let max = (self.details_natural_w() - pane_w).max(0.0);
+        let mut target = self.scroll_x;
+        if x < self.scroll_x {
+            target = x;
+        } else if x + w > self.scroll_x + pane_w {
+            target = x + w - pane_w;
+        }
+        target = target.clamp(0.0, max);
+        if (target - self.scroll_x).abs() < 0.5 {
+            return Task::none();
+        }
+        self.scroll_x = target;
+        iced::widget::operation::scrollable::scroll_to(
+            crate::folder::details_h_scrollable_id(),
+            iced::widget::operation::scrollable::AbsoluteOffset {
+                x: Some(target),
+                y: None,
+            },
+            iced::widget::operation::Animation::Instant,
+        )
     }
 
     /// Space toggles the idle-selected item (the Windows checkbox
@@ -1289,5 +1390,114 @@ mod focus_tests {
         assert!((m.y1 - (m.py + e.scroll_y)).abs() < 0.01);
         // row 1 sat below the old corner; it joins once the corner tracks
         assert!(e.selected.contains(&1));
+    }
+
+    #[test]
+    fn details_right_engages_the_column_highlight_without_touching_selection() {
+        let mut e = explorer(5);
+        e.view_index = e.view_cfg.presets.details;
+        // no idle selector shown, no selection: Right reveals the idle
+        // selector only — it must NOT select the item, and the
+        // highlight is not engaged yet
+        assert!(!e.focus_shown);
+        let _ = e.update(Message::FocusMove(FocusDir::Right));
+        assert!(e.focus_shown);
+        assert_eq!(e.detail_col_focus, None);
+        assert!(e.selected.is_empty());
+        // now engaged: Right jumps straight to the first highlight
+        // past the leftmost column (position 0 IS the whole idle
+        // selector — already on screen), leaving the idle selector
+        // and the selection alone
+        let _ = e.update(Message::FocusMove(FocusDir::Right));
+        assert_eq!(e.detail_col_focus, Some(1));
+        assert!(e.selected.is_empty());
+        assert!(e.focus_shown);
+        let _ = e.update(Message::FocusMove(FocusDir::Right));
+        assert_eq!(e.detail_col_focus, Some(2));
+        // …and Left walks it back; reaching the leftmost column puts
+        // the whole idle selector back (position 0, never drawn)
+        let _ = e.update(Message::FocusMove(FocusDir::Left));
+        assert_eq!(e.detail_col_focus, Some(1));
+        let _ = e.update(Message::FocusMove(FocusDir::Left));
+        assert_eq!(e.detail_col_focus, Some(0));
+        let _ = e.update(Message::FocusMove(FocusDir::Left));
+        assert_eq!(e.detail_col_focus, Some(0), "clamped at the first column");
+    }
+
+    #[test]
+    fn details_column_highlight_releases_on_a_mouse_press() {
+        let mut e = explorer(5);
+        e.view_index = e.view_cfg.presets.details;
+        e.focus_shown = true;
+        let _ = e.update(Message::FocusMove(FocusDir::Right));
+        assert_eq!(e.detail_col_focus, Some(1));
+        // a manual click on another row releases the highlight (the
+        // plain click also selects the pressed row as usual)
+        let _ = e.update(Message::Select(3));
+        assert_eq!(e.detail_col_focus, None);
+        assert_eq!(e.focus_item, Some(3));
+        // …and so does a free-space (marquee) press
+        let _ = e.update(Message::FocusMove(FocusDir::Right));
+        assert_eq!(e.detail_col_focus, Some(1));
+        let _ = e.update(Message::MarqueeBegin { x: 5.0, y: 5.0 });
+        assert_eq!(e.detail_col_focus, None);
+    }
+
+    #[test]
+    fn details_column_highlight_walks_to_the_last_column_and_clamps() {
+        let mut e = explorer(5);
+        e.view_index = e.view_cfg.presets.details;
+        e.focus_shown = true;
+        let vis = e
+            .details_col_order
+            .iter()
+            .filter(|&&g| e.details_col_on.get(g).copied().unwrap_or(true))
+            .count();
+        assert!(vis >= 2);
+        for _ in 0..vis + 2 {
+            let _ = e.update(Message::FocusMove(FocusDir::Right));
+        }
+        assert_eq!(e.detail_col_focus, Some(vis - 1), "clamped at the last column");
+    }
+
+    #[test]
+    fn details_column_highlight_follows_vertical_moves() {
+        let mut e = explorer(5);
+        e.view_index = e.view_cfg.presets.details;
+        e.focus_shown = true;
+        let _ = e.update(Message::FocusMove(FocusDir::Right));
+        assert_eq!(e.detail_col_focus, Some(1));
+        // Down moves like a plain idle move (the selection follows)
+        // and KEEPS the column: the highlight follows to the next line
+        let _ = e.update(Message::FocusMove(FocusDir::Down));
+        assert_eq!(e.detail_col_focus, Some(1));
+        assert_eq!(e.focus_item, Some(1));
+        assert!(e.selected.contains(&1));
+        // Ctrl+Down likewise keeps the column (rectangle-only move)
+        e.ctrl_held = true;
+        let _ = e.update(Message::FocusMove(FocusDir::Down));
+        assert_eq!(e.detail_col_focus, Some(1));
+        assert_eq!(e.focus_item, Some(2));
+        assert!(e.selected.contains(&1), "Ctrl+Down moves the rectangle only");
+        e.ctrl_held = false;
+        // the highlight now sits on line two's same column; Up walks
+        // back the same way
+        let _ = e.update(Message::FocusMove(FocusDir::Up));
+        assert_eq!(e.detail_col_focus, Some(1));
+        assert_eq!(e.focus_item, Some(1));
+    }
+
+    #[test]
+    fn details_column_highlight_engages_over_a_selection() {
+        let mut e = explorer(5);
+        e.view_index = e.view_cfg.presets.details;
+        // a selection without a shown idle selector still engages,
+        // focused on the tracked item
+        e.selected.insert(3);
+        e.focus_item = Some(3);
+        let _ = e.update(Message::FocusMove(FocusDir::Right));
+        assert_eq!(e.detail_col_focus, Some(1));
+        assert_eq!(e.focus_item, Some(3));
+        assert_eq!(e.selected.iter().copied().collect::<Vec<_>>(), vec![3]);
     }
 }

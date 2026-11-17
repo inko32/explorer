@@ -68,6 +68,11 @@ pub struct Explorer {
     pub(crate) focus_item: Option<usize>,
     /// Whether the idle-selector border is shown.
     pub(crate) focus_shown: bool,
+    /// The Details data-column highlight (the keyboard Left/Right
+    /// selector on the focused row): an index into the VISIBLE column
+    /// list. Purely visual — no selection semantics; follows the focus
+    /// on Up/Down, released by a mouse press and the Menu key.
+    pub(crate) detail_col_focus: Option<usize>,
     pub hovered: Option<usize>,
     /// Hovered navigation tree row: the path plus a tag that is true
     /// when the hovered row is a Favorites shortcut (nav_pane uses it
@@ -326,6 +331,7 @@ impl Explorer {
             selected: Default::default(),
             focus_item: None,
             focus_shown: false,
+            detail_col_focus: None,
             hovered: None,
             nav_hover: None,
             nav_selected: None,
@@ -1245,6 +1251,10 @@ impl Explorer {
                 // only the rubber band reacts to the cursor
                 self.hovered = None;
                 self.col_hovered = None;
+                // a manual free-space press also releases the
+                // data-column highlight (keyboard releases go through
+                // the arrow keys)
+                self.detail_col_focus = None;
                 self.marquee = Some(Marquee {
                     x0: x,
                     y0: y,
@@ -1521,6 +1531,9 @@ impl Explorer {
                 iced::Task::none()
             }
             Message::MenuKey => {
+                // release the Details data-column highlight first:
+                // the menu belongs to the plain selection
+                self.detail_col_focus = None;
                 // keyboard Menu key: anchor at the first selected
                 // element's left-bottom corner; no selection = the
                 // background menu at the cursor
