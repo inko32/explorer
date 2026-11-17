@@ -16,6 +16,7 @@ mod fonts;
 mod fs;
 mod icon;
 mod icon_theme;
+mod icon_wayland;
 mod icons;
 mod menu;
 mod model;
@@ -27,6 +28,8 @@ mod nav_pane;
 mod perf;
 mod navigation;
 mod pane;
+mod popup_wayland;
+mod raw_handle_wayland;
 // Ribbon: the vendored rs-ribbon framework (Windows Ribbon Framework
 // re-implementation, vendor/rs-ribbon) + the explorer commanding layer
 // in ribbon.rs. The ribbon markup is assets/ribbon.yaml.

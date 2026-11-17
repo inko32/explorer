@@ -1046,7 +1046,7 @@ impl Explorer {
         } else {
             crate::ui_common::skin::light()
         };
-        h.set_icon(crate::dnd_wayland::paint_toplevel_icon(key.0, &skin));
+        h.set_icon(crate::icon_wayland::paint_toplevel_icon(key.0, &skin));
     }
 
     fn handle(&mut self, message: Message) -> iced::Task<Message> {
