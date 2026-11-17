@@ -1,0 +1,28 @@
+diff --git a/src/backends/wayland/buffer.rs b/src/backends/wayland/buffer.rs
+index 49e641f..3cfd17b 100644
+--- a/src/backends/wayland/buffer.rs
++++ b/src/backends/wayland/buffer.rs
+@@ -99,7 +99,11 @@ impl WaylandBuffer {
+             width,
+             height,
+             width * 4,
+-            wl_shm::Format::Xrgb8888,
++            // Argb8888, not Xrgb8888: the alpha byte is meaningful. iced's
++            // tiny-skia compositor presents through this buffer and the
++            // pixels are premultiplied argb already (see
++            // deps/softbuffer-argb.md).
++            wl_shm::Format::Argb8888,
+             qh,
+             released.clone(),
+         );
+@@ -139,7 +143,9 @@ impl WaylandBuffer {
+                 width,
+                 height,
+                 width * 4,
+-                wl_shm::Format::Xrgb8888,
++                // keep Argb8888 on resize (the pool regrows, the pixel
++                // format contract does not change)
++                wl_shm::Format::Argb8888,
+                 &self.qh,
+                 self.released.clone(),
+             );

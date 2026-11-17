@@ -38,6 +38,20 @@ ICED_PATCH   := $(CURDIR)/deps/iced-raw-handle.patch
 # is parsed before the CARGO_TARGET_DIR export below)
 ICED_OVERLAY := $(TMPROOT)/target/iced-overlay
 
+# --- local softbuffer overlay ----------------------------------------------
+# The translucent Win8.1 border (win81theme.yaml border_opacity < 1) needs
+# pixel alpha to reach the Wayland compositor. iced's tiny-skia (software)
+# compositor presents through softbuffer, whose Wayland backend hardcodes
+# wl_shm Xrgb8888 ("alpha ignored"), so the border composites opaque in
+# cpu-render mode. The buffer bytes are already premultiplied-argb-ready
+# (iced swaps R/B into tiny-skia; tiny-skia is premultiplied), so
+# relabeling the shm buffer Argb8888 is the whole fix — see
+# deps/softbuffer-argb.md. Same overlay pattern as iced above, but seeded
+# from the crates.io source and idempotency-checked via grep (no git).
+SB_VER     := 0.4.8
+SB_PATCH   := $(CURDIR)/deps/softbuffer-argb.patch
+SB_OVERLAY := $(TMPROOT)/target/softbuffer-overlay
+
 
 export CARGO_TARGET_DIR := $(TMPROOT)/target
 export CARGO_INCREMENTAL := 0
@@ -94,7 +108,32 @@ setup-iced:
 		exit 1; \
 	fi
 
-setup-env: setup-iced
+.PHONY: setup-softbuffer
+setup-softbuffer:
+	@if [ ! -d $(SB_OVERLAY)/src ]; then \
+		cache=$$(echo $(CARGO_HOME)/registry/src/*/softbuffer-$(SB_VER)); \
+		if [ -d "$$cache" ]; then \
+			echo "==> seeding softbuffer overlay from cargo cache"; \
+			mkdir -p $(SB_OVERLAY); \
+			cp -a "$$cache"/. $(SB_OVERLAY)/; \
+		else \
+			echo "==> ERROR: softbuffer $(SB_VER) not in cargo cache (fetch deps first)"; \
+			exit 1; \
+		fi; \
+	fi
+	@chmod -R u+w $(SB_OVERLAY)
+	@if grep -q 'wl_shm::Format::Argb8888' $(SB_OVERLAY)/src/backends/wayland/buffer.rs 2>/dev/null; then \
+		echo "==> softbuffer overlay already patched"; \
+	elif git -C $(SB_OVERLAY) apply --check $(SB_PATCH) 2>/dev/null; then \
+		git -C $(SB_OVERLAY) apply $(SB_PATCH); \
+		echo "==> applied deps/softbuffer-argb.patch"; \
+	else \
+		echo "==> ERROR: softbuffer patch does not apply to $(SB_VER)"; \
+		echo "==> bump SB_VER or refresh deps/softbuffer-argb.patch"; \
+		exit 1; \
+	fi
+
+setup-env: setup-iced setup-softbuffer
 	@ln -sf $(CARGO_TARGET_DIR) target
 	@mkdir -p $(CARGO_HOME) $(RUSTUP_HOME)
 	@if ! rustup toolchain list --no-self-update 2>/dev/null | grep -q "$(TOOLCHAIN)"; then \
