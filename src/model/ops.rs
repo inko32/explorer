@@ -1,8 +1,6 @@
-//! File-operation update logic: clipboard (copy/cut/paste), delete,
-//! inline rename and the recursive copy helper used by the ribbon
-//! "Copy to" command. The `handle` match delegates here.
-
-use std::path::Path;
+//! File-operation update logic: clipboard (copy/cut/paste), delete and
+//! inline rename. All real filesystem work goes through `Job`s handled
+//! on the fs worker thread (src/fs). The `handle` match delegates here.
 
 use crate::fs::Job;
 
@@ -79,25 +77,5 @@ impl Explorer {
             let to = from.with_file_name(&name);
             self.sched.send(Job::Rename(from, to));
         }
-    }
-}
-
-/// Recursive copy (files + dirs); true on success.
-pub(crate) fn copy_rec(src: &Path, dst: &Path) -> bool {
-    if src.is_dir() {
-        if std::fs::create_dir_all(dst).is_err() {
-            return false;
-        }
-        let Ok(rd) = std::fs::read_dir(src) else {
-            return false;
-        };
-        for e in rd.flatten() {
-            if !copy_rec(&e.path(), &dst.join(e.file_name())) {
-                return false;
-            }
-        }
-        true
-    } else {
-        std::fs::copy(src, dst).is_ok()
     }
 }

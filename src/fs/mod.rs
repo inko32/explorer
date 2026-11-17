@@ -133,6 +133,8 @@ pub enum Job {
     Mkdir(PathBuf),
     Rename(PathBuf, PathBuf),
     Trash(Vec<PathBuf>),
+    /// Permanent delete, bypassing the trash.
+    DeletePermanent(Vec<PathBuf>),
     Copy { sources: Vec<PathBuf>, dest_dir: PathBuf, cut: bool },
     /// Create symlinks to `sources` inside `dest_dir`.
     Link { sources: Vec<PathBuf>, dest_dir: PathBuf },
@@ -147,6 +149,8 @@ pub enum FsEvent {
     DirCreated { parent: PathBuf, result: Result<String, String> },
     Renamed { result: Result<(), String> },
     Trashed { result: Result<(), String> },
+    /// Permanent delete finished.
+    Deleted { result: Result<(), String> },
     /// Symlink creation finished; Ok carries the created count.
     Linked { result: Result<usize, String> },
     /// Progress of the active file operation.
@@ -216,6 +220,23 @@ fn worker(backend: impl Backend, jobs: std::sync::mpsc::Receiver<Job>, tx: Event
                     }
                 }
                 let _ = tx.unbounded_send(FsEvent::Trashed { result });
+            }
+            Job::DeletePermanent(paths) => {
+                let mut result = Ok(());
+                for p in &paths {
+                    // dir trees need remove_dir_all; backend.remove
+                    // handles empty dirs and files only
+                    let r = if p.is_dir() {
+                        std::fs::remove_dir_all(p)
+                    } else {
+                        backend.remove(p).map_err(|e| std::io::Error::other(e.to_string()))
+                    };
+                    if let Err(e) = r {
+                        result = Err(format!("{}: {e}", p.display()));
+                        break;
+                    }
+                }
+                let _ = tx.unbounded_send(FsEvent::Deleted { result });
             }
             Job::Copy { sources, dest_dir, cut } => {
                 let result = copy_tree(&backend, &sources, &dest_dir, cut, &tx);
