@@ -75,8 +75,8 @@ all: build
 # 		echo "==> Adding target '$(TARGET)' for $(TOOLCHAIN)..."; \
 # 		rustup +$(TOOLCHAIN) target add $(TARGET); \
 # 	fi
-.PHONY: setup-iced
-setup-iced:
+.PHONY: seed-iced
+seed-iced:
 	@mkdir -p $(ICED_OVERLAY)
 	@if [ ! -d $(ICED_OVERLAY)/.git ]; then \
 		rev7=$$(echo $(ICED_REV) | cut -c1-7); \
@@ -96,6 +96,19 @@ setup-iced:
 		git -C $(ICED_OVERLAY) -c user.email=local@explorer -c user.name=explorer \
 			commit -qm "baseline: iced @ $(ICED_REV) (upstream)"; \
 	fi
+
+# --- manual patch toggle ----------------------------------------------------
+# Cargo.toml's [patch] section always points at the overlay, so switching
+# between patched/pristine only touches the overlay's working tree — no
+# Cargo.toml edits, no dependency re-resolution, and cargo rebuilds the
+# overlay crates on the next build either way.
+#   make patch-iced    apply deps/iced-raw-handle.patch (explorer builds:
+#                      raw Wayland handles, tiny-skia quad snap, and the
+#                      window::resize viewport sync)
+#   make unpatch-iced  revert the overlay to pristine upstream iced (used
+#                      to reproduce upstream bugs, e.g. demo/iced_resize)
+.PHONY: patch-iced
+patch-iced: seed-iced
 	@# apply the patch unless already applied
 	@if git -C $(ICED_OVERLAY) apply --check $(ICED_PATCH) 2>/dev/null; then \
 		git -C $(ICED_OVERLAY) apply $(ICED_PATCH); \
@@ -107,6 +120,23 @@ setup-iced:
 		echo "==> bump ICED_REV or refresh deps/iced-raw-handle.patch"; \
 		exit 1; \
 	fi
+
+.PHONY: unpatch-iced
+unpatch-iced: seed-iced
+	@# revert the overlay to pristine upstream unless already pristine
+	@if git -C $(ICED_OVERLAY) apply --reverse --check $(ICED_PATCH) 2>/dev/null; then \
+		git -C $(ICED_OVERLAY) apply --reverse $(ICED_PATCH); \
+		echo "==> iced overlay reverted to pristine upstream"; \
+	elif git -C $(ICED_OVERLAY) apply --check $(ICED_PATCH) 2>/dev/null; then \
+		echo "==> iced overlay is already pristine"; \
+	else \
+		echo "==> ERROR: overlay state matches neither the patch nor pristine"; \
+		echo "==> re-seed it: rm -rf $(ICED_OVERLAY) && make seed-iced"; \
+		exit 1; \
+	fi
+
+.PHONY: setup-iced
+setup-iced: patch-iced
 
 .PHONY: setup-softbuffer
 setup-softbuffer:
@@ -133,7 +163,7 @@ setup-softbuffer:
 		exit 1; \
 	fi
 
-setup-env: setup-iced setup-softbuffer
+setup-env: patch-iced setup-softbuffer
 	@ln -sf $(CARGO_TARGET_DIR) target
 	@mkdir -p $(CARGO_HOME) $(RUSTUP_HOME)
 	@if ! rustup toolchain list --no-self-update 2>/dev/null | grep -q "$(TOOLCHAIN)"; then \
