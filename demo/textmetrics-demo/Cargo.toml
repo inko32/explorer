@@ -1,0 +1,14 @@
+[package]
+name = "textmetrics"
+version = "0.1.0"
+edition = "2024"
+description = "Demo: precise text measurement, wrapping, and ellipsis with iced/cosmic-text"
+license = "MIT"
+
+[dependencies]
+# same pinned rev as the explorer spike, but tiny-skia only: fast build,
+# full text support, no GPU dependency
+iced = { git = "https://github.com/iced-rs/iced", rev = "b2fbd3cb6289603f8cbbb2387a5242231f509d13", default-features = false, features = ["tiny-skia", "wayland", "thread-pool", "advanced"] }
+
+[profile.release]
+debug = false

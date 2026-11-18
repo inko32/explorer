@@ -1,0 +1,20 @@
+[package]
+name = "iced_resize"
+version = "0.1.0"
+edition = "2024"
+description = "Repro: window::resize on Wayland leaves iced's viewport stale"
+license = "MIT"
+
+[dependencies]
+iced = { git = "https://github.com/iced-rs/iced", rev = "e5c350f271a8046f875c6662d452fde9e462d486", default-features = false, features = ["tiny-skia", "wayland", "thread-pool"] }
+
+# The [patch] section always points at the demo's own iced overlay (seeded
+# into target/iced-overlay by the Makefile from the explorer overlay).
+# `make patch-iced` applies deps/iced-resize-viewport-sync.patch on it,
+# `make unpatch-iced` reverts it to pristine upstream — cargo rebuilds the
+# overlay crates either way.
+[patch."https://github.com/iced-rs/iced"]
+iced = { path = "target/iced-overlay" }
+
+[profile.release]
+debug = false
