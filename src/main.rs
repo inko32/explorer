@@ -11,6 +11,7 @@ mod commands;
 mod dnd;
 mod dnd_wayland;
 mod details_view;
+mod file_ops_ui;
 mod folder;
 mod fonts;
 mod fs;
@@ -111,6 +112,45 @@ fn marquee_tick_stream() -> impl iced::futures::Stream<Item = ()> {
 }
 
 fn main() -> iced::Result {
+    // File-operation dialogs (progress / conflicts / delete / shortcut)
+    // run as a separate process for stability: `explorer --fileop=<base64>`
+    // (or `--fileop demo` for the scripted /tmp sandbox session). Scan
+    // ALL args first (a `--render` may sit before or after `--fileop`),
+    // then hand off; the child honors --render/--dpi just like the shell.
+    {
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        let mut fileop: Option<String> = None;
+        let mut i = 0;
+        while i < args.len() {
+            match args[i].as_str() {
+                "--fileop" => {
+                    eprintln!("--fileop expects a value: 'demo' or a base64 payload");
+                    std::process::exit(2);
+                }
+                "--render" if i + 1 < args.len() => {
+                    i += 1;
+                    set_renderer(&args[i]);
+                }
+                "--dpi" if i + 1 < args.len() => {
+                    i += 1;
+                    set_dpi(&args[i]);
+                }
+                v => {
+                    if let Some(value) = v.strip_prefix("--fileop=") {
+                        fileop = Some(value.to_string());
+                    } else if let Some(value) = v.strip_prefix("--render=") {
+                        set_renderer(value);
+                    } else if let Some(value) = v.strip_prefix("--dpi=") {
+                        set_dpi(value);
+                    }
+                }
+            }
+            i += 1;
+        }
+        if let Some(payload) = fileop {
+            return file_ops_ui::run(&payload);
+        }
+    }
     // Renderer selection (D17): GPU (wgpu) is primary, CPU (tiny-skia) is the
     // reserved fallback — both are compiled in and picked at startup.
     //   explorer             -> wgpu, auto-fallback to tiny-skia if GPU init fails

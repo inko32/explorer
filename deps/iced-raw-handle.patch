@@ -34,52 +34,6 @@ index e5ecb756b..ba5c8b6ec 100644
  /// Begins dragging the window while the left mouse button is held.
  pub fn drag<T>(id: Id) -> Task<T> {
      task::effect(crate::Action::Window(Action::Drag(id)))
-diff --git a/winit/src/lib.rs b/winit/src/lib.rs
-index 88eaec45b..430bad7f8 100644
---- a/winit/src/lib.rs
-+++ b/winit/src/lib.rs
-@@ -1366,6 +1366,41 @@ fn run_action<'a, P, C>(
- 
-                 let _ = channel.send(id);
-             }
-+            window::Action::GetRawHandle(id, channel) => {
-+                use winit::raw_window_handle::{
-+                    HasDisplayHandle, HasWindowHandle, RawDisplayHandle,
-+                    RawWindowHandle,
-+                };
-+
-+                let handles = window_manager.get_mut(id).and_then(|window| {
-+                    let surface = match window.raw.window_handle().ok()?.as_raw() {
-+                        RawWindowHandle::Wayland(handle) => handle.surface.as_ptr() as usize,
-+                        _ => return None,
-+                    };
-+
-+                    let display = match window.raw.display_handle().ok()?.as_raw() {
-+                        RawDisplayHandle::Wayland(handle) => handle.display.as_ptr() as usize,
-+                        _ => return None,
-+                    };
-+
-+                    // the xdg_toplevel (popup parent) — only this winit
-+                    // fork's Wayland extension exposes it
-+                    #[allow(unused_mut)]
-+                    let mut toplevel = 0usize;
-+                    #[cfg(feature = "wayland")]
-+                    {
-+                        use winit::platform::wayland::WindowExtWayland as _;
-+
-+                        if let Some(ptr) = window.raw.xdg_toplevel() {
-+                            toplevel = ptr.as_ptr() as usize;
-+                        }
-+                    }
-+
-+                    Some((surface, display, toplevel))
-+                });
-+
-+                let _ = channel.send(handles);
-+            }
-             window::Action::Drag(id) => {
-                 if let Some(window) = window_manager.get_mut(id) {
-                     let _ = window.raw.drag_window();
 diff --git a/tiny_skia/src/engine.rs b/tiny_skia/src/engine.rs
 index bb8dcad36..a753e6bba 100644
 --- a/tiny_skia/src/engine.rs
@@ -126,3 +80,116 @@ index bb8dcad36..a753e6bba 100644
          let physical_bounds = quad.bounds * transformation;
  
          if !clip_bounds.intersects(&physical_bounds) {
+diff --git a/winit/src/lib.rs b/winit/src/lib.rs
+index 88eaec45b..9ab868184 100644
+--- a/winit/src/lib.rs
++++ b/winit/src/lib.rs
+@@ -1366,6 +1366,41 @@ fn run_action<'a, P, C>(
+ 
+                 let _ = channel.send(id);
+             }
++            window::Action::GetRawHandle(id, channel) => {
++                use winit::raw_window_handle::{
++                    HasDisplayHandle, HasWindowHandle, RawDisplayHandle,
++                    RawWindowHandle,
++                };
++
++                let handles = window_manager.get_mut(id).and_then(|window| {
++                    let surface = match window.raw.window_handle().ok()?.as_raw() {
++                        RawWindowHandle::Wayland(handle) => handle.surface.as_ptr() as usize,
++                        _ => return None,
++                    };
++
++                    let display = match window.raw.display_handle().ok()?.as_raw() {
++                        RawDisplayHandle::Wayland(handle) => handle.display.as_ptr() as usize,
++                        _ => return None,
++                    };
++
++                    // the xdg_toplevel (popup parent) — only this winit
++                    // fork's Wayland extension exposes it
++                    #[allow(unused_mut)]
++                    let mut toplevel = 0usize;
++                    #[cfg(feature = "wayland")]
++                    {
++                        use winit::platform::wayland::WindowExtWayland as _;
++
++                        if let Some(ptr) = window.raw.xdg_toplevel() {
++                            toplevel = ptr.as_ptr() as usize;
++                        }
++                    }
++
++                    Some((surface, display, toplevel))
++                });
++
++                let _ = channel.send(handles);
++            }
+             window::Action::Drag(id) => {
+                 if let Some(window) = window_manager.get_mut(id) {
+                     let _ = window.raw.drag_window();
+@@ -1380,13 +1415,23 @@ fn run_action<'a, P, C>(
+             }
+             window::Action::Resize(id, size) => {
+                 if let Some(window) = window_manager.get_mut(id) {
+-                    let _ = window.raw.request_inner_size(
++                    let scale_factor = f64::from(window.state.scale_factor());
++
++                    if let Some(new_size) = window.raw.request_inner_size(
+                         winit::dpi::LogicalSize {
+                             width: size.width,
+                             height: size.height,
+                         }
+-                        .to_physical::<f32>(f64::from(window.state.scale_factor())),
+-                    );
++                        .to_physical::<f32>(scale_factor),
++                    ) {
++                        // The platform applied the resize synchronously and
++                        // no `Resized` event will follow (Wayland stateless
++                        // configures), so keep the viewport in sync here.
++                        window.state.notify_synchronous_resize(
++                            new_size,
++                            window.raw.scale_factor() as f32,
++                        );
++                    }
+                 }
+             }
+             window::Action::SetMinSize(id, size) => {
+diff --git a/winit/src/window/state.rs b/winit/src/window/state.rs
+index 40590c268..5b7b4559f 100644
+--- a/winit/src/window/state.rs
++++ b/winit/src/window/state.rs
+@@ -107,6 +107,35 @@ where
+         self.viewport.scale_factor()
+     }
+ 
++    /// Records a resize that the platform applied synchronously.
++    ///
++    /// `winit::window::Window::request_inner_size` returns `Some` when the
++    /// backend applied the size change immediately and **no**
++    /// `WindowEvent::Resized` will follow — the Wayland stateless-configure
++    /// path is the notable case. iced must update its own viewport there,
++    /// the same way a `WindowEvent::Resized` does, or it keeps rendering at
++    /// the old size while the compositor displays the new window geometry.
++    pub fn notify_synchronous_resize(
++        &mut self,
++        new_size: winit::dpi::PhysicalSize<u32>,
++        window_scale_factor: f32,
++    ) {
++        let size = Size::new(new_size.width, new_size.height);
++
++        if size == self.viewport.physical_size() {
++            return;
++        }
++
++        self.viewport = Viewport::with_physical_size(
++            size,
++            renderer::Scale {
++                window: window_scale_factor,
++                application: self.viewport.scale().application,
++            },
++        );
++        self.surface_version += 1;
++    }
++
+     pub fn cursor(&self) -> mouse::Cursor {
+         self.cursor_position
+             .map(|cursor_position| {
