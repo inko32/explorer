@@ -1,6 +1,8 @@
 # explorer
 
-A Windows 8 style file explorer for POSIX and Windows — POSIX/Wayland first.
+A Windows 8 style file explorer for Linux/Wayland.
+
+https://github.com/user-attachments/assets/17954feb-9d5b-44b6-95f4-42323746ba4c
 
 Rust + iced (git `e5c350f`, 0.15-dev; wgpu GPU renderer with tiny-skia CPU
 fallback). Borderless window with self-drawn frame (Win8 double border /

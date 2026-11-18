@@ -1,0 +1,16 @@
+[package]
+name = "dnd-demo"
+version = "0.1.0"
+edition = "2024"
+description = "Wayland drag-in/out demo for the explorer (winit has no DnD)"
+
+[dependencies]
+# every one of these is already in the explorer's cargo cache (tmpfs)
+smithay-client-toolkit = "=0.21.1"
+wayland-client = "0.31"
+wayland-cursor = "0.31"
+tiny-skia = "0.12"
+cosmic-text = { git = "https://github.com/hecrj/cosmic-text.git", rev = "6adc2364289fd241daed751948a03d0aea5a31ca" }
+
+[profile.release]
+incremental = false
