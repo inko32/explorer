@@ -1,4 +1,4 @@
-//! File Operation UI — the six dialogs from SPEC/File_Operation_UI_Spec.md
+//! File Operation UI — the six file-operation dialogs.
 //! (D1 progress, D2 conflict confirmation, D3 fine selector, D4 delete
 //! confirmation, D5 message box, D6 shortcut wizard).
 //!
