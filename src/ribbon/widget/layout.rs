@@ -42,11 +42,6 @@ pub const CONTENT_H: f32 = BODY_H - FOOTER_H - 8.0; // 66
 pub const ROW_H: f32 = CONTENT_H / 3.0; // 22
 pub const ORB_SIZE: f32 = 22.0;
 
-/// Estimated text width (no renderer measurement; deterministic).
-pub fn text_w(s: &str, size: f32) -> f32 {
-    s.chars().count() as f32 * size * 0.55
-}
-
 /// Greedy word wrap by measured width.
 pub fn wrap_width(ctx: &Ctx, s: &str, size: f32, max_w: f32) -> Vec<String> {
     let mut lines = Vec::new();
@@ -92,31 +87,6 @@ pub fn wrap_balanced(ctx: &Ctx, s: &str, size: f32, max_lines: usize) -> Vec<Str
         return vec![words[..i].join(" "), words[i..].join(" ")];
     }
     wrap_width(ctx, s, size, 76.0)
-}
-
-/// Greedy word wrap by character count (no renderer at hand).
-pub fn wrap(s: &str, max_chars: usize) -> Vec<String> {
-    let mut lines = Vec::new();
-    let mut cur = String::new();
-    for word in s.split(' ') {
-        let extra = if cur.is_empty() { 0 } else { 1 };
-        if !cur.is_empty() && cur.chars().count() + extra + word.chars().count()
-            > max_chars
-        {
-            lines.push(std::mem::take(&mut cur));
-        }
-        if !cur.is_empty() {
-            cur.push(' ');
-        }
-        cur.push_str(word);
-    }
-    if !cur.is_empty() {
-        lines.push(cur);
-    }
-    if lines.is_empty() {
-        lines.push(String::new());
-    }
-    lines
 }
 
 /// Read-only context handed to all scene builders.
@@ -1736,10 +1706,13 @@ pub fn width_of_cc(
                 },
                 size,
             );
-            // leave room for the dropdown part: the "label ▾" strip on
-            // large buttons, the 14px arrow zone on small/medium ones
+            // small/medium buttons draw a 14px arrow zone beside the
+            // label (build_split); large buttons need no extra room —
+            // the arrow either sits alone on a second line
+            // (build_large_dropdown) or trails the wrapped label within
+            // the padding button_width_scaled already adds
             match size {
-                CtrlSize::Large => w + 12.0,
+                CtrlSize::Large => w,
                 _ => w + 14.0,
             }
         }
