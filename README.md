@@ -1,6 +1,6 @@
 # explorer
 
-A Windows 8 style file explorer for Linux/Wayland.
+A Windows-style file explorer for Linux/Wayland.
 
 [explorer.webm](https://github.com/user-attachments/assets/c4b9e91c-192c-4e86-b766-e70463d42550)
 
@@ -21,6 +21,30 @@ trash via GIO) on a dedicated fs worker thread, archives open as folders via
 7-Zip (7z.so → tar → 7z CLI), drag & drop (internal + a Wayland data-device
 side-channel that also drives the native taskbar icon), light/dark theme,
 ~0% idle CPU.
+
+## Design sources
+
+The design is a deliberate blend of Windows versions past and present, not a
+transplant of any single release — and not a wholesale return to Windows 8.
+It is best described as "measured", in both senses: values are taken from
+real measurements of the shipped systems, and the result is judged on its
+own merits rather than by provenance.
+
+- Window frame / borders — Windows 8 (the double border) and Windows 10
+  (1px frame), toggleable. The Win8 chrome is simply the most space-
+  efficient full-frame look Microsoft shipped, and ages well.
+- Ribbon — measured from Windows 10 and 11. This includes QAT behaviour,
+  contextual tab blocks, and the newer command layouts.
+- Folder view & file-operation (copy/move) dialogs — measured from Windows 11.
+- Future features — some are planned from the Windows Vista / 7 era, where
+  that generation did things well.
+- New ground — parts are original work with no Windows counterpart, notably
+  a custom file-system abstraction layer.
+
+Choosing each piece individually is the point. No single Windows release got
+everything right; taking what holds up, from whichever version it came, and
+building a few things that never existed is a different goal than re-creating
+any one OS — including the current one.
 
 ## Why iced is patched
 

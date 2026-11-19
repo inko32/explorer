@@ -1,5 +1,6 @@
 /dist/
 /target/
+/target
 /_archives/
 /_real_win10/
 *.bmp
