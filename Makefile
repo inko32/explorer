@@ -177,7 +177,7 @@ setup-softbuffer:
 		exit 1; \
 	fi
 
-	.PHONY: setup-upx
+.PHONY: setup-upx
 setup-upx:
 	@if [ ! -x $(UPX_BIN) ]; then \
 		echo "==> downloading upx $(UPX_VER)"; \
