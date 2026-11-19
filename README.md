@@ -36,7 +36,10 @@ opaque pointers. It is ~30 lines, purely additive, and re-applied by
 
 ## Build & run
 
-Always build via the Makefile — it keeps every artifact in in-memory tmpfs.
+cargo is the build tool — the Makefile only prepares the two patched crate
+overlays (see above) and, for its own targets, redirects cargo's target dir
+and caches into in-memory tmpfs to spare the SSD. Everything below is plain
+cargo underneath.
 
 ```sh
 make run                # build (release) + run; GPU, CPU fallback
@@ -54,6 +57,24 @@ make run ARGS="/usr/bin"       # initial folder (default $HOME)
 make build FEATURES=embed-selawik # embed the UI font (Selawik, SIL OFL; off by default)
 make saferun:/usr/bin            # run dist/ in a bubblewrap sandbox
 ```
+
+### With plain cargo
+
+If you'd rather use your own toolchain/environment, cargo works directly —
+the only make-specific step is materializing the patched overlays that
+`Cargo.toml`'s `[patch]` sections point at:
+
+```sh
+make setup-overlays    # one-time: seed + patch iced/softbuffer into tmpfs,
+                       # create the target/ symlink cargo resolves them through
+
+cargo build --release  # your env, your toolchain; artifacts land in the
+                       # tmpfs target/ symlink, never a ./target on disk
+```
+
+`setup-overlays` touches nothing else: no toolchain install, no
+CARGO_HOME/RUSTUP_HOME redirection. After that, any cargo command
+(`build`, `check`, `test`, `clippy`, ...) behaves as usual.
 
 ## Configuration
 

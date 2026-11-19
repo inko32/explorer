@@ -52,6 +52,17 @@ SB_VER     := 0.4.8
 SB_PATCH   := $(CURDIR)/deps/softbuffer-argb.patch
 SB_OVERLAY := $(TMPROOT)/target/softbuffer-overlay
 
+# --- upx (dist compression) -------------------------------------------------
+# dist/dist-static compress the staging binary with upx when COMPRESS != 0.
+# The binary is fetched once from the pinned GitHub release into tmpfs —
+# UPX_VER is hard-coded on purpose: upx output is baked into the shipped
+# artifacts, so its version is part of the build inputs. Supersedes the
+# previously vendored ./tools/upx (5.2.1).
+UPX_VER := 5.3.0
+UPX_DIR := $(TMPROOT)/tools/upx
+UPX_BIN := $(UPX_DIR)/upx
+UPX_URL := https://github.com/upx/upx/releases/download/v$(UPX_VER)/upx-$(UPX_VER)-amd64_linux.tar.xz
+
 
 export CARGO_TARGET_DIR := $(TMPROOT)/target
 export CARGO_INCREMENTAL := 0
@@ -147,8 +158,11 @@ setup-softbuffer:
 			mkdir -p $(SB_OVERLAY); \
 			cp -a "$$cache"/. $(SB_OVERLAY)/; \
 		else \
-			echo "==> ERROR: softbuffer $(SB_VER) not in cargo cache (fetch deps first)"; \
-			exit 1; \
+			echo "==> softbuffer $(SB_VER) not in cargo cache; downloading from crates.io"; \
+			mkdir -p $(SB_OVERLAY) $(TMPROOT)/dl; \
+			curl -fL --retry 3 -o $(TMPROOT)/dl/softbuffer.crate \
+				https://static.crates.io/crates/softbuffer/softbuffer-$(SB_VER).crate && \
+			tar -xzf $(TMPROOT)/dl/softbuffer.crate -C $(SB_OVERLAY) --strip-components=1; \
 		fi; \
 	fi
 	@chmod -R u+w $(SB_OVERLAY)
@@ -163,8 +177,37 @@ setup-softbuffer:
 		exit 1; \
 	fi
 
-setup-env: patch-iced setup-softbuffer
-	@ln -sf $(CARGO_TARGET_DIR) target
+	.PHONY: setup-upx
+setup-upx:
+	@if [ ! -x $(UPX_BIN) ]; then \
+		echo "==> downloading upx $(UPX_VER)"; \
+		mkdir -p $(UPX_DIR) $(TMPROOT)/dl; \
+		curl -fL --retry 3 -o $(TMPROOT)/dl/upx.tar.xz $(UPX_URL) && \
+		tar -xJf $(TMPROOT)/dl/upx.tar.xz -C $(UPX_DIR) --strip-components=1; \
+	fi
+
+# --- plain-cargo support ----------------------------------------------------
+# Cargo.toml's [patch] sections resolve the iced/softbuffer overlays through
+# the repo-root `target/` symlink, so once the overlays exist a bare
+# `cargo build` works in the user's OWN environment — no toolchain install,
+# no CARGO_HOME/RUSTUP_HOME redirection:
+#
+#   make setup-overlays    # one-time: seed + patch overlays, create target/
+#   cargo build --release  # artifacts land in tmpfs through the symlink
+#
+# `make setup-env` extends this with the tmpfs toolchain for the make flow.
+.PHONY: setup-overlays
+setup-overlays: patch-iced setup-softbuffer
+	@mkdir -p $(CARGO_TARGET_DIR)
+	@if [ -e target ] && [ ! -L target ]; then \
+		echo "==> ERROR: ./target is a real directory;"; \
+		echo "==> move it away before letting make manage the symlink"; \
+		exit 1; \
+	fi
+	@ln -sfn $(CARGO_TARGET_DIR) target
+	@echo "==> overlays ready under $(TMPROOT); plain 'cargo build' will pick them up"
+
+setup-env: setup-overlays
 	@mkdir -p $(CARGO_HOME) $(RUSTUP_HOME)
 	@if ! rustup toolchain list --no-self-update 2>/dev/null | grep -q "$(TOOLCHAIN)"; then \
 		echo "==> Installing Rust toolchain '$(TOOLCHAIN)'..."; \
@@ -245,7 +288,7 @@ static: setup-env static-sysroot
 
 # dist variant of the mostly-static build; mirrors `dist` but takes the
 # binary from target-static (same strip/upx staging discipline).
-dist-static: static
+dist-static: static setup-upx
 	@mkdir -p $(DIST)
 	@target="$$(realpath $(DIST)/$(BIN))"; \
 	for p in /proc/[0-9]*; do \
@@ -258,7 +301,7 @@ dist-static: static
 	cp $(STATIC_TARGET_DIR)/$(TARGET)/release/$(BIN) $(STATIC_TARGET_DIR)/dist/$(BIN)
 	@if [ "$(COMPRESS)" != "0" ]; then \
 		strip --strip-all $(STATIC_TARGET_DIR)/dist/$(BIN) 2>/dev/null || true; \
-		./tools/upx $(STATIC_TARGET_DIR)/dist/$(BIN) || true; \
+		$(UPX_BIN) $(STATIC_TARGET_DIR)/dist/$(BIN) || true; \
 	fi
 	cp $(STATIC_TARGET_DIR)/dist/$(BIN) $(DIST)/$(BIN)
 	@ls -l $(DIST)/$(BIN)
@@ -287,7 +330,7 @@ clippy-json: setup-env
 	-cargo +$(TOOLCHAIN) clippy --target $(TARGET) --message-format=json $(if $(FEATURES),--features $(FEATURES),) 2>/dev/null | grep '"reason":"compiler-message"' > /tmp/clippy.jsonl || true
 	@echo "wrote /tmp/clippy.jsonl"
 
-dist: build
+dist: build setup-upx
 	@mkdir -p $(DIST)
 	@target="$$(realpath $(DIST)/$(BIN))"; \
 	for p in /proc/[0-9]*; do \
@@ -303,7 +346,7 @@ dist: build
 	cp $(CARGO_TARGET_DIR)/$(TARGET)/release/$(BIN) $(CARGO_TARGET_DIR)/dist/$(BIN)
 	@if [ "$(COMPRESS)" != "0" ]; then \
 		strip --strip-all $(CARGO_TARGET_DIR)/dist/$(BIN) 2>/dev/null || true; \
-		./tools/upx $(CARGO_TARGET_DIR)/dist/$(BIN) || true; \
+		$(UPX_BIN) $(CARGO_TARGET_DIR)/dist/$(BIN) || true; \
 	fi
 	cp $(CARGO_TARGET_DIR)/dist/$(BIN) $(DIST)/$(BIN)
 	@ls -l $(DIST)/$(BIN)
