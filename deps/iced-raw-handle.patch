@@ -34,52 +34,46 @@ index e5ecb756b..ba5c8b6ec 100644
  /// Begins dragging the window while the left mouse button is held.
  pub fn drag<T>(id: Id) -> Task<T> {
      task::effect(crate::Action::Window(Action::Drag(id)))
-diff --git a/tiny_skia/src/engine.rs b/tiny_skia/src/engine.rs
-index bb8dcad36..a753e6bba 100644
---- a/tiny_skia/src/engine.rs
-+++ b/tiny_skia/src/engine.rs
-@@ -1,6 +1,8 @@
- use crate::Primitive;
- use crate::core::renderer::Quad;
--use crate::core::{Background, Color, Gradient, Rectangle, Size, Transformation, Vector};
-+use crate::core::{
-+    Background, Color, Gradient, Point, Rectangle, Size, Transformation, Vector,
-+};
- use crate::graphics::{Image, Text};
- use crate::text;
+diff --git a/vello_cpu/src/lib.rs b/vello_cpu/src/lib.rs
+--- a/vello_cpu/src/lib.rs
++++ b/vello_cpu/src/lib.rs
+@@ -87,5 +87,36 @@ impl Renderer {
+             for (quad, background) in &layer.quads {
++                // Honor `Quad::snap` like the wgpu backend: nudge-and-round
++                // each edge to the physical pixel grid so hairlines land on
++                // whole pixels instead of anti-aliasing across two pixel
++                // rows. Layer bounds are logical at this point (the viewport
++                // scale is applied below via `set_transform`), so snap in
++                // physical space and convert back — same convention as
++                // `shader/quad/snap.wgsl` and `wgpu/src/nudge.rs`.
++                let quad = &if quad.snap {
++                    const NUDGE: f32 = 0.001;
++
++                    let transformation = Transformation::scale(viewport.scale_factor());
++                    let physical = quad.bounds * transformation;
++
++                    let x0 = (physical.x + NUDGE).round();
++                    let y0 = (physical.y + NUDGE).round();
++                    let x1 = (physical.x + physical.width + NUDGE).round();
++                    let y1 = (physical.y + physical.height + NUDGE).round();
++
++                    renderer::Quad {
++                        bounds: Rectangle {
++                            x: x0,
++                            y: y0,
++                            width: x1 - x0,
++                            height: y1 - y0,
++                        } * transformation.inverse(),
++                        ..*quad
++                    }
++                } else {
++                    *quad
++                };
++
+                 let shadow = quad.shadow;
  
-@@ -34,6 +36,31 @@ impl Engine {
-         clip_mask: &mut tiny_skia::Mask,
-         clip_bounds: Rectangle,
-     ) {
-+        // Honor `Quad::snap` like the wgpu backend: nudge-and-round each
-+        // edge to the physical pixel grid so hairlines land on whole
-+        // pixels instead of anti-aliasing across two pixel rows. The
-+        // convention (nudge 0.001, then round) mirrors
-+        // `shader/quad/snap.wgsl` and `wgpu/src/nudge.rs`.
-+        let quad = if quad.snap {
-+            const NUDGE: f32 = 0.001;
-+
-+            let physical = quad.bounds * transformation;
-+            let x0 = (physical.x + NUDGE).round();
-+            let y0 = (physical.y + NUDGE).round();
-+            let x1 = (physical.x + physical.width + NUDGE).round();
-+            let y1 = (physical.y + physical.height + NUDGE).round();
-+
-+            let snapped = Rectangle::new(Point::new(x0, y0), Size::new(x1 - x0, y1 - y0))
-+                * transformation.inverse();
-+
-+            Quad {
-+                bounds: snapped,
-+                ..*quad
-+            }
-+        } else {
-+            *quad
-+        };
-+
-         let physical_bounds = quad.bounds * transformation;
- 
-         if !clip_bounds.intersects(&physical_bounds) {
+                 if shadow.color.a > 0.0 {
+                     let bounds = into_rect(quad.bounds) + into_vec2(shadow.offset);
 diff --git a/winit/src/lib.rs b/winit/src/lib.rs
 index 88eaec45b..9ab868184 100644
 --- a/winit/src/lib.rs
