@@ -34,52 +34,44 @@ index e5ecb756b..ba5c8b6ec 100644
  /// Begins dragging the window while the left mouse button is held.
  pub fn drag<T>(id: Id) -> Task<T> {
      task::effect(crate::Action::Window(Action::Drag(id)))
-diff --git a/tiny_skia/src/engine.rs b/tiny_skia/src/engine.rs
-index bb8dcad36..a753e6bba 100644
---- a/tiny_skia/src/engine.rs
-+++ b/tiny_skia/src/engine.rs
-@@ -1,6 +1,8 @@
- use crate::Primitive;
- use crate::core::renderer::Quad;
--use crate::core::{Background, Color, Gradient, Rectangle, Size, Transformation, Vector};
-+use crate::core::{
-+    Background, Color, Gradient, Point, Rectangle, Size, Transformation, Vector,
-+};
- use crate::graphics::{Image, Text};
- use crate::text;
- 
-@@ -34,6 +36,31 @@ impl Engine {
-         clip_mask: &mut tiny_skia::Mask,
-         clip_bounds: Rectangle,
+diff --git a/vello_cpu/src/layer.rs b/vello_cpu/src/layer.rs
+--- a/vello_cpu/src/layer.rs
++++ b/vello_cpu/src/layer.rs
+@@ -26,11 +26,34 @@ impl Layer {
+     pub fn draw_quad(
+         &mut self,
+         mut quad: Quad,
+         background: Background,
+         transformation: Transformation,
      ) {
+         quad.bounds = quad.bounds * transformation;
++
 +        // Honor `Quad::snap` like the wgpu backend: nudge-and-round each
 +        // edge to the physical pixel grid so hairlines land on whole
 +        // pixels instead of anti-aliasing across two pixel rows. The
 +        // convention (nudge 0.001, then round) mirrors
 +        // `shader/quad/snap.wgsl` and `wgpu/src/nudge.rs`.
-+        let quad = if quad.snap {
++        if quad.snap {
 +            const NUDGE: f32 = 0.001;
 +
-+            let physical = quad.bounds * transformation;
-+            let x0 = (physical.x + NUDGE).round();
-+            let y0 = (physical.y + NUDGE).round();
-+            let x1 = (physical.x + physical.width + NUDGE).round();
-+            let y1 = (physical.y + physical.height + NUDGE).round();
++            let bounds = quad.bounds;
++            let x0 = (bounds.x + NUDGE).round();
++            let y0 = (bounds.y + NUDGE).round();
++            let x1 = (bounds.x + bounds.width + NUDGE).round();
++            let y1 = (bounds.y + bounds.height + NUDGE).round();
 +
-+            let snapped = Rectangle::new(Point::new(x0, y0), Size::new(x1 - x0, y1 - y0))
-+                * transformation.inverse();
++            quad.bounds = Rectangle {
++                x: x0,
++                y: y0,
++                width: x1 - x0,
++                height: y1 - y0,
++            };
++        }
 +
-+            Quad {
-+                bounds: snapped,
-+                ..*quad
-+            }
-+        } else {
-+            *quad
-+        };
-+
-         let physical_bounds = quad.bounds * transformation;
+         self.quads.push((quad, background));
+     }
  
-         if !clip_bounds.intersects(&physical_bounds) {
+     pub fn draw_paragraph(
 diff --git a/winit/src/lib.rs b/winit/src/lib.rs
 index 88eaec45b..9ab868184 100644
 --- a/winit/src/lib.rs
