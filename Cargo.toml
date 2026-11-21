@@ -6,6 +6,14 @@ description = "Windows 8 style file explorer for POSIX/Windows — iced spike"
 license = "MIT"
 
 [features]
+default = ["wgpu"]
+# GPU renderer (wgpu); tiny-skia stays compiled in as the CPU fallback.
+# Default on; a tiny-skia-only build is `make check NO_DEFAULT=1`.
+# `--render gpu` fails at startup when this feature is off.
+wgpu = ["iced/wgpu"]
+# X11 windowing backend (winit). Default off (Wayland-only build);
+# enable with `make check FEATURES=x11`.
+x11 = ["iced/x11"]
 # Embed the UI font (assets/fonts/selawik.regular.ttf, SIL OFL).
 # Default: off (system fonts only). `make build FEATURES=embed-selawik`.
 embed-selawik = []
@@ -15,7 +23,7 @@ embed-selawik = []
 cpu-render = []
 
 [dependencies]
-iced = { git = "https://github.com/iced-rs/iced", rev = "e5c350f271a8046f875c6662d452fde9e462d486", default-features = false, features = ["wgpu", "tiny-skia", "wayland", "crisp", "thread-pool", "svg", "image", "canvas", "advanced"] } # wgpu primary + tiny-skia fallback (D17); pick at runtime via --render
+iced = { git = "https://github.com/iced-rs/iced", rev = "e5c350f271a8046f875c6662d452fde9e462d486", default-features = false, features = ["tiny-skia", "wayland", "crisp", "thread-pool", "svg", "image", "canvas", "advanced"] } # wgpu primary + tiny-skia fallback (D17); pick at runtime via --render
 # 2026.11.2 iced git
 gio  = "0.22"  # GIO backend for the VFS (local fs, volumes, trash)
 glib = "0.22"  # gio companion

@@ -17,6 +17,10 @@ COMPRESS  ?= 0
 TOOLCHAIN   ?= stable
 TARGET      ?= x86_64-unknown-linux-gnu
 # Dependency: sudo pacman -S rustup
+# Crate features: default = wgpu (GPU renderer) + Wayland windowing.
+# NO_DEFAULT=1 drops the defaults: `make check NO_DEFAULT=1` is a
+# tiny-skia + Wayland-only build. FEATURES=... adds optional features:
+# `make check FEATURES=x11` (X11 backend), `make run FEATURES=x11,embed-selawik`.
 
 # --- local iced overlay ---------------------------------------------------
 # The Wayland DnD side-channel (src/dnd_wayland.rs) needs the window's raw
@@ -281,7 +285,7 @@ static: setup-env static-sysroot
 	$(STATIC_DEPS_ENV) \
 	RUSTFLAGS="-L native=$(SYSROOT)/lib -L native=/usr/lib" \
 	CARGO_TARGET_DIR="$(STATIC_TARGET_DIR)" \
-	cargo +$(TOOLCHAIN) build --release --target $(TARGET) $(if $(FEATURES),--features $(FEATURES),)
+	cargo +$(TOOLCHAIN) build --release --target $(TARGET) $(if $(NO_DEFAULT),--no-default-features,) $(if $(FEATURES),--features $(FEATURES),)
 	@$(STATIC_TARGET_DIR)/$(TARGET)/release/$(BIN) --version >/dev/null 2>&1 || true
 	@echo "==> ldd of the mostly-static binary:"
 	@ldd $(STATIC_TARGET_DIR)/$(TARGET)/release/$(BIN) || true
@@ -307,27 +311,27 @@ dist-static: static setup-upx
 	@ls -l $(DIST)/$(BIN)
 
 build: setup-env
-	cargo +$(TOOLCHAIN) build --release --target $(TARGET) $(if $(FEATURES),--features $(FEATURES),)
+	cargo +$(TOOLCHAIN) build --release --target $(TARGET) $(if $(NO_DEFAULT),--no-default-features,) $(if $(FEATURES),--features $(FEATURES),)
 
 check: setup-env
-	cargo +$(TOOLCHAIN) check --target $(TARGET) $(if $(FEATURES),--features $(FEATURES),)
+	cargo +$(TOOLCHAIN) check --target $(TARGET) $(if $(NO_DEFAULT),--no-default-features,) $(if $(FEATURES),--features $(FEATURES),)
 
 run: build
 	$(CARGO_TARGET_DIR)/$(TARGET)/release/$(BIN) $(ARGS)
 
 test: setup-env
-	cargo +$(TOOLCHAIN) test --target $(TARGET) $(if $(FEATURES),--features $(FEATURES),)
+	cargo +$(TOOLCHAIN) test --target $(TARGET) $(if $(NO_DEFAULT),--no-default-features,) $(if $(FEATURES),--features $(FEATURES),)
 
 clippy: setup-env
 	$(CLIPPY_ENSURE)
-	cargo +$(TOOLCHAIN) clippy --target $(TARGET) $(if $(FEATURES),--features $(FEATURES),)
+	cargo +$(TOOLCHAIN) clippy --target $(TARGET) $(if $(NO_DEFAULT),--no-default-features,) $(if $(FEATURES),--features $(FEATURES),)
 
 # machine-readable clippy (one JSON diagnostic per line) — for tooling
 # that sorts/filters the warning list.
 clippy-json: setup-env
 	$(CLIPPY_ENSURE)
 	@# grep exits 1 on zero matches (clean run) — not an error here
-	-cargo +$(TOOLCHAIN) clippy --target $(TARGET) --message-format=json $(if $(FEATURES),--features $(FEATURES),) 2>/dev/null | grep '"reason":"compiler-message"' > /tmp/clippy.jsonl || true
+	-cargo +$(TOOLCHAIN) clippy --target $(TARGET) --message-format=json $(if $(NO_DEFAULT),--no-default-features,) $(if $(FEATURES),--features $(FEATURES),) 2>/dev/null | grep '"reason":"compiler-message"' > /tmp/clippy.jsonl || true
 	@echo "wrote /tmp/clippy.jsonl"
 
 dist: build setup-upx
@@ -375,12 +379,12 @@ bloat: setup-env
 		[ $$n -le 3 ] || exit 1; \
 	fi
 	@find src -name '*.rs' -exec touch {} +
-	cargo +$(TOOLCHAIN) bloat --release --target $(TARGET) --crates $(if $(FEATURES),--features $(FEATURES),)
+	cargo +$(TOOLCHAIN) bloat --release --target $(TARGET) --crates $(if $(NO_DEFAULT),--no-default-features,) $(if $(FEATURES),--features $(FEATURES),)
 
 # dependency graph inspection; pass args via ARGS, e.g.
 # make tree ARGS="-i exr"  (inverse: what pulls in exr)
 tree: setup-env
-	cargo +$(TOOLCHAIN) tree --target $(TARGET) $(if $(FEATURES),--features $(FEATURES),) $(ARGS)
+	cargo +$(TOOLCHAIN) tree --target $(TARGET) $(if $(NO_DEFAULT),--no-default-features,) $(if $(FEATURES),--features $(FEATURES),) $(ARGS)
 
 fmt: setup-env
 	cargo +$(TOOLCHAIN) fmt
