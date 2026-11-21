@@ -151,17 +151,17 @@ fn main() -> iced::Result {
             return file_ops_ui::run(&payload);
         }
     }
-    // Renderer selection (D17): GPU (wgpu) is primary, CPU (tiny-skia) is the
+    // Renderer selection (D17): GPU (wgpu) is primary, CPU (vello-cpu) is the
     // reserved fallback — both are compiled in and picked at startup.
-    //   explorer             -> wgpu, auto-fallback to tiny-skia if GPU init fails
+    //   explorer             -> wgpu, auto-fallback to vello-cpu if GPU init fails
     //   explorer --render gpu -> wgpu only; startup ERROR if unavailable
-    //   explorer --render cpu -> tiny-skia only
-    // `cpu-render` build (`make dist-cpu`): tiny-skia is the compiled-in
+    //   explorer --render cpu -> vello-cpu only
+    // `cpu-render` build (`make dist-cpu`): vello-cpu is the compiled-in
     // default instead of wgpu. An explicit `--render gpu|cpu` below still
     // overrides this.
     #[cfg(feature = "cpu-render")]
     unsafe {
-        std::env::set_var("ICED_BACKEND", "tiny-skia");
+        std::env::set_var("ICED_BACKEND", "vello-cpu");
     }
     let mut want_dpi = false;
     let mut want_render = false;
@@ -182,7 +182,7 @@ fn main() -> iced::Result {
             v if v.starts_with("--dpi=") => set_dpi(&v["--dpi=".len()..]),
             v if v.starts_with("--size=") => set_size(&v["--size=".len()..]),
             "--help" | "-h" => {
-                eprintln!("Windows 8 style file explorer\n\nUSAGE:\n    explorer [--render <gpu|cpu>] [path]\n\nOPTIONS:\n    --render gpu    GPU rendering (wgpu); fails at startup if unavailable\n    --render cpu    CPU rendering (tiny-skia); always works\n    --dpi=N         absolute UI scale: percent of 96 dpi (100, 125, 150, 123...)\n                    or a direct factor <= 10 (1.5); default = system scale\n    --size=WxH      window size in logical pixels (default 1152x720)\n    (no flag)       GPU with automatic CPU fallback");
+                eprintln!("Windows 8 style file explorer\n\nUSAGE:\n    explorer [--render <gpu|cpu>] [path]\n\nOPTIONS:\n    --render gpu    GPU rendering (wgpu); fails at startup if unavailable\n    --render cpu    CPU rendering (vello-cpu); always works\n    --dpi=N         absolute UI scale: percent of 96 dpi (100, 125, 150, 123...)\n                    or a direct factor <= 10 (1.5); default = system scale\n    --size=WxH      window size in logical pixels (default 1152x720)\n    (no flag)       GPU with automatic CPU fallback");
                 return Ok(());
             }
             v if v.starts_with("--render=") => set_renderer(&v["--render=".len()..]),
@@ -340,13 +340,13 @@ fn set_size(value: &str) {
     }
 }
 
-/// `--render gpu|cpu` -> iced's `ICED_BACKEND` (wgpu / tiny-skia). An
+/// `--render gpu|cpu` -> iced's `ICED_BACKEND` (wgpu / vello-cpu). An
 /// explicit choice is strict: `--render gpu` errors out instead of silently
 /// falling back; no flag = auto-fallback.
 fn set_renderer(choice: &str) {
     let backend = match choice {
         "gpu" | "wgpu" => "wgpu",
-        "cpu" | "tiny-skia" | "tiny_skia" => "tiny-skia",
+        "cpu" | "vello-cpu" | "vello_cpu" | "tiny-skia" | "tiny_skia" => "vello-cpu",
         other => {
             eprintln!("unknown --render value '{other}' (expected gpu|cpu)");
             std::process::exit(2);
