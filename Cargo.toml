@@ -6,9 +6,11 @@ description = "Windows 8 style file explorer for POSIX/Windows — iced spike"
 license = "MIT"
 
 [features]
-default = ["wgpu"]
-# GPU renderer (wgpu); tiny-skia stays compiled in as the CPU fallback.
-# Default on; a tiny-skia-only build is `make check NO_DEFAULT=1`.
+# TEMPORARY (migrate-iced-vello branch): wgpu is not a default feature here;
+# the vello-cpu software renderer is the only compiled-in backend.
+default = []
+# GPU renderer (wgpu); vello-cpu stays compiled in as the CPU fallback.
+# Default on; a vello-cpu-only build is `make check NO_DEFAULT=1`.
 # `--render gpu` fails at startup when this feature is off.
 wgpu = ["iced/wgpu"]
 # X11 windowing backend (winit). Default off (Wayland-only build);
@@ -17,14 +19,13 @@ x11 = ["iced/x11"]
 # Embed the UI font (assets/fonts/selawik.regular.ttf, SIL OFL).
 # Default: off (system fonts only). `make build FEATURES=embed-selawik`.
 embed-selawik = []
-# CPU-renderer build (`make dist-cpu`): tiny-skia is the startup default
+# CPU-renderer build (`make dist-cpu`): vello-cpu is the startup default
 # instead of wgpu. wgpu stays compiled in; an explicit --render flag
 # still overrides this default.
 cpu-render = []
 
 [dependencies]
-iced = { git = "https://github.com/iced-rs/iced", rev = "e5c350f271a8046f875c6662d452fde9e462d486", default-features = false, features = ["tiny-skia", "wayland", "crisp", "thread-pool", "svg", "image", "canvas", "advanced"] } # wgpu primary + tiny-skia fallback (D17); pick at runtime via --render
-# 2026.11.2 iced git
+iced = { git = "https://github.com/iced-rs/iced", rev = "98bd48fe011efc0ec5819fee0fa7673a7169ff11", default-features = false, features = ["vello-cpu", "wayland", "crisp", "thread-pool", "svg", "image", "canvas", "advanced"] } # wgpu primary + vello-cpu fallback (D17); pick at runtime via --render
 gio  = "0.22"  # GIO backend for the VFS (local fs, volumes, trash)
 glib = "0.22"  # gio companion
 serde = { version = "1", features = ["derive"] }

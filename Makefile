@@ -17,10 +17,9 @@ COMPRESS  ?= 0
 TOOLCHAIN   ?= stable
 TARGET      ?= x86_64-unknown-linux-gnu
 # Dependency: sudo pacman -S rustup
-# Crate features: default = wgpu (GPU renderer) + Wayland windowing.
-# NO_DEFAULT=1 drops the defaults: `make check NO_DEFAULT=1` is a
-# tiny-skia + Wayland-only build. FEATURES=... adds optional features:
-# `make check FEATURES=x11` (X11 backend), `make run FEATURES=x11,embed-selawik`.
+# Crate features: TEMPORARY on this branch: no default features (vello-cpu
+# software renderer + Wayland only). NO_DEFAULT is now a no-op; add
+# FEATURES=wgpu to build the GPU backend.
 
 # --- local iced overlay ---------------------------------------------------
 # The Wayland DnD side-channel (src/dnd_wayland.rs) needs the window's raw
@@ -36,7 +35,7 @@ TARGET      ?= x86_64-unknown-linux-gnu
 # re-applies the patch. The patch is purely additive, so it should apply
 # cleanly; if not, git apply reports the conflict and it has to be
 # re-placed by hand (rare; ~30 lines).
-ICED_REV     := e5c350f271a8046f875c6662d452fde9e462d486
+ICED_REV     := 98bd48fe011efc0ec5819fee0fa7673a7169ff11
 ICED_PATCH   := $(CURDIR)/deps/iced-raw-handle.patch
 # (same dir as CARGO_TARGET_DIR; spelled via TMPROOT because this block
 # is parsed before the CARGO_TARGET_DIR export below)
