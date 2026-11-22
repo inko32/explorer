@@ -1,6 +1,7 @@
 # explorer
 
-A Windows-style file explorer for Linux/Wayland.
+A Windows-style file explorer for Linux (Wayland by default, X11 optional)
+and Windows (native PE, runs under Wine).
 
 [explorer.webm](https://github.com/user-attachments/assets/c4b9e91c-192c-4e86-b766-e70463d42550)
 
@@ -18,8 +19,8 @@ adjustable and reorderable columns, multi-select (Ctrl/Shift+click,
 rubber-band with edge auto-scroll), Windows-style scrollbars with end
 buttons, touch input, inline rename, sorting, file ops (internal clipboard,
 trash via GIO) on a dedicated fs worker thread, archives open as folders via
-7-Zip (7z.so → tar → 7z CLI), drag & drop (internal + a Wayland data-device
-side-channel that also drives the native taskbar icon), light/dark theme,
+7-Zip (7z.so → tar → 7z CLI), drag & drop (internal everywhere; on unix/Wayland also a data-device
+side-channel that drives the native taskbar icon), light/dark theme,
 ~0% idle CPU.
 
 ## Design sources
@@ -71,6 +72,15 @@ make check / make test  # type check / unit tests
 make dist               # stripped + upxed binary in dist/
 make static             # mostly-static build (only glibc stays dynamic)
 make dist-static        # its dist counterpart
+
+# Windows (cross) build — everything stays in the /tmp tmpfs (mingw
+# toolchain, wine prefix, 7z.dll fetched from the pinned 7-Zip-zstd
+# installer), nothing touches $HOME:
+make build-wine         # explorer.exe for x86_64-pc-windows-gnu
+make run-wine           # run it under Wine (fonts set up in the prefix)
+make dist-wine          # dist/wine/ = the PE + 7z.dll
+
+make build FEATURES=x11 # X11 windowing backend (default is Wayland-only)
 
 # flags (after --):
 make run ARGS="--render cpu"   # force CPU renderer (--render gpu is strict)
