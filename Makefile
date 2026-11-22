@@ -441,17 +441,27 @@ setup-7z-dll: build-wine
 		fi; \
 	fi
 
+# Feature set for the wine builds. dist-wine embeds Selawik (SIL OFL,
+# free to ship) so the distributed exe renders text in ANY wine prefix
+# — a double-clicked binary runs in the user's default prefix, whose
+# C:\Windows\Fonts is usually empty (wine only registers fonts in the
+# registry, which the app's font stack never reads). run-wine keeps the
+# feature off so the local test path exercises the real font fallback.
+WINE_FEATURES ?= $(FEATURES)
+
 check-wine: setup-wine-toolchain setup-mingw setup-overlays
-	PATH="$(MINGW_ROOT)/usr/bin:$(PATH)" cargo +$(TOOLCHAIN) check --target $(TARGET_WINE) $(if $(NO_DEFAULT),--no-default-features,) $(if $(FEATURES),--features $(FEATURES),)
+	PATH="$(MINGW_ROOT)/usr/bin:$(PATH)" cargo +$(TOOLCHAIN) check --target $(TARGET_WINE) $(if $(NO_DEFAULT),--no-default-features,) $(if $(WINE_FEATURES),--features $(WINE_FEATURES),)
 
 build-wine: setup-wine-toolchain setup-mingw setup-overlays
-	PATH="$(MINGW_ROOT)/usr/bin:$(PATH)" cargo +$(TOOLCHAIN) build --release --target $(TARGET_WINE) $(if $(NO_DEFAULT),--no-default-features,) $(if $(FEATURES),--features $(FEATURES),)
+	PATH="$(MINGW_ROOT)/usr/bin:$(PATH)" cargo +$(TOOLCHAIN) build --release --target $(TARGET_WINE) $(if $(NO_DEFAULT),--no-default-features,) $(if $(WINE_FEATURES),--features $(WINE_FEATURES),)
 
 run-wine: build-wine setup-fonts setup-7z-dll
 	WINEPREFIX=$(WINEPREFIX) wine $(WINE_EXE) $(ARGS)
 
 # Windows sibling of `dist`: the release PE plus 7z.dll (when present),
-# optionally upx-compressed with the same COMPRESS discipline.
+# optionally upx-compressed with the same COMPRESS discipline. Builds
+# with embed-selawik (see WINE_FEATURES) unless FEATURES is given.
+dist-wine: WINE_FEATURES = $(or $(FEATURES),embed-selawik)
 dist-wine: build-wine setup-7z-dll setup-upx
 	@mkdir -p $(DIST)/wine
 	@cp $(WINE_EXE) $(DIST)/wine/$(BIN).exe
