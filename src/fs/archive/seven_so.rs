@@ -262,11 +262,14 @@ fn lib() -> Result<&'static SevenLib, FsError> {
 }
 
 fn load() -> Result<SevenLib, String> {
+    // `EXPLORER_7Z_SO` overrides both platform lists (point it at any
+    // 7z.so / 7z.dll).
     let candidates: Vec<std::path::PathBuf> = {
         let mut v: Vec<std::path::PathBuf> = Vec::new();
         if let Ok(p) = std::env::var("EXPLORER_7Z_SO") {
             v.push(p.into());
         }
+        #[cfg(unix)]
         for p in [
             "/usr/lib/7zip/7z.so",
             "/usr/lib/p7zip/7z.so",
@@ -275,6 +278,11 @@ fn load() -> Result<SevenLib, String> {
         ] {
             v.push(p.into());
         }
+        // Windows: LoadLibrary's standard search order (application
+        // directory first, then system32/PATH) — dist-wine ships a
+        // real 7z.dll next to the exe.
+        #[cfg(not(unix))]
+        v.push("7z.dll".into());
         v
     };
     let mut tried = String::new();

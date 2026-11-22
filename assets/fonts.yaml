@@ -11,10 +11,14 @@
 # back per glyph through the system fonts. Selawik is the open (SIL OFL)
 # Segoe-metric face — used when embedded (`make build
 # FEATURES=embed-selawik`) or installed; "Segoe UI" covers Windows
-# systems. Both are silently skipped when unavailable.
+# systems. Both are silently skipped when unavailable. Tahoma/Arial are
+# Wine's built-in fonts (every wine prefix has them), so a fresh prefix
+# renders text with no font setup at all.
 family:
   - Selawik            # primary when embedded/installed, else ignored
   - Segoe UI           # Windows systems
+  - Tahoma             # Wine built-in (fresh prefixes)
+  - Arial              # Windows + Wine built-in
   - Noto Sans
   - Noto Sans CJK SC
   - Noto Sans CJK JP

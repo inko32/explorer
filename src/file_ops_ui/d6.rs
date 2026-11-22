@@ -4,6 +4,7 @@
 use iced::widget::{container, mouse_area, row, text, text_input, Space};
 use iced::{Alignment, Element, Length, Padding};
 
+#[cfg(unix)]
 use super::engine;
 use super::tokens::Tokens;
 use super::widgets;
@@ -78,8 +79,15 @@ impl Wizard {
         if target.is_empty() || name.is_empty() {
             return;
         }
-        let link = std::path::Path::new(engine::DEMO_ROOT).join(name);
-        let _ = std::os::unix::fs::symlink(target, &link);
+        // symlink creation needs a privilege on Windows we don't
+        // require; unsupported there (same rule as fs::link_one)
+        #[cfg(unix)]
+        {
+            let link = std::path::Path::new(engine::DEMO_ROOT).join(name);
+            let _ = std::os::unix::fs::symlink(target, &link);
+        }
+        #[cfg(not(unix))]
+        let _ = target;
     }
 
     pub fn next(&mut self) {

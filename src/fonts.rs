@@ -22,10 +22,13 @@ pub const EMBED_BYTES: &[u8] = include_bytes!("../assets/fonts/selawik.regular.t
 
 /// Shipped fallback list (fonts.yaml `family:`): Segoe UI first — it
 /// resolves only when embedded (feature `embed-selawik`) or installed,
-/// otherwise it is skipped.
+/// otherwise it is skipped. Tahoma/Arial are Wine's built-in fonts, so
+/// a fresh wine prefix renders text with no font setup at all.
 pub const DEFAULT_FAMILIES: &[&str] = &[
     "Selawik",
     "Segoe UI",
+    "Tahoma",   // Wine built-in (fresh prefixes)
+    "Arial",    // Windows + Wine built-in
     "Noto Sans",
     "Noto Sans CJK SC",
     "Noto Sans CJK JP",

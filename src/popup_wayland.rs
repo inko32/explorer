@@ -19,7 +19,8 @@ use smithay_client_toolkit::seat::pointer::{PointerEvent, PointerEventKind, BTN_
 use smithay_client_toolkit::shm::slot::SlotPool;
 use wayland_client::{Connection, QueueHandle};
 
-use crate::dnd_wayland::{DragVisual, Event, Handle, State};
+use crate::dnd_wayland::{Event, Handle, State};
+use crate::drag_paint::DragVisual;
 
 /// Popup commands GUI -> side-channel thread.
 pub(crate) enum Cmd {
@@ -255,7 +256,7 @@ fn commit_popup_pixels(pool: &mut SlotPool, popup: &mut PopupState, visual: Drag
     ) else {
         return;
     };
-    let src = crate::dnd_wayland::swizzle(&visual.pixels);
+    let src = crate::drag_paint::swizzle(&visual.pixels);
     let Some(dst) = canvas.get_mut(..src.len()) else {
         return;
     };

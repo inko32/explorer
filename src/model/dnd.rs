@@ -126,33 +126,40 @@ impl Explorer {
     /// targets; modifier changes still update it via
     /// `refresh_wayland_visual`.
     pub(crate) fn wayland_handoff(&mut self) {
-        let (Some(wl), Some(crate::dnd::DragPayload::Files(items))) =
-            (&self.dnd_wl, self.dnd.payload())
-        else {
-            return;
-        };
-        let caption = self.wayland_caption();
-        let skin = if self.dark {
-            crate::ui_common::skin::dark()
-        } else {
-            crate::ui_common::skin::light()
-        };
-        let (paint, ls) = self.wl_paint_scale();
-        let visual = crate::dnd_wayland::paint_drag_visual(
-            items,
-            self.dnd.top(),
-            items.len(),
-            &caption,
-            &skin,
-            paint,
-        );
-        let uris: Vec<String> = items.iter().map(|i| i.uri.clone()).collect();
-        // Copy|Move advertised together (the core protocol has no link
-        // action): the destination (or the compositor) resolves, like
-        // our ambiguous-drop menu.
-        use smithay_client_toolkit::reexports::client::protocol::wl_data_device_manager::DndAction as Wl;
-        wl.begin_drag(uris, Wl::Copy | Wl::Move, ls, visual);
-        self.dnd_wl_drag = true;
+        // everything below paints the compositor drag image / starts
+        // the native drag — unix-only (the side-channel); the in-window
+        // simulated drag continues on other platforms
+        #[cfg(unix)]
+        {
+            let (Some(wl), Some(crate::dnd::DragPayload::Files(items))) =
+                (&self.dnd_wl, self.dnd.payload())
+            else {
+                return;
+            };
+            let caption = self.wayland_caption();
+            let skin = if self.dark {
+                crate::ui_common::skin::dark()
+            } else {
+                crate::ui_common::skin::light()
+            };
+            let (paint, ls) = self.wl_paint_scale();
+            let visual = crate::drag_paint::paint_drag_visual(
+                items,
+                self.dnd.top(),
+                items.len(),
+                &caption,
+                &skin,
+                paint,
+            );
+            let uris: Vec<String> = items.iter().map(|i| i.uri.clone()).collect();
+            // Copy|Move advertised together (the core protocol has no link
+            // action): the destination (or the compositor) resolves, like
+            // our ambiguous-drop menu. `begin_drag` takes the Wayland
+            // `DndAction` — unix-only, like the whole side-channel.
+            use wayland_client::protocol::wl_data_device_manager::DndAction as Wl;
+            wl.begin_drag(uris, Wl::Copy | Wl::Move, ls, visual);
+            self.dnd_wl_drag = true;
+        }
     }
 
     /// The target-less caption for the compositor drag image: the
@@ -195,7 +202,7 @@ impl Explorer {
         };
         let caption = self.wayland_caption();
         let (paint, _) = self.wl_paint_scale();
-        let visual = crate::dnd_wayland::paint_drag_visual(
+        let visual = crate::drag_paint::paint_drag_visual(
             items,
             self.dnd.top(),
             items.len(),

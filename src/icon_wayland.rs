@@ -18,20 +18,8 @@ use smithay_client_toolkit::reexports::protocols::xdg::toplevel_icon::v1::client
 use smithay_client_toolkit::shm::slot::Buffer;
 use wayland_client::{Connection, QueueHandle};
 
-use crate::dnd_wayland::{DragVisual, Handle, State};
-
-/// Pixels for one toplevel-icon assignment: one square buffer per
-/// wl scale, premultiplied RGBA (like [`DragVisual`]).
-pub struct ToplevelIcon {
-    pub sizes: Vec<IconSize>,
-}
-
-pub struct IconSize {
-    /// wl buffer scale the pixels were rendered for (e.g. 1, 2)
-    pub scale: i32,
-    /// square `width == height`
-    pub visual: DragVisual,
-}
+use crate::dnd_wayland::{Handle, State};
+use crate::drag_paint::ToplevelIcon;
 
 /// The icon assigned to our toplevel. The protocol requires the
 /// wl_buffers to stay alive and unmodified until the icon object is
@@ -79,7 +67,7 @@ pub(crate) fn apply(state: &mut State, cmd: Cmd, qh: &QueueHandle<State>) {
             icon.destroy();
             return;
         };
-        let src = crate::dnd_wayland::swizzle(&size.visual.pixels);
+        let src = crate::drag_paint::swizzle(&size.visual.pixels);
         let Some(dst) = canvas.get_mut(..src.len()) else {
             icon.destroy();
             return;
@@ -113,32 +101,3 @@ impl wayland_client::Dispatch<XdgToplevelIconManagerV1, ()> for State {
 }
 wayland_client::delegate_noop!(State: XdgToplevelIconV1);
 
-// ---------------------------------------------------------------------------
-// Icon painting (GUI thread)
-// ---------------------------------------------------------------------------
-
-/// Paint the toplevel (taskbar/window-switcher) icon: the location icon
-/// centered on a transparent SQUARE canvas at each wl scale — the
-/// protocol only accepts square shm buffers. Two sizes cover common
-/// taskbars (16-32px at scale 1, hidpi at scale 2).
-pub fn paint_toplevel_icon(name: &str, skin: &crate::theme::Palette) -> ToplevelIcon {
-    let sizes = [(1, 64), (2, 128)]
-        .into_iter()
-        .map(|(scale, px)| {
-            let icon = crate::icon::raster(name, px, skin);
-            let mut visual = DragVisual {
-                width: px,
-                height: px,
-                pixels: vec![0; (px * px * 4) as usize],
-            };
-            let mut cv = crate::dnd_wayland::Canvas {
-                px: &mut visual.pixels,
-                w: px,
-                h: px,
-            };
-            cv.blend_icon(1.0, 0.0, 0.0, px as f32, &icon, 255);
-            IconSize { scale, visual }
-        })
-        .collect();
-    ToplevelIcon { sizes }
-}

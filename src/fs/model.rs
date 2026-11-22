@@ -69,6 +69,7 @@ impl From<std::io::Error> for FsError {
     }
 }
 
+#[cfg(unix)]
 impl From<glib::Error> for FsError {
     fn from(e: glib::Error) -> Self {
         FsError(e.message().to_string())

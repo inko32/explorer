@@ -1058,8 +1058,8 @@ pub fn paint_popup(
     cfg: &MenuCfg,
     skin: skin::Skin,
     scale: f32,
-) -> Option<crate::dnd_wayland::DragVisual> {
-    use crate::dnd_wayland::{draw_text_weighted, text_size_weighted, Canvas};
+) -> Option<crate::drag_paint::DragVisual> {
+    use crate::drag_paint::{draw_text_weighted, text_size_weighted, Canvas};
 
     let l = &cfg.layout;
     let scale = scale.max(1.0);
@@ -1127,7 +1127,7 @@ pub fn paint_popup(
                 let y = (top + l.separator_height / 2.0) * scale;
                 let x0 = (border + l.gutter) * scale;
                 let x1 = (border + content_w - l.pad_h) * scale;
-                let line = crate::dnd_wayland::rgba255(skin.menu_section_border);
+                let line = crate::drag_paint::rgba255(skin.menu_section_border);
                 let xx = x0 as i32;
                 let yy = y as i32;
                 for x in xx..x1 as i32 {
@@ -1150,7 +1150,7 @@ pub fn paint_popup(
                     cv.blend_icon(1.0, ix, iy, l.icon_size, &icon, 255);
                 }
                 let color = if item.enabled { skin.text } else { skin.disabled };
-                let c = crate::dnd_wayland::rgba255(color);
+                let c = crate::drag_paint::rgba255(color);
                 let size = l.font_size * scale;
                 let (tw, th) = text_size_weighted(&item.label, size, item.bold);
                 let tx = (border + l.gutter) * scale;
@@ -1160,7 +1160,7 @@ pub fn paint_popup(
                     let sx = (border + l.gutter + tw / scale + l.gutter) * scale;
                     let (sw, sh) = text_size_weighted(&item.shortcut, size, false);
                     let sy = (row_top + (l.item_height - sh / scale) / 2.0) * scale;
-                    draw_text_weighted(&mut cv, sx, sy, size, &item.shortcut, crate::dnd_wayland::rgba255(skin.subtle), false);
+                    draw_text_weighted(&mut cv, sx, sy, size, &item.shortcut, crate::drag_paint::rgba255(skin.subtle), false);
                     let _ = sw;
                 }
                 top += l.item_height;
@@ -1168,7 +1168,7 @@ pub fn paint_popup(
         }
     }
 
-    Some(crate::dnd_wayland::DragVisual {
+    Some(crate::drag_paint::DragVisual {
         width: w,
         height: h,
         pixels: px,

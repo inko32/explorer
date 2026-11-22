@@ -1,0 +1,24 @@
+[package]
+name = "wine_port"
+version = "0.1.0"
+edition = "2024"
+description = "Cross-build of the iced_resize repro for Windows, run under Wine"
+license = "MIT"
+
+[dependencies]
+# Same iced rev as demo/iced_resize, software renderer (tiny-skia) so no
+# GPU is needed under Wine. The "wayland" feature is dropped: winit's
+# wayland/x11 backends are cfg'd out on Windows anyway and would only pull
+# Linux-only deps into the cross build.
+iced = { git = "https://github.com/iced-rs/iced", rev = "e5c350f271a8046f875c6662d452fde9e462d486", default-features = false, features = ["tiny-skia", "thread-pool"] }
+
+# The [patch] section always points at the demo's own iced overlay (seeded
+# into target/iced-overlay by the Makefile from the explorer overlay).
+# `make patch-iced` applies deps/iced-resize-viewport-sync.patch on it,
+# `make unpatch-iced` reverts it to pristine upstream — cargo rebuilds the
+# overlay crates either way.
+[patch."https://github.com/iced-rs/iced"]
+iced = { path = "target/iced-overlay" }
+
+[profile.release]
+debug = false

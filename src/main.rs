@@ -9,14 +9,26 @@ mod commands;
 // executables, favorites), not yet wired in the UI.
 #[allow(dead_code)]
 mod dnd;
+// Wayland side-channel (unix only); the stub keeps the GUI-side types
+// and no-op handle methods compiling on other platforms.
+#[cfg(unix)]
+#[path = "dnd_wayland.rs"]
+mod dnd_wayland;
+#[cfg(not(unix))]
+#[path = "dnd_wayland_stub.rs"]
 mod dnd_wayland;
 mod details_view;
+// Off-window pixel painting (drag visuals, popup/menu pixels, toplevel
+// icon) — portable, shared by the unix side-channel and the in-window
+// overlays on every platform.
+mod drag_paint;
 mod file_ops_ui;
 mod folder;
 mod fonts;
 mod fs;
 mod icon;
 mod icon_theme;
+#[cfg(unix)]
 mod icon_wayland;
 mod icons;
 mod menu;
@@ -29,7 +41,9 @@ mod nav_pane;
 mod perf;
 mod navigation;
 mod pane;
+#[cfg(unix)]
 mod popup_wayland;
+#[cfg(unix)]
 mod raw_handle_wayland;
 // Ribbon: the vendored rs-ribbon framework (Windows Ribbon Framework
 // re-implementation, vendor/rs-ribbon) + the explorer commanding layer
@@ -300,13 +314,26 @@ fn main() -> iced::Result {
         // xdg-toplevel-icon support); the app id below drives the
         // taskbar lookup there.
         icon: window_icon(),
-        platform_specific: iced::window::settings::PlatformSpecific {
-            application_id: "explorer".into(),
-            ..Default::default()
-        },
+        // `application_id` only exists on winit's Wayland build of
+        // PlatformSpecific (the field is feature-gated there); other
+        // platforms take the default.
+        platform_specific: platform_settings(),
         ..Default::default()
     })
     .run()
+}
+
+#[cfg(unix)]
+fn platform_settings() -> iced::window::settings::PlatformSpecific {
+    iced::window::settings::PlatformSpecific {
+        application_id: "explorer".into(),
+        ..Default::default()
+    }
+}
+
+#[cfg(not(unix))]
+fn platform_settings() -> iced::window::settings::PlatformSpecific {
+    iced::window::settings::PlatformSpecific::default()
 }
 
 /// `--dpi=N` -> `EXPLORER_DPI`: absolute scale (percent of 96 dpi, or a

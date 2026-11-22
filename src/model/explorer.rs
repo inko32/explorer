@@ -315,7 +315,7 @@ impl Explorer {
             break;
         }
         let cwd = cwd
-            .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
+            .or_else(home_dir)
             .unwrap_or_else(|| PathBuf::from("/"));
         let view_cfg = crate::view_step::ViewCfg::load();
         let view_index = view_cfg.presets.details;
@@ -1048,7 +1048,7 @@ impl Explorer {
         } else {
             crate::ui_common::skin::light()
         };
-        h.set_icon(crate::icon_wayland::paint_toplevel_icon(key.0, &skin));
+        h.set_icon(crate::drag_paint::paint_toplevel_icon(key.0, &skin));
     }
 
     fn handle(&mut self, message: Message) -> iced::Task<Message> {
@@ -2336,6 +2336,19 @@ impl Explorer {
                 iced::Task::none()
             }
         }
+    }
+}
+
+/// Initial directory fallback: `$HOME` on unix, `%USERPROFILE%` on
+/// Windows (wine exports both; `/` is the last-resort root).
+fn home_dir() -> Option<PathBuf> {
+    #[cfg(unix)]
+    {
+        std::env::var_os("HOME").map(PathBuf::from)
+    }
+    #[cfg(not(unix))]
+    {
+        std::env::var_os("USERPROFILE").map(PathBuf::from)
     }
 }
 

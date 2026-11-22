@@ -318,6 +318,152 @@ check: setup-env
 run: build
 	$(CARGO_TARGET_DIR)/$(TARGET)/release/$(BIN) $(ARGS)
 
+# --- Windows cross-build + Wine (targets below are additive; the Linux
+# --- build above is untouched) ---------------------------------------------
+# Same toolchain as demo/wine_port: x86_64-pc-windows-gnu via a tmpfs-local
+# mingw-w64 (fetched as Arch package tarballs, no root), run with a wine
+# prefix that also lives in the tmpfs. `run-wine`/`dist-wine` copy host
+# fonts into the prefix (fontdb scans %SYSTEMROOT%\Fonts, which wine
+# leaves empty — without it no text renders) and, when present, a real
+# 7z.dll next to the exe (the archive backend loads "7z.dll" through
+# LoadLibrary's search order).
+TARGET_WINE := x86_64-pc-windows-gnu
+MINGW_ROOT  := $(TMPROOT)/mingw
+WINEPREFIX  := $(TMPROOT)/wine-prefix
+HOST_FONTS  ?= /usr/share/fonts/liberation
+FONT_MARKER := $(WINEPREFIX)/drive_c/windows/Fonts/.copied-from-host
+WINE_EXE    := $(CARGO_TARGET_DIR)/$(TARGET_WINE)/release/$(BIN).exe
+
+MINGW_MIRROR := https://mirror.rackspace.com/archlinux/extra/os/x86_64
+MINGW_PKGS   := \
+	mingw-w64-binutils-2.47-1-x86_64 \
+	mingw-w64-headers-14.0.0-1-any \
+	mingw-w64-crt-14.0.0-1-any \
+	mingw-w64-winpthreads-14.0.0-1-any \
+	mingw-w64-gcc-16.2.0-2-x86_64
+
+# Windows stdlib for the tmpfs toolchain (idempotent; same retry
+# discipline as setup-env).
+.PHONY: setup-wine-toolchain
+setup-wine-toolchain: setup-env
+	@if ! rustup +$(TOOLCHAIN) target list --installed 2>/dev/null | grep -q "$(TARGET_WINE)"; then \
+		echo "==> Adding target '$(TARGET_WINE)' for $(TOOLCHAIN)..."; \
+		n=1; while [ $$n -le 3 ]; do \
+			if rustup +$(TOOLCHAIN) target add $(TARGET_WINE); then \
+				break; \
+			fi; \
+			echo "==> Download failed, retrying ($$n/3)..."; \
+			n=$$((n + 1)); \
+			sleep 2; \
+		done; \
+		[ $$n -le 3 ] || exit 1; \
+	fi
+
+# mingw-w64 gcc/binutils/CRT, unpacked from Arch packages into the
+# tmpfs. No root: curl the .pkg.tar.zst, tar -xf into $(MINGW_ROOT).
+# One fetch per tmpfs lifetime (needs network).
+.PHONY: setup-mingw
+setup-mingw:
+	@if [ ! -x $(MINGW_ROOT)/usr/bin/x86_64-w64-mingw32-gcc ]; then \
+		mkdir -p $(MINGW_ROOT) $(TMPROOT)/pkgs; \
+		for p in $(MINGW_PKGS); do \
+			if [ ! -f $(TMPROOT)/pkgs/$$p.pkg.tar.zst ]; then \
+				echo "==> downloading $$p"; \
+				curl -fsSL -o $(TMPROOT)/pkgs/$$p.pkg.tar.zst $(MINGW_MIRROR)/$$p.pkg.tar.zst; \
+			fi; \
+			echo "==> extracting $$p"; \
+			tar -xf $(TMPROOT)/pkgs/$$p.pkg.tar.zst -C $(MINGW_ROOT); \
+		done; \
+	fi
+
+# Populate C:\Windows\Fonts in the (possibly not yet created) wine
+# prefix. Creating the dir before wineboot is fine — wineboot only adds
+# files. Without this the app finds zero fonts and renders no text.
+# Wine never copies its OWN bundled fonts into the prefix (it keeps
+# them behind registry entries pointing at Z: paths, which the app's
+# font stack — fontdb — does not read), so copy both wine's bundled
+# TTFs (Tahoma is Wine's default UI font) and a host font set; the
+# fonts.yaml fallback list names Tahoma/Arial first among the always
+# available ones.
+WINE_FONTS ?= /usr/share/wine/fonts
+.PHONY: setup-fonts
+setup-fonts:
+	@if [ ! -f $(FONT_MARKER) ]; then \
+		mkdir -p $(WINEPREFIX)/drive_c/windows/Fonts && \
+		[ -d $(WINE_FONTS) ] && cp $(WINE_FONTS)/*.ttf $(WINEPREFIX)/drive_c/windows/Fonts/ || true; \
+		cp $(HOST_FONTS)/*.tt[fc] $(WINEPREFIX)/drive_c/windows/Fonts/ && \
+		touch $(FONT_MARKER); \
+	fi
+
+# --- 7z.dll for the Windows build -------------------------------------------
+# The archive backend dlopens "7z.dll" (LoadLibrary search: exe dir
+# first), so the build fetches one from the pinned 7-Zip-zstd installer
+# (a 7z self-extracting archive; version+URL hardcoded on purpose — the
+# dll is a build input). Extraction: `7z x` when the CLI is available,
+# else a silent (/S) install into the tmpfs wine prefix. Any failure
+# only warns — archives still open via the tar/CLI backends.
+7Z_VER   := 26.05-v1.5.7-R1
+7Z_EXE   := 7z26.05-zstd-x64.exe
+7Z_URL   := https://github.com/mcmilk/7-Zip-zstd/releases/download/v$(7Z_VER)/$(7Z_EXE)
+7Z_STAGE := $(TMPROOT)/7z-installer
+# Last-resort fallback: a locally available dll (e.g. _real_win10).
+7Z_DLL   ?= $(CURDIR)/_real_win10/7z.dll
+
+.PHONY: setup-7z-dll
+setup-7z-dll: build-wine
+	@if [ ! -f $(CARGO_TARGET_DIR)/$(TARGET_WINE)/release/7z.dll ]; then \
+		mkdir -p $(7Z_STAGE); \
+		if [ ! -f $(7Z_STAGE)/$(7Z_EXE) ]; then \
+			echo "==> downloading $(7Z_URL)"; \
+			curl -fsSL --retry 3 -o $(7Z_STAGE)/$(7Z_EXE) $(7Z_URL) || true; \
+		fi; \
+		if [ -f $(7Z_STAGE)/$(7Z_EXE) ]; then \
+			if command -v 7z >/dev/null 2>&1; then \
+				7z x -y -o$(7Z_STAGE)/x $(7Z_STAGE)/$(7Z_EXE) >/dev/null 2>&1 || true; \
+			fi; \
+			if [ ! -f $(7Z_STAGE)/x/7z.dll ]; then \
+				echo "==> 7z CLI failed; silent-installing into the wine prefix"; \
+				WINEPREFIX=$(WINEPREFIX) wine $(7Z_STAGE)/$(7Z_EXE) /S >/dev/null 2>&1 || true; \
+				dll=$$(find $(WINEPREFIX)/drive_c -name 7z.dll 2>/dev/null | head -1); \
+				[ -n "$$dll" ] && cp "$$dll" $(7Z_STAGE)/x/7z.dll; \
+			fi; \
+			if [ -f $(7Z_STAGE)/x/7z.dll ]; then \
+				cp $(7Z_STAGE)/x/7z.dll $(CARGO_TARGET_DIR)/$(TARGET_WINE)/release/7z.dll; \
+				echo "==> 7z.dll from $(7Z_EXE) ($(7Z_VER)) ready"; \
+			fi; \
+		fi; \
+		if [ ! -f $(CARGO_TARGET_DIR)/$(TARGET_WINE)/release/7z.dll ] && [ -f "$(7Z_DLL)" ]; then \
+			cp "$(7Z_DLL)" $(CARGO_TARGET_DIR)/$(TARGET_WINE)/release/7z.dll; \
+		echo "==> fell back to $(7Z_DLL)"; \
+		fi; \
+		if [ ! -f $(CARGO_TARGET_DIR)/$(TARGET_WINE)/release/7z.dll ]; then \
+			echo "==> WARNING: no 7z.dll — archives via tar/CLI only"; \
+		fi; \
+	fi
+
+check-wine: setup-wine-toolchain setup-mingw setup-overlays
+	PATH="$(MINGW_ROOT)/usr/bin:$(PATH)" cargo +$(TOOLCHAIN) check --target $(TARGET_WINE) $(if $(NO_DEFAULT),--no-default-features,) $(if $(FEATURES),--features $(FEATURES),)
+
+build-wine: setup-wine-toolchain setup-mingw setup-overlays
+	PATH="$(MINGW_ROOT)/usr/bin:$(PATH)" cargo +$(TOOLCHAIN) build --release --target $(TARGET_WINE) $(if $(NO_DEFAULT),--no-default-features,) $(if $(FEATURES),--features $(FEATURES),)
+
+run-wine: build-wine setup-fonts setup-7z-dll
+	WINEPREFIX=$(WINEPREFIX) wine $(WINE_EXE) $(ARGS)
+
+# Windows sibling of `dist`: the release PE plus 7z.dll (when present),
+# optionally upx-compressed with the same COMPRESS discipline.
+dist-wine: build-wine setup-7z-dll setup-upx
+	@mkdir -p $(DIST)/wine
+	@cp $(WINE_EXE) $(DIST)/wine/$(BIN).exe
+	@if [ -f $(CARGO_TARGET_DIR)/$(TARGET_WINE)/release/7z.dll ]; then \
+		cp $(CARGO_TARGET_DIR)/$(TARGET_WINE)/release/7z.dll $(DIST)/wine/; \
+	fi
+	@if [ "$(COMPRESS)" != "0" ]; then \
+		strip --strip-all $(DIST)/wine/$(BIN).exe 2>/dev/null || true; \
+		$(UPX_BIN) $(DIST)/wine/$(BIN).exe || true; \
+	fi
+	@ls -l $(DIST)/wine/
+
 test: setup-env
 	cargo +$(TOOLCHAIN) test --target $(TARGET) $(if $(NO_DEFAULT),--no-default-features,) $(if $(FEATURES),--features $(FEATURES),)
 

@@ -13,10 +13,16 @@
 //! the seam.
 
 pub mod archive;
+#[cfg(unix)]
 mod gio_backend;
 pub mod model;
+#[cfg(not(unix))]
+mod std_backend;
 
+#[cfg(unix)]
 pub(crate) use gio_backend::writable;
+#[cfg(not(unix))]
+pub(crate) use std_backend::writable;
 pub use model::{Entry, EntryKind, FsError, Volume, IMAGE_EXTS, is_image_name};
 
 use iced::futures::channel::mpsc;
@@ -45,14 +51,20 @@ pub trait Backend: Send + 'static {
     fn fs_type(&self, path: &Path) -> Option<String>;
 }
 
-/// Unified backend: GIO for real paths, 7-Zip for archive paths.
+/// Unified backend: the platform backend (GIO on unix, std::fs on
+/// Windows) for real paths, 7-Zip for archive paths.
 pub struct VfsBackend {
-    gio: gio_backend::GioBackend,
+    inner: PlatformBackend,
 }
+
+#[cfg(unix)]
+use gio_backend::GioBackend as PlatformBackend;
+#[cfg(not(unix))]
+use std_backend::StdBackend as PlatformBackend;
 
 impl VfsBackend {
     pub fn new() -> Self {
-        Self { gio: gio_backend::GioBackend::new() }
+        Self { inner: PlatformBackend::new() }
     }
 }
 
@@ -62,64 +74,64 @@ fn readonly() -> FsError {
 
 impl Backend for VfsBackend {
     fn home(&self) -> PathBuf {
-        self.gio.home()
+        self.inner.home()
     }
 
     fn list(&self, path: &Path) -> Result<Vec<Entry>, FsError> {
         if let Some((archive, inner)) = archive::resolve(path) {
             return archive::list(&archive, &inner);
         }
-        self.gio.list(path)
+        self.inner.list(path)
     }
 
     fn volumes(&self) -> Vec<Volume> {
-        self.gio.volumes()
+        self.inner.volumes()
     }
 
     fn create_dir(&self, path: &Path) -> Result<(), FsError> {
         if archive::resolve(path).is_some() {
             return Err(readonly());
         }
-        self.gio.create_dir(path)
+        self.inner.create_dir(path)
     }
 
     fn rename(&self, from: &Path, to: &Path) -> Result<(), FsError> {
         if archive::resolve(from).is_some() || archive::resolve(to).is_some() {
             return Err(readonly());
         }
-        self.gio.rename(from, to)
+        self.inner.rename(from, to)
     }
 
     fn trash(&self, path: &Path) -> Result<(), FsError> {
         if archive::resolve(path).is_some() {
             return Err(readonly());
         }
-        self.gio.trash(path)
+        self.inner.trash(path)
     }
 
     fn remove(&self, path: &Path) -> Result<(), FsError> {
         if archive::resolve(path).is_some() {
             return Err(readonly());
         }
-        self.gio.remove(path)
+        self.inner.remove(path)
     }
 
     fn copy_file(&self, src: &Path, dst: &Path, progress: &mut dyn FnMut(u64, u64)) -> Result<(), FsError> {
         if archive::resolve(src).is_some() || archive::resolve(dst).is_some() {
             return Err(readonly());
         }
-        self.gio.copy_file(src, dst, progress)
+        self.inner.copy_file(src, dst, progress)
     }
 
     fn is_dir(&self, path: &Path) -> bool {
         if let Some((archive, inner)) = archive::resolve(path) {
             return archive::is_dir(&archive, &inner);
         }
-        self.gio.is_dir(path)
+        self.inner.is_dir(path)
     }
 
     fn fs_type(&self, path: &Path) -> Option<String> {
-        self.gio.fs_type(path)
+        self.inner.fs_type(path)
     }
 }
 
