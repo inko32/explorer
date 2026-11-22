@@ -280,8 +280,21 @@ fn text_system() -> &'static std::sync::Mutex<(cosmic_text::FontSystem, cosmic_t
         std::sync::OnceLock::new();
     TS.get_or_init(|| {
         let fs = cosmic_text::FontSystem::new();
-        #[cfg(feature = "embed-selawik")]
-        let mut fs = fs;
+        #[cfg(not(unix))]
+        let fs = {
+            // fresh wine prefix: FontSystem::new found zero faces (its
+            // fontdb scan sees the empty C:\Windows\Fonts); load the
+            // registry-listed fonts so painted captions/menus show text
+            let mut fs = fs;
+            if fs.db_mut().faces().next().is_none() {
+                for path in crate::fonts::supplementary_font_paths() {
+                    if let Ok(data) = std::fs::read(&path) {
+                        fs.db_mut().load_font_data(data);
+                    }
+                }
+            }
+            fs
+        };
         // the embedded UI font (feature `embed-selawik`) is loaded into
         // the renderer's font system at startup (main.rs app.fonts) but
         // NOT into system fontdb copies: without it, `attrs`' primary

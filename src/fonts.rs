@@ -37,6 +37,206 @@ pub const DEFAULT_FAMILIES: &[&str] = &[
     "sans-serif",
 ];
 
+/// Windows-only: `(registry value name, font file path)` pairs from
+/// `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts`.
+///
+/// Why this exists: fontdb/cosmic-text discover fonts by scanning font
+/// DIRECTORIES with plain file I/O (`%SYSTEMROOT%\Fonts`), never
+/// through the OS font API. Wine serves its fonts (bundled + the
+/// host's, via fontconfig) through gdi32 instead and leaves
+/// `C:\Windows\Fonts` empty — so a fresh prefix has zero loadable
+/// faces and renders no text. The registry lists every font as an
+/// absolute path (wine: `Z:\usr\share\wine\fonts\msyh.ttf`, which
+/// the PE binary's std::fs opens through the Z: drive mapping; real
+/// Windows: bare filenames, resolved against `%SYSTEMROOT%\Fonts`).
+#[cfg(not(unix))]
+pub(crate) fn registry_fonts() -> Vec<(String, std::path::PathBuf)> {
+    use windows_sys::Win32::System::Registry::{
+        HKEY, HKEY_LOCAL_MACHINE, KEY_READ, REG_SZ, RegCloseKey, RegEnumValueW, RegOpenKeyExW,
+        RegQueryInfoKeyW,
+    };
+
+    let mut out = Vec::new();
+    let subkey: Vec<u16> = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts\0"
+        .encode_utf16()
+        .collect();
+    let mut key: HKEY = std::ptr::null_mut();
+    // wine prefixes without the key (or non-Windows hosts) just fall through
+    if unsafe { RegOpenKeyExW(HKEY_LOCAL_MACHINE, subkey.as_ptr(), 0, KEY_READ, &mut key) } != 0 {
+        return out;
+    }
+    let mut values = 0u32;
+    let mut max_name = 0u32; // WCHARs
+    let mut max_data = 0u32; // bytes
+    let info = unsafe {
+        RegQueryInfoKeyW(
+            key,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut values,
+            &mut max_name,
+            &mut max_data,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    };
+    if info != 0 {
+        unsafe { RegCloseKey(key) };
+        return out;
+    }
+    let name_cap = max_name + 1;
+    let data_cap = max_data + 2; // WCHAR terminator safety
+    let mut name_buf = vec![0u16; name_cap as usize];
+    let mut data_buf = vec![0u8; data_cap as usize];
+    for i in 0..values {
+        let mut name_len = name_cap;
+        let mut data_len = data_cap;
+        let mut typ = 0u32;
+        let r = unsafe {
+            RegEnumValueW(
+                key,
+                i,
+                name_buf.as_mut_ptr(),
+                &mut name_len,
+                std::ptr::null_mut(),
+                &mut typ,
+                data_buf.as_mut_ptr(),
+                &mut data_len,
+            )
+        };
+        if r != 0 || typ != REG_SZ {
+            continue;
+        }
+        let name = String::from_utf16_lossy(&name_buf[..name_len as usize]);
+        // data is little-endian UTF-16 (x86-64 windows hosts and wine alike)
+        let units: Vec<u16> = data_buf[..data_len as usize]
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        let value = String::from_utf16_lossy(&units);
+        let path = std::path::PathBuf::from(value.trim_end_matches('\0'));
+        // bare filenames (real Windows) live in %SYSTEMROOT%\Fonts;
+        // absolute paths (wine's Z:\...) are used as-is
+        let path = if path.is_absolute() {
+            path
+        } else {
+            std::env::var_os("SYSTEMROOT")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| "C:\\Windows".into())
+                .join("Fonts")
+                .join(path)
+        };
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase());
+        if matches!(ext.as_deref(), Some("ttf" | "ttc" | "otf")) && path.is_file() {
+            out.push((name, path));
+        }
+    }
+    unsafe { RegCloseKey(key) };
+    out
+}
+
+/// Windows-only: font files from the registry, picked for the shipped
+/// fallback list (entries whose name mentions a fallback family first,
+/// then a few small others), capped so startup stays cheap. Skipped
+/// entirely when the direct font-directory scan found faces — that is
+/// the real-Windows case, where this would only re-load what fontdb
+/// already discovered.
+#[cfg(not(unix))]
+pub(crate) fn supplementary_font_paths() -> Vec<std::path::PathBuf> {
+    const MAX_FILES: usize = 16;
+    const MAX_FILE_BYTES: u64 = 24 * 1024 * 1024;
+    let mut db = fontdb::Database::new();
+    db.load_system_fonts();
+    if db.faces().next().is_some() {
+        return Vec::new();
+    }
+    let entries = registry_fonts();
+    if std::env::var_os("EXPLORER_DEBUG").is_some() {
+        eprintln!(
+            "[fonts] font-dir scan found 0 faces; {} registry font entries",
+            entries.len()
+        );
+    }
+    let mut picked: Vec<&(String, std::path::PathBuf)> = Vec::new();
+    // pass 1: families from the shipped fallback list, in list order
+    // ("Noto Sans" alone matches hundreds of host variants — the cap
+    // keeps startup cheap; Tahoma/Arial are the first real hits)
+    'families: for fam in DEFAULT_FAMILIES {
+        if fam.eq_ignore_ascii_case("sans-serif") {
+            continue;
+        }
+        for e in &entries {
+            if picked.len() >= MAX_FILES {
+                break 'families;
+            }
+            if e.0.to_ascii_lowercase().contains(&fam.to_ascii_lowercase())
+                && !picked.iter().any(|p| p.1 == e.1)
+            {
+                picked.push(e);
+            }
+        }
+    }
+    // pass 1b: Wine's built-in CJK-capable UI font (covers CJK file
+    // names when the host has no small CJK font to offer)
+    if picked.len() < MAX_FILES {
+        for e in &entries {
+            if picked.len() >= MAX_FILES {
+                break;
+            }
+            if e.0.to_ascii_lowercase().contains("microsoft yahei")
+                && !picked.iter().any(|p| p.1 == e.1)
+            {
+                picked.push(e);
+            }
+        }
+    }
+    // pass 2: fill up with the remaining small files (wine's bundled
+    // set: marlett/webdings are useless for text but cheap to skip here —
+    // the per-file size cap keeps the big CJK collections out)
+    for e in &entries {
+        if picked.len() >= MAX_FILES {
+            break;
+        }
+        if picked.iter().any(|p| p.1 == e.1) {
+            continue;
+        }
+        let small = std::fs::metadata(&e.1).map(|m| m.len() <= MAX_FILE_BYTES).unwrap_or(false);
+        if small {
+            picked.push(e);
+        }
+    }
+    let paths: Vec<std::path::PathBuf> = picked.into_iter().map(|e| e.1.clone()).collect();
+    if std::env::var_os("EXPLORER_DEBUG").is_some() {
+        for p in &paths {
+            eprintln!("[fonts]   + {}", p.display());
+        }
+    }
+    paths
+}
+
+/// Supplementary fonts as bytes, for the renderer's `font::load` (iced
+/// owns that font system; this is the only way in). Empty on unix.
+pub fn supplementary_font_bytes() -> Vec<Vec<u8>> {
+    #[cfg(not(unix))]
+    {
+        supplementary_font_paths()
+            .iter()
+            .filter_map(|p| std::fs::read(p).ok())
+            .collect()
+    }
+    #[cfg(unix)]
+    {
+        Vec::new()
+    }
+}
+
 /// Resolve the primary UI family from the configured fallback list:
 /// the first family that is available wins — Segoe UI when embedded
 /// (feature) or installed, otherwise the first system-installed entry;
@@ -45,6 +245,14 @@ pub const DEFAULT_FAMILIES: &[&str] = &[
 pub fn resolve_primary(families: &[String]) -> Font {
     let mut db = fontdb::Database::new();
     db.load_system_fonts();
+    #[cfg(not(unix))]
+    if db.faces().next().is_none() {
+        // fresh wine prefix: the scan found nothing, fall back to the
+        // registry-listed files so the fallback list can resolve
+        for path in supplementary_font_paths() {
+            let _ = db.load_font_file(&path);
+        }
+    }
     let installed = |name: &str| {
         db.faces().any(|f| {
             f.families.iter().any(|(n, _)| n.eq_ignore_ascii_case(name))

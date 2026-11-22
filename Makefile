@@ -441,12 +441,12 @@ setup-7z-dll: build-wine
 		fi; \
 	fi
 
-# Feature set for the wine builds. dist-wine embeds Selawik (SIL OFL,
-# free to ship) so the distributed exe renders text in ANY wine prefix
-# — a double-clicked binary runs in the user's default prefix, whose
-# C:\Windows\Fonts is usually empty (wine only registers fonts in the
-# registry, which the app's font stack never reads). run-wine keeps the
-# feature off so the local test path exercises the real font fallback.
+# Feature set for the wine builds. Empty by default: the app loads
+# wine's registered fonts at runtime when the font-directory scan found
+# nothing (fonts.rs supplementary_font_paths), so a double-clicked exe
+# renders text in a fresh prefix with no embedding. `embed-selawik`
+# (SIL OFL) stays available via FEATURES=embed-selawik for a fully
+# font-self-contained binary.
 WINE_FEATURES ?= $(FEATURES)
 
 check-wine: setup-wine-toolchain setup-mingw setup-overlays
@@ -459,9 +459,7 @@ run-wine: build-wine setup-fonts setup-7z-dll
 	WINEPREFIX=$(WINEPREFIX) wine $(WINE_EXE) $(ARGS)
 
 # Windows sibling of `dist`: the release PE plus 7z.dll (when present),
-# optionally upx-compressed with the same COMPRESS discipline. Builds
-# with embed-selawik (see WINE_FEATURES) unless FEATURES is given.
-dist-wine: WINE_FEATURES = $(or $(FEATURES),embed-selawik)
+# optionally upx-compressed with the same COMPRESS discipline.
 dist-wine: build-wine setup-7z-dll setup-upx
 	@mkdir -p $(DIST)/wine
 	@cp $(WINE_EXE) $(DIST)/wine/$(BIN).exe

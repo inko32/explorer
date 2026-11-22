@@ -224,7 +224,14 @@ fn main() -> iced::Result {
         );
     }
     let app = iced::application(
-        || (Explorer::new(), iced::Task::none()),
+        || {
+            // before the first view() can measure any text: a fresh
+            // wine prefix has no loadable system fonts (see fonts.rs),
+            // and measurements memoize — so seed the renderer's global
+            // font system synchronously rather than via async tasks
+            boot_fonts();
+            (Explorer::new(), iced::Task::none())
+        },
         Explorer::update,
         ui::view,
     );
@@ -334,6 +341,29 @@ fn platform_settings() -> iced::window::settings::PlatformSpecific {
 #[cfg(not(unix))]
 fn platform_settings() -> iced::window::settings::PlatformSpecific {
     iced::window::settings::PlatformSpecific::default()
+}
+
+/// Startup font loading. No-op on unix; on Windows, feeds the
+/// registry-enlisted fonts (wine's bundled/host fonts — see
+/// fonts::supplementary_font_bytes) into the renderer's global font
+/// system when the font-directory scan found nothing, so a fresh wine
+/// prefix renders text instead of nothing. Synchronous on purpose:
+/// text measurements memoize, and measuring before the faces exist
+/// would poison every width-dependent layout for the session.
+fn boot_fonts() {
+    let bytes = crate::fonts::supplementary_font_bytes();
+    if bytes.is_empty() {
+        return;
+    }
+    if std::env::var_os("EXPLORER_DEBUG").is_some() {
+        eprintln!("[fonts] loading {} supplementary faces at startup", bytes.len());
+    }
+    let mut system = iced::advanced::graphics::text::font_system()
+        .write()
+        .unwrap_or_else(|e| e.into_inner());
+    for b in bytes {
+        system.load_font(b.into());
+    }
 }
 
 /// `--dpi=N` -> `EXPLORER_DPI`: absolute scale (percent of 96 dpi, or a
