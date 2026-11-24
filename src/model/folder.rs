@@ -425,15 +425,15 @@ impl Explorer {
             }
             vs::Family::Tiles => {
                 let t = &cfg.layouts.tiles;
-                grid_neighbor(i, n, vs::grid_cols(t.cell_w, 0.0, w), dir)
+                grid_neighbor(i, n, cfg.grid_cols_at(self.view_index, t.cell_w, 0.0, w), dir)
             }
             vs::Family::SmallIcon => {
                 let m = cfg.small_icon(cfg.icon_px(self.view_index));
-                grid_neighbor(i, n, vs::grid_cols(m.cell_w, m.gap, w), dir)
+                grid_neighbor(i, n, cfg.grid_cols_at(self.view_index, m.cell_w, m.gap, w), dir)
             }
             vs::Family::IconTop => {
                 let m = cfg.icon_top(cfg.icon_px(self.view_index));
-                grid_neighbor(i, n, vs::grid_cols(m.cell_w, m.gap, w), dir)
+                grid_neighbor(i, n, cfg.grid_cols_at(self.view_index, m.cell_w, m.gap, w), dir)
             }
         }
     }
@@ -785,15 +785,17 @@ impl Explorer {
         iced::Task::none()
     }
 
-    /// Width of a Details row's rendered element: the files margin,
-    /// the visible column block (widths + resizers) and the right
-    /// chrome pad — the same geometry `file_row` and the
+    /// Width of a Details row's chrome: the visible column block
+    /// (widths + resizers), starting right of the files margin (the
+    /// column header contains that margin; the item shifts right past
+    /// it) and ending at the block's right edge (the 4px right reserve
+    /// belongs to the header) — the same geometry `file_row` and the
     /// selection-border overlay use. The rubber band must hit this,
     /// not the full pane width: the background right of the column
     /// block is empty space. Allocation-free: `marquee_update` calls
     /// this through `item_rect` for every item.
     pub(crate) fn details_row_w(&self) -> f32 {
-        let mut w = self.detail_cfg.files_left + self.detail_cfg.chrome_pad;
+        let mut w = 0.0;
         let mut prev_visible = false;
         for &g in &self.details_col_order {
             if !self.details_col_on.get(g).copied().unwrap_or(true) {
@@ -821,16 +823,24 @@ impl Explorer {
         // the files sit below the reserved files_top strip (the
         // IconTop branch reads it back from the row prefix sums)
         let top = cfg.files_top(self.view_index);
+        // every layout reserves an empty strip left of the files (the
+        // rubber band can reach or start there); the Details margin is
+        // the column-header one
+        let left = if cfg.family(self.view_index) == vs::Family::Details {
+            self.detail_cfg.files_left
+        } else {
+            cfg.files_left(self.view_index)
+        };
         match cfg.family(self.view_index) {
             vs::Family::Content => {
                 let row_h = cfg.layouts.content.row_h;
-                (0.0, top + i as f32 * row_h, pane_w, row_h)
+                (left, top + i as f32 * row_h, (pane_w - left).max(0.0), row_h)
             }
             vs::Family::Details => {
                 let row_h = cfg.details_row_h(self.details_compact);
                 let pitch = cfg.details_pitch(self.details_compact);
                 (
-                    0.0,
+                    left,
                     cfg.layouts.details.header_h
                         + cfg.layouts.details.files_gap
                         + i as f32 * pitch,
@@ -851,7 +861,7 @@ impl Explorer {
                 let col_w = cfg.list_col_w(longest);
                 let rows = cfg.list_rows_per_col(self.viewport_h);
                 (
-                    (i / rows) as f32 * col_w,
+                    left + (i / rows) as f32 * col_w,
                     top + (i % rows) as f32 * l.row_h,
                     col_w,
                     l.row_h,
@@ -859,9 +869,9 @@ impl Explorer {
             }
             vs::Family::Tiles => {
                 let t = &cfg.layouts.tiles;
-                let cols = vs::grid_cols(t.cell_w, 0.0, pane_w);
+                let cols = cfg.grid_cols_at(self.view_index, t.cell_w, 0.0, pane_w);
                 (
-                    (i % cols) as f32 * t.cell_w,
+                    left + (i % cols) as f32 * t.cell_w,
                     top + (i / cols) as f32 * t.cell_h,
                     t.cell_w,
                     t.cell_h,
@@ -869,9 +879,9 @@ impl Explorer {
             }
             vs::Family::SmallIcon => {
                 let m = cfg.small_icon(s);
-                let cols = vs::grid_cols(m.cell_w, m.gap, pane_w);
+                let cols = cfg.grid_cols_at(self.view_index, m.cell_w, m.gap, pane_w);
                 (
-                    (i % cols) as f32 * (m.cell_w + m.gap),
+                    left + (i % cols) as f32 * (m.cell_w + m.gap),
                     top + (i / cols) as f32 * (m.cell_h + m.gap),
                     m.cell_w,
                     m.cell_h,
@@ -890,7 +900,7 @@ impl Explorer {
                 let col = i % rows.cols;
                 let row = i / rows.cols;
                 (
-                    col as f32 * (m.cell_w + m.gap),
+                    left + col as f32 * (m.cell_w + m.gap),
                     rows.starts[row],
                     m.cell_w,
                     rows.item_h.get(i).copied().unwrap_or(m.cell_h),
@@ -933,9 +943,10 @@ impl Explorer {
             let col_w = self.view_cfg.list_col_w(longest);
             let rows = self.view_cfg.list_rows_per_col(self.viewport_h);
             let top = self.view_cfg.files_top(self.view_index);
+            let left = self.view_cfg.files_left(self.view_index);
             let row_h = self.view_cfg.layouts.list.row_h;
             for i in 0..self.entries.len() {
-                let ix = (i / rows) as f32 * col_w;
+                let ix = left + (i / rows) as f32 * col_w;
                 let iy = top + (i % rows) as f32 * row_h;
                 if ix < x1 && ix + col_w > x0 && iy < y1 && iy + row_h > y0 {
                     hits.insert(i);
@@ -953,8 +964,9 @@ impl Explorer {
                 pane_w,
                 &self.it_label_lines,
             );
+            let left = self.view_cfg.files_left(self.view_index);
             for i in 0..self.entries.len() {
-                let ix = (i % rows.cols) as f32 * (m.cell_w + m.gap);
+                let ix = left + (i % rows.cols) as f32 * (m.cell_w + m.gap);
                 let iy = rows.starts[i / rows.cols];
                 let iw = m.cell_w;
                 let ih = rows.item_h.get(i).copied().unwrap_or(m.cell_h);
@@ -1236,7 +1248,9 @@ mod focus_tests {
         let mut e = explorer(0);
         e.view_index = e.view_cfg.presets.tiles;
         let t = &e.view_cfg.layouts.tiles;
-        let cols = vs::grid_cols(t.cell_w, 0.0, e.file_pane_width());
+        let cols = e
+            .view_cfg
+            .grid_cols_at(e.view_index, t.cell_w, 0.0, e.file_pane_width());
         // enough items for two full rows plus one partial
         let n = cols * 2 + 1;
         e.entries = (0..n).map(|i| entry(&format!("item{i:02}"))).collect();

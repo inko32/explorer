@@ -5,8 +5,11 @@ dropdown_w: 15.0       # §5 the column's right dropdown button width
 sep_w: 1.0             # §6 the 1px line left of the dropdown button
 arrow_w: 9.0           # §2 sort arrow, on top of the column title: 9px wide…
 arrow_h: 5.0           # …5px tall, touching the header's top line
-files_left: 14.0       # §13 space left of the file rows
-chrome_pad: 4.0        # §16 row chrome reserve inside the column block's right border
+files_left: 14.0       # §13 space left of the file rows: the column header contains
+                       # it, the item chrome shifts right past it
+chrome_pad: 4.0        # §16 right reserve at the right of the last column: the column
+                       # header contains it (its trailing resizer), the item chrome's
+                       # right border stops at the column block's right edge
 col_min: 40.0          # column resizer clamp
 col_max: 600.0
 columns:               # §8/§11 the available columns, in order

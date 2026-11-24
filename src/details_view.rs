@@ -24,10 +24,12 @@ pub struct DetailsViewCfg {
     pub arrow_w: f32,
     /// …9px wide, 5px tall, touching the header's top line.
     pub arrow_h: f32,
-    /// §13 space left of the file rows.
+    /// §13 space left of the file rows: the column header contains
+    /// it, the item chrome shifts right past it.
     pub files_left: f32,
-    /// §16 the row chrome keeps this space inside the column block's
-    /// right border.
+    /// §16 the 4px right reserve at the right of the last column: the
+    /// column header contains it (its trailing resizer), the item
+    /// chrome's right border stops at the column block's right edge.
     pub chrome_pad: f32,
     /// Column resizer clamp.
     pub col_min: f32,

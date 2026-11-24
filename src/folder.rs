@@ -590,7 +590,10 @@ fn grid_view<'a>(
     top: f32,
     cell: impl Fn(usize, &'a Entry) -> Element<'a, Message>,
 ) -> Element<'a, Message> {
-    let cols = vs::grid_cols(cell_w, gap, width);
+    // the grid lays out right of the reserved files_left strip (the
+    // rubber band can reach or start there)
+    let left = state.view_cfg.files_left(state.view_index);
+    let cols = state.view_cfg.grid_cols_at(state.view_index, cell_w, gap, width);
     let total_rows = state.entries.len().div_ceil(cols);
     let pitch = cell_h + gap;
     // the grid sits below the reserved files_top strip (rubber-band space)
@@ -600,15 +603,16 @@ fn grid_view<'a>(
         rows = rows.push(vspacer(first as f32 * pitch).boxed());
     }
     for r in first..last {
-        let mut line = row![].spacing(gap);
+        let mut cells = row![].spacing(gap);
         for c in 0..cols {
             let idx = r * cols + c;
             if let Some(e) = state.entries.get(idx) {
-                line = line.push(cell(idx, e));
+                cells = cells.push(cell(idx, e));
             } else {
-                line = line.push(Space::new().width(Length::Fixed(cell_w)).boxed());
+                cells = cells.push(Space::new().width(Length::Fixed(cell_w)).boxed());
             }
         }
+        let line = row![Space::new().width(Length::Fixed(left)), cells];
         rows = rows.push(container(line).height(Length::Fixed(pitch)).boxed());
     }
     if last < total_rows {
@@ -1077,7 +1081,11 @@ fn sort_arrow(ascending: bool, w: f32, h: f32, color: Color) -> Element<'static,
 /// right-click opens the column menu, a drag reorders (Windows header
 /// semantics: the dragged header floats, the others shift aside, the
 /// rows follow on release). The block is as wide as the columns need —
-/// no 100% fill (§7/§10).
+/// no 100% fill (§7/§10). The first cell's hover box extends
+/// files_left into the §13 left reserve, the last cell's chrome_pad
+/// into the §16 right reserve (its tail carries the column's right
+/// resizer) — the header CONTAINS both reserves; the file items stay
+/// out of them.
 fn details_header(state: &Explorer, skin: skin::Skin) -> Element<'static, Message> {
     let d = &state.view_cfg.layouts.details;
     let dc = &state.detail_cfg;
@@ -1086,31 +1094,21 @@ fn details_header(state: &Explorer, skin: skin::Skin) -> Element<'static, Messag
     if let Some(drag) = &state.col_reorder {
         return details_header_drag(state, skin, drag);
     }
-    let mut cols = row![Space::new().width(Length::Fixed(dc.files_left))];
-    for &g in &details_visible(state) {
+    let vis = details_visible(state);
+    let mut cols = row![];
+    for (n, &g) in vis.iter().enumerate() {
         let hovered = state.col_hovered == Some(g);
         let pressed = state.col_pressed == Some(g);
-        cols = cols.push(details_header_cell(state, skin, g, hovered, pressed, true));
-        // §10/§15: the column's right resizer — the 1px separator line
-        // with a 4px drag target; resizes only its own column
-        let resizer = mouse_area(
-            container(
-                row![
-                    container(
-                        Space::new()
-                            .width(Length::Fixed(crate::theme::border_w(1.0)))
-                            .height(Length::Fill)
-                    )
-                    .style(bg(skin.sep)),
-                    Space::new().width(Length::Fixed(COL_RESIZER_W - crate::theme::border_w(1.0))),
-                ]
-                .height(Length::Fixed(d.header_h)),
-            )
-            .width(Length::Fixed(COL_RESIZER_W)),
-        )
-        .interaction(iced::mouse::Interaction::ResizingHorizontally)
-        .on_press(Message::ColumnSplitBegin(g));
-        cols = cols.push(resizer.boxed());
+        let extra = [
+            if n == 0 { dc.files_left } else { 0.0 },
+            if n + 1 == vis.len() { dc.chrome_pad } else { 0.0 },
+        ];
+        cols = cols.push(details_header_cell(state, skin, g, hovered, pressed, true, extra));
+        // the last column's resizer lives inside its cell's extended
+        // hover box (the §16 tail)
+        if n + 1 < vis.len() {
+            cols = cols.push(col_resizer(state, skin, g));
+        }
     }
     // the strip is opaque: it overlays the scrolling rows, so a
     // transparent background would show file items sliding under it.
@@ -1121,11 +1119,44 @@ fn details_header(state: &Explorer, skin: skin::Skin) -> Element<'static, Messag
         .boxed()
 }
 
+/// §10/§15: a column's right resizer — the 1px separator line with a
+/// 4px drag target; resizes only its own column. Between columns it
+/// sits in the header row; the LAST column's lives inside its cell's
+/// extended box (the §16 right reserve), so the column's hover tint
+/// covers it.
+fn col_resizer(state: &Explorer, skin: skin::Skin, g: usize) -> Element<'static, Message> {
+    let d = &state.view_cfg.layouts.details;
+    mouse_area(
+        container(
+            row![
+                container(
+                    Space::new()
+                        .width(Length::Fixed(crate::theme::border_w(1.0)))
+                        .height(Length::Fill)
+                )
+                .style(bg(skin.sep)),
+                Space::new().width(Length::Fixed(COL_RESIZER_W - crate::theme::border_w(1.0))),
+            ]
+            .height(Length::Fixed(d.header_h)),
+        )
+        .width(Length::Fixed(COL_RESIZER_W)),
+    )
+    .interaction(iced::mouse::Interaction::ResizingHorizontally)
+    .on_press(Message::ColumnSplitBegin(g))
+    .boxed()
+}
+
 /// One Details column header cell: sort arrow on top (§2), the title,
 /// the 1px line + dropdown button at the right (§5/§6). `hovered` /
 /// `pressed` drive the blue tints; `interactive` wraps the cell in the
 /// sort/right-click mouse_area — the reorder drag renders
-/// non-interactive copies that follow the cursor.
+/// non-interactive copies that follow the cursor. `extra` extends the
+/// cell's hover box past the column: [files_left, 0] on the first
+/// column (the §13 reserve), [0, chrome_pad] on the last (the §16
+/// reserve, whose tail carries the column's right resizer). The title
+/// keeps its §4 padding from the COLUMN edge and the sort arrow stays
+/// centered on the column, so the extension shifts neither.
+#[allow(clippy::too_many_arguments)]
 fn details_header_cell(
     state: &Explorer,
     skin: skin::Skin,
@@ -1133,6 +1164,7 @@ fn details_header_cell(
     hovered: bool,
     pressed: bool,
     interactive: bool,
+    extra: [f32; 2],
 ) -> Element<'static, Message> {
     let d = &state.view_cfg.layouts.details;
     let dc = &state.detail_cfg;
@@ -1176,35 +1208,50 @@ fn details_header_cell(
     .on_press(Message::ColumnFilterMenu(g))
     .on_enter(Message::ColumnHoverEnter(g))
     .on_exit(Message::ColumnHoverExit(g));
+    // the arrow stays centered on the COLUMN: the left extension is
+    // skipped past, the column width carries the centering, the right
+    // extension is left over
+    let arrow_row = row![
+        Space::new().width(Length::Fixed(extra[0])),
+        container(arrow)
+            .width(Length::Fixed(w))
+            .align_x(iced::alignment::Horizontal::Center)
+            .height(Length::Fixed(dc.arrow_h)),
+        Space::new().width(Length::Fill),
+    ]
+    .height(Length::Fixed(dc.arrow_h));
+    let mut title_row = row![
+        container(text(c.label.clone()).size(dc.font_size).color(color))
+            .padding(iced::Padding {
+                left: extra[0] + dc.text_pad_left,
+                ..Default::default()
+            }),
+        Space::new().width(Length::Fill),
+        container(
+            Space::new()
+                .width(Length::Fixed(crate::theme::border_w(dc.sep_w)))
+                .height(Length::Fill)
+        )
+        // a faint line was almost invisible on the window
+        // background — use the darker secondary text color
+        .style(bg(if hovered { skin.subtle } else { Color::TRANSPARENT })),
+        dropdown,
+    ];
+    // the last column's right resizer lives in the §16 tail, inside
+    // the cell's extended hover box
+    if extra[1] > 0.0 {
+        title_row = title_row.push(col_resizer(state, skin, g));
+    }
     let cell = container(
         column![
-            container(arrow)
-                .width(Length::Fill)
-                .align_x(iced::alignment::Horizontal::Center)
-                .height(Length::Fixed(dc.arrow_h)),
-            row![
-                container(text(c.label.clone()).size(dc.font_size).color(color))
-                    .padding(iced::Padding {
-                        left: dc.text_pad_left,
-                        ..Default::default()
-                    }),
-                Space::new().width(Length::Fill),
-                container(
-                    Space::new()
-                        .width(Length::Fixed(crate::theme::border_w(dc.sep_w)))
-                        .height(Length::Fill)
-                )
-                // a faint line was almost invisible on the window
-                // background — use the darker secondary text color
-                .style(bg(if hovered { skin.subtle } else { Color::TRANSPARENT })),
-                dropdown,
-            ]
-            .height(Length::Fill)
-            .align_y(iced::Alignment::Center),
+            arrow_row,
+            title_row
+                .height(Length::Fill)
+                .align_y(iced::Alignment::Center),
         ]
         .height(Length::Fixed(d.header_h)),
     )
-    .width(Length::Fixed(w))
+    .width(Length::Fixed(w + extra[0] + extra[1]))
     .style(move |_t: &iced::Theme| container::Style {
         background: Some(bgc.into()),
         ..Default::default()
@@ -1262,10 +1309,21 @@ fn details_header_drag(
     let gap_rest = (COL_RESIZER_W - sep_w).max(0.0);
     let mut line = row![];
     let mut prev_end = 0.0f32;
-    for &g in &base {
+    for (n, &g) in base.iter().enumerate() {
+        // the leftmost base header carries the §13 left reserve like
+        // the resting first cell: its box starts files_left BEFORE
+        // its slot x (the slot spacing stays `width + 4px`, so the
+        // extension never overlaps its neighbor)
+        let ext_left = if n == 0 { dc.files_left } else { 0.0 };
         let x = from[g] + (to[g] - from[g]) * t;
-        line = line.push(Space::new().width(Length::Fixed((x - prev_end).max(0.0))).boxed());
-        line = line.push(details_header_cell(state, skin, g, false, false, false));
+        line = line.push(
+            Space::new()
+                .width(Length::Fixed((x - ext_left - prev_end).max(0.0)))
+                .boxed(),
+        );
+        line = line.push(details_header_cell(
+            state, skin, g, false, false, false, [ext_left, 0.0],
+        ));
         line = line.push(
             container(
                 Space::new()
@@ -1285,7 +1343,7 @@ fn details_header_drag(
         .clamp(0.0, (strip_w - w0 - COL_RESIZER_W).max(0.0));
     let dragged = row![
         Space::new().width(Length::Fixed(fx)),
-        details_header_cell(state, skin, drag.col, true, false, false),
+        details_header_cell(state, skin, drag.col, true, false, false, [0.0, 0.0]),
         container(
             Space::new()
                 .width(Length::Fixed(sep_w))
@@ -1314,6 +1372,9 @@ fn content_view(state: &Explorer, skin: skin::Skin, width: f32) -> Element<'_, M
     let total = state.entries.len();
     // the rows sit below the reserved files_top strip (rubber-band space)
     let top = state.view_cfg.files_top(state.view_index);
+    // …and right of the reserved files_left strip (the rubber band can
+    // reach or start there)
+    let left = state.view_cfg.files_left(state.view_index);
     let (first, last) = row_window(total, row_h, (state.scroll_y - top).max(0.0), state.viewport_h);
     let mut rows = column![vspacer(top).boxed()].spacing(0);
     if first > 0 {
@@ -1321,7 +1382,13 @@ fn content_view(state: &Explorer, skin: skin::Skin, width: f32) -> Element<'_, M
     }
     for i in first..last {
         if let Some(e) = state.entries.get(i) {
-            rows = rows.push(content_row(i, e, state, skin, width));
+            rows = rows.push(
+                row![
+                    Space::new().width(Length::Fixed(left)),
+                    content_row(i, e, state, skin, width - left),
+                ]
+                .boxed(),
+            );
         }
     }
     if last < total {
@@ -1560,8 +1627,8 @@ fn data_selector_border<'a>(
 /// the idle selector, stacked above the row fills (see `details_view`).
 /// Spacer-positioned
 /// like the marquee rectangle; the geometry mirrors `file_row`'s
-/// chrome: 0 → files_left margin, the column block, the 4px chrome
-/// pad at the right (§13/§16).
+/// chrome: the files_left margin (§13), then the column block whose
+/// right edge is the item's right border (§16).
 fn selection_borders<'a>(
     state: &'a Explorer,
     skin: skin::Skin,
@@ -1572,8 +1639,10 @@ fn selection_borders<'a>(
     row_h: f32,
 ) -> Element<'a, Message> {
     // the same width the rubber-band hit test (details_row_w) and
-    // file_row's chrome use
+    // file_row's chrome use; the chrome starts right of the files
+    // margin (§13)
     let w = state.details_row_w();
+    let left = state.detail_cfg.files_left;
     let radius = state.view_cfg.style.corner_radius;
     // while the data-column highlight walks a selected row, the
     // selected border repaints in the fill color (the overlay redraws
@@ -1604,15 +1673,18 @@ fn selection_borders<'a>(
         overlay = overlay.push(
             column![
                 vspacer(y),
-                container(Space::new().width(Length::Fixed(w)).height(Length::Fixed(row_h)))
-                    .style(move |_t: &iced::Theme| container::Style {
-                        border: iced::Border {
-                            color,
-                            width: crate::theme::border_w(1.0),
-                            radius: radius.into(),
-                        },
-                        ..Default::default()
-                    }),
+                row![
+                    Space::new().width(Length::Fixed(left)),
+                    container(Space::new().width(Length::Fixed(w)).height(Length::Fixed(row_h)))
+                        .style(move |_t: &iced::Theme| container::Style {
+                            border: iced::Border {
+                                color,
+                                width: crate::theme::border_w(1.0),
+                                radius: radius.into(),
+                            },
+                            ..Default::default()
+                        }),
+                ],
             ]
             .boxed(),
         );
@@ -1644,29 +1716,28 @@ fn file_row<'a>(
             cells = cells.push(Space::new().width(Length::Fixed(COL_RESIZER_W)).boxed());
         }
     }
-    // §13: 14px left of the files; §16: the chrome keeps a 4px space
-    // inside the column block's right border
+    // §13: the 14px files margin lives OUTSIDE the item chrome — the
+    // column header contains it and the item shifts right past it.
+    // §16: the item's right border sits at the column block's right
+    // edge; the 4px right reserve belongs to the header, not to the
+    // item. The reserve must be a SIBLING of item_chrome: inside it
+    // the chrome box would still cover the margin (hover/selection
+    // reaching the pane's left edge, doubled by the selection-border
+    // overlay at files_left).
     let content = container(cells)
-        .width(Length::Fixed(dc.chrome_pad + total_w + dc.chrome_pad))
-        .height(Length::Fixed(row_h))
-        .padding(iced::Padding {
-            left: dc.chrome_pad,
-            ..Default::default()
-        });
-    item_chrome(
-        i,
-        row![
-            Space::new().width(Length::Fixed(dc.files_left - dc.chrome_pad)),
-            content,
-        ],
-        state,
-        skin,
-    )
+        .width(Length::Fixed(total_w))
+        .height(Length::Fixed(row_h));
+    row![
+        Space::new().width(Length::Fixed(dc.files_left)),
+        item_chrome(i, content, state, skin),
+    ]
+    .boxed()
 }
 
 /// The Details name cell: icon + (elided) name; the renaming row swaps
-/// the name for the edit field. The cell starts at the column edge —
-/// the 14px files margin lives outside (§13).
+/// the name for the edit field. The icon sits text_pad_left into the
+/// column (§4) so it left-aligns with the header title above it —
+/// like the value cells' text does.
 fn name_cell<'a>(
     i: usize,
     e: &Entry,
@@ -1676,9 +1747,10 @@ fn name_cell<'a>(
     row_h: f32,
 ) -> Element<'a, Message> {
     let d = &state.view_cfg.layouts.details;
+    let dc = &state.detail_cfg;
     let font = state.view_cfg.style.font_size;
     const ICON_GAP: f32 = 4.0;
-    let name_w = (w - d.icon - ICON_GAP).max(0.0);
+    let name_w = (w - dc.text_pad_left - d.icon - ICON_GAP).max(0.0);
     // The rename editor occupies the exact same single-line label box
     // (same width, same row height) — a bordered input where the
     // elided label was.
@@ -1723,6 +1795,10 @@ fn name_cell<'a>(
     )
     .width(Length::Fixed(w))
     .height(Length::Fixed(row_h))
+    .padding(iced::Padding {
+        left: dc.text_pad_left,
+        ..Default::default()
+    })
     .boxed()
 }
 
@@ -1779,11 +1855,15 @@ fn list_view(state: &Explorer, skin: skin::Skin, width: f32) -> Element<'_, Mess
     let rows_per_col = state.view_cfg.list_rows_per_col(state.viewport_h);
     let total = state.entries.len();
     let total_cols = total.div_ceil(rows_per_col);
+    // the columns sit right of the reserved files_left strip (the
+    // rubber band can reach or start there)
+    let left = state.view_cfg.files_left(state.view_index);
     // virtualize by column
     let view_cols = (width / col_w).ceil() as usize + 3;
     let first = ((state.scroll_x / col_w).floor() as usize).saturating_sub(1);
     let last = (first + view_cols).min(total_cols);
-    let mut strip: iced::widget::Row<Element<'_, Message>> = row![].spacing(0);
+    let mut strip: iced::widget::Row<Element<'_, Message>> =
+        row![Space::new().width(Length::Fixed(left)).boxed()].spacing(0);
     if first > 0 {
         strip = strip.push(Space::new().width(Length::Fixed(first as f32 * col_w)).boxed());
     }
@@ -1917,6 +1997,9 @@ fn icon_top_grid_view<'a>(
         last += 1;
     }
     last = (last + 1).min(total_rows);
+    // the grid lays out right of the reserved files_left strip (the
+    // rubber band can reach or start there)
+    let left = state.view_cfg.files_left(state.view_index);
     let mut grid = column![].spacing(0);
     // starts[first] is always > 0 now: the row prefix sums begin at
     // the reserved files_top strip, so the spacer must be pushed even
@@ -1924,15 +2007,16 @@ fn icon_top_grid_view<'a>(
     // presses there land on the items, not on empty space)
     grid = grid.push(vspacer(rows.starts[first]).boxed());
     for r in first..last {
-        let mut line = row![].spacing(m.gap);
+        let mut cells = row![].spacing(m.gap);
         for c in 0..rows.cols {
             let idx = r * rows.cols + c;
             if let Some(e) = state.entries.get(idx) {
-                line = line.push(icon_top_cell(idx, e, state, skin, s, &m));
+                cells = cells.push(icon_top_cell(idx, e, state, skin, s, &m));
             } else {
-                line = line.push(Space::new().width(Length::Fixed(m.cell_w)).boxed());
+                cells = cells.push(Space::new().width(Length::Fixed(m.cell_w)).boxed());
             }
         }
+        let line = row![Space::new().width(Length::Fixed(left)), cells];
         let pitch = if r + 1 < total_rows {
             rows.starts[r + 1] - rows.starts[r]
         } else {

@@ -129,3 +129,8 @@ style:
                             # SmallIcon/IconTop): the rubber band can start
                             # there; Details reserves its own strip
                             # (details.header_h + details.files_gap)
+  left_gap: 14.0            # empty strip reserved left of the files in the
+                            # same layouts: the rubber band can reach or
+                            # start there; Details reserves its own margin
+                            # (details-view.yaml files_left), which its
+                            # column header contains
