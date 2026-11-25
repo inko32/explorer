@@ -1585,7 +1585,15 @@ fn content_view(state: &Explorer, skin: skin::Skin, width: f32) -> Element<'_, M
     }
     // tail room for the item's bottom line overflow (same as Details)
     rows = rows.push(vspacer((row_h - pitch).max(0.0)).boxed());
-    file_scrollable(rows.boxed()).boxed()
+    // the focused item's bottom line shares its slot with the next
+    // item's top line (which paints later) — redraw the focus
+    // rectangle on top so the bottom edge keeps the focus color
+    let rows: Element<Message> = stack![
+        rows.boxed(),
+        focus_border_overlay(state, skin, first, last, top, pitch, row_h, left, width - left),
+    ]
+    .boxed();
+    file_scrollable(rows).boxed()
 }
 
 /// §8.1 Content row: 32px icon, name (semibold) + 2 property lines,
@@ -1727,12 +1735,93 @@ fn details_view(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     // px past the last slot): without it the stack would clamp the
     // overlay's last rectangle 1 px short
     rows = rows.push(vspacer((item_h - pitch).max(0.0)).boxed());
+    // compact shares the bottom-line slot with the next item's top
+    // line — redraw the focus rectangle on top (see
+    // focus_border_overlay); non-compact items never overlap, so
+    // their own chrome is enough
+    let focus_overlay: Element<Message> = if state.details_compact {
+        focus_border_overlay(
+            state,
+            skin,
+            first,
+            last,
+            top,
+            pitch,
+            item_h,
+            state.detail_cfg.files_left,
+            state.details_row_w(),
+        )
+    } else {
+        Space::new().boxed()
+    };
     let rows: Element<Message> = stack![
         rows.boxed(),
         data_selector_border(state, skin, first, last, top, pitch, item_h),
+        focus_overlay,
     ]
     .boxed();
     file_scrollable(rows).boxed()
+}
+
+/// The focused item's border rectangle, redrawn on top of the rows.
+/// In the shared-line layouts (compact Details, Content) adjacent
+/// items overlap by one line px and a LATER item's top line paints
+/// over the previous item's bottom line — so when the item below the
+/// focused one is selected, the focus rectangle's bottom edge would
+/// show the neighbor's light selection line instead of the focus
+/// color. Redrawing the rectangle last keeps the focus border intact
+/// (same convention as the old selection overlay's focused-rect-last
+/// rule). Hidden while the data-column highlight walks the row (the
+/// column rectangle takes over) and for a drop target (its strong
+/// border wins).
+#[allow(clippy::too_many_arguments)]
+fn focus_border_overlay<'a>(
+    state: &'a Explorer,
+    skin: skin::Skin,
+    first: usize,
+    last: usize,
+    top: f32,
+    pitch: f32,
+    item_h: f32,
+    left: f32,
+    w: f32,
+) -> Element<'a, Message> {
+    let hide = || -> Element<'a, Message> { Space::new().boxed() };
+    if !state.focus_shown || state.detail_col_focus.is_some_and(|n| n > 0) {
+        return hide();
+    }
+    let Some(&i) = state.focus_item.as_ref().filter(|&&i| i < state.entries.len()) else {
+        return hide();
+    };
+    if !(first..last).contains(&i) {
+        return hide();
+    }
+    if state
+        .entries
+        .get(i)
+        .is_some_and(|e| state.drop_targeted(&e.path))
+    {
+        return hide();
+    }
+    let color = focus_border(state, skin);
+    let radius = state.view_cfg.style.corner_radius;
+    let y = (top + i as f32 * pitch).max(0.0);
+    column![
+        vspacer(y),
+        row![
+            Space::new().width(Length::Fixed(left)),
+            container(Space::new().width(Length::Fixed(w)).height(Length::Fixed(item_h)))
+                .style(move |_t: &iced::Theme| container::Style {
+                    border: iced::Border {
+                        color,
+                        width: crate::theme::border_w(1.0),
+                        radius: radius.into(),
+                    },
+                    ..Default::default()
+                }),
+        ],
+    ]
+    .boxed()
 }
 
 /// The data-column highlight: a border-only rectangle on the focused
