@@ -555,9 +555,15 @@ fn item_interactions<'a>(el: Element<'a, Message>, i: usize, state: &'a Explorer
 /// so the bottom line of one item and the top line of the next
 /// coincide — one shared line; a later item's transparent top line
 /// never erases the line under it. Non-compact Details inserts a
-/// spacer instead, so each item keeps its own pair of lines. The
-/// lines are square: corner_radius does not apply here (the
-/// selection overlay still rounds its redrawn rectangles).
+/// spacer instead, so each item keeps its own pair of lines.
+///
+/// Corner radius: the lines are square widgets, so the configured
+/// corner_radius is SIMULATED instead — every line drops
+/// `corner_radius` px (the literal value, not the DPI-unscaled
+/// border_w) at the two ends it would round off: the top and bottom
+/// lines lose it at the left and right end, the side lines lose it at
+/// the top and bottom. The selection overlay still rounds its redrawn
+/// rectangles by the real radius.
 ///
 /// `width` is the item's full width (the side lines sit INSIDE it:
 /// the file_content is `width − 2 line px` wide, exactly where the
@@ -575,6 +581,9 @@ fn rule_item_chrome<'a>(
 ) -> Element<'a, Message> {
     let (bgc, bcol, border_on) = chrome_paint(state, skin, i);
     let bw = crate::theme::border_w(1.0);
+    // the shave simulating the corner radius: literal corner_radius px
+    // off every line end (0 = full-size square lines)
+    let shave = state.view_cfg.style.corner_radius.max(0.0);
     let edge = if border_on { bcol } else { Color::TRANSPARENT };
     let bottom = if border_on {
         bcol
@@ -582,20 +591,50 @@ fn rule_item_chrome<'a>(
         idle_bottom.unwrap_or(Color::TRANSPARENT)
     };
     let hline = |color: Color| -> Element<'static, Message> {
-        container(Space::new().width(Length::Fill).height(Length::Fixed(bw)))
+        let bar = container(Space::new().width(Length::Fill).height(Length::Fixed(bw)))
             .style(move |_t: &iced::Theme| container::Style {
                 background: Some(color.into()),
                 ..Default::default()
-            })
+            });
+        if shave > 0.0 {
+            // drop `shave` px at both ends
+            row![
+                Space::new().width(Length::Fixed(shave)),
+                bar,
+                Space::new().width(Length::Fixed(shave)),
+            ]
+            .height(Length::Fixed(bw))
             .boxed()
+        } else {
+            bar.boxed()
+        }
     };
     let vline = |color: Color| -> Element<'static, Message> {
-        container(Space::new().width(Length::Fixed(bw)).height(Length::Fixed(content_h)))
-            .style(move |_t: &iced::Theme| container::Style {
-                background: Some(color.into()),
-                ..Default::default()
-            })
-            .boxed()
+        let bar = container(
+            Space::new()
+                .width(Length::Fixed(bw))
+                .height(Length::Fixed(if shave > 0.0 {
+                    (content_h - 2.0 * shave).max(0.0)
+                } else {
+                    content_h
+                })),
+        )
+        .style(move |_t: &iced::Theme| container::Style {
+            background: Some(color.into()),
+            ..Default::default()
+        });
+        if shave > 0.0 {
+            // drop `shave` px at both ends
+            container(bar)
+                .padding(iced::Padding {
+                    top: shave,
+                    bottom: shave,
+                    ..Default::default()
+                })
+                .boxed()
+        } else {
+            bar.boxed()
+        }
     };
     let body = container(
         column![
@@ -1878,14 +1917,18 @@ fn file_row<'a>(
     }
     // §13: the 14px files margin lives OUTSIDE the item chrome — the
     // column header contains it and the item shifts right past it.
-    // §16: the item's right line sits at the column block's right
+    // §16: the item's right edge sits at the column block's right
     // edge; the 4px right reserve belongs to the header, not to the
     // item. The reserve must be a SIBLING of the item chrome: inside
     // it the chrome box would still cover the margin (hover/selection
     // reaching the pane's left edge, doubled by the selection-border
     // overlay at files_left).
-    row![
-        Space::new().width(Length::Fixed(dc.files_left)),
+    //
+    // compact: the line-based chrome (rule_item_chrome) — adjacent
+    // items share their coinciding lines. non-compact: the spacer
+    // between items makes the shared-line structure pointless, so the
+    // item border (item_chrome) is back — a real rounded rectangle.
+    let chrome: Element<Message> = if state.details_compact {
         rule_item_chrome(
             i,
             container(cells).height(Length::Fixed(content_h)),
@@ -1894,7 +1937,23 @@ fn file_row<'a>(
             None,
             state,
             skin,
-        ),
+        )
+    } else {
+        // the container border insets its content, so the bordered
+        // box is item_h tall: item_h − 2 border px = content_h, the
+        // same file_content strip as the compact item
+        item_chrome(
+            i,
+            container(cells)
+                .width(Length::Fixed(total_w))
+                .height(Length::Fixed(state.view_cfg.details_item_h())),
+            state,
+            skin,
+        )
+    };
+    row![
+        Space::new().width(Length::Fixed(dc.files_left)),
+        chrome,
     ]
     .boxed()
 }
