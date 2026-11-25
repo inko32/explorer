@@ -1449,6 +1449,9 @@ impl Explorer {
             }
             Message::SelectAll => {
                 self.selected = (0..self.entries.len()).collect();
+                // select all only: the idle selector stays hidden until
+                // the first arrow key reveals it on the current item
+                self.focus_shown = false;
                 self.status = format!("{} items selected", self.entries.len());
                 iced::Task::none()
             }

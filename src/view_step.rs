@@ -608,6 +608,15 @@ impl ViewCfg {
         if compact { d.row_h_compact } else { d.row_h }
     }
 
+    /// §8.1 Content row pitch: row height minus one border px —
+    /// adjacent rows overlap by one border px so the row divider and
+    /// the selection borders share a single line (same convention as
+    /// the Details pitch). All scroll math must use the pitch, never
+    /// the bare row height.
+    pub fn content_pitch(&self) -> f32 {
+        (self.layouts.content.row_h - crate::theme::border_w(1.0)).max(1.0)
+    }
+
     /// §8.1 Details row pitch: row height plus the effective row gap.
     /// The configured gap is in border pixels, so it goes through the
     /// same DPI unscale as the chrome borders (`theme::border_w`). All
@@ -762,7 +771,7 @@ impl ViewCfg {
         match self.family(index) {
             // content starts below the reserved files_top strip
             Family::Content => {
-                self.files_top(index) + n_items as f32 * l.content.row_h
+                self.files_top(index) + n_items as f32 * self.content_pitch()
             }
             Family::Details => {
                 l.details.header_h
@@ -815,7 +824,7 @@ impl ViewCfg {
         let l = &self.layouts;
         let item = match self.family(index) {
             Family::Content => {
-                ((offset - self.files_top(index)).max(0.0) / l.content.row_h).floor() as usize
+                ((offset - self.files_top(index)).max(0.0) / self.content_pitch()).floor() as usize
             }
             Family::Details => {
                 // content starts below the header strip + the §12 gap
@@ -867,7 +876,7 @@ impl ViewCfg {
     ) -> f32 {
         let l = &self.layouts;
         match self.family(index) {
-            Family::Content => self.files_top(index) + item as f32 * l.content.row_h,
+            Family::Content => self.files_top(index) + item as f32 * self.content_pitch(),
             Family::Details => {
                 l.details.header_h
                     + l.details.files_gap

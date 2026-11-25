@@ -401,12 +401,13 @@ fn marquee_rect(
 
 /// Selection/hover chrome shared by the per-item renderers (§8.4:
 /// rounded rectangle, radius 4).
-fn item_chrome<'a>(
-    i: usize,
-    content: impl iced::Widget<Message, iced::Theme, iced::Renderer> + 'a,
-    state: &'a Explorer,
-    skin: skin::Skin,
-) -> Element<'a, Message> {
+/// The chrome paint decision for item `i`: (fill, border color,
+/// border shown). Shared with the Content row, whose bottom divider
+/// doubles as the bottom border line: the container draws its border
+/// UNDER its content, so the divider (the bottom 1px of the row,
+/// inside the chrome) always covers the border and must carry its
+/// color itself.
+fn chrome_paint(state: &Explorer, skin: skin::Skin, i: usize) -> (Color, Color, bool) {
     let selected = state.selected.contains(&i);
     let hovered = state.hovered == Some(i);
     // §5.1: the item is the innermost drop target under the pointer
@@ -415,15 +416,23 @@ fn item_chrome<'a>(
         .get(i)
         .is_some_and(|e| state.drop_targeted(&e.path));
     // the idle selector (keyboard focus): a border-only rectangle, no
-    // fill; never drawn over a real selection (which has its own).
-    // While the data-column highlight walks the row (position > 0) it
-    // takes over the focus indication and the idle border hides.
+    // fill; on an unselected item it draws its own border. While the
+    // data-column highlight walks the row (position > 0) it takes over
+    // the focus indication and the idle border hides.
     let col_highlighted = state.detail_col_focus.is_some_and(|n| n > 0);
     let focused_idle = state.focus_shown
         && state.focus_item == Some(i)
         && !selected
         && !targeted
         && !col_highlighted;
+    // the idle selector sitting on a selected item (Ctrl+A then
+    // Ctrl+arrows): the focused item's selection border IS the focus
+    // indication, so every other selected item repaints its border in
+    // the fill color — same convention as the data-column highlight
+    let sel_focus = state.focus_shown
+        && state
+            .focus_item
+            .is_some_and(|f| state.selected.contains(&f));
     // selection fades to gray while the folder pane is inactive
     // (window unfocused, nav pane active, or a ribbon popup open);
     // hovering a grayed item (or an active drop target) restores the
@@ -449,23 +458,39 @@ fn item_chrome<'a>(
     } else {
         bgc
     };
-    // the data-column highlight takes the border from a selected
-    // item: repaint it in the (rainbow-adjusted) fill color — the
-    // 1px slot keeps its geometry and the background stays, only
-    // the outline moves from the whole row to the one column. A
-    // drop target's border is never touched.
-    let border_color = if col_highlighted && selected && !targeted {
+    // the data-column highlight (or the idle selector walking a
+    // selection) takes the border from a selected item: repaint it in
+    // the (rainbow-adjusted) fill color — the 1px slot keeps its
+    // geometry and the background stays, only the outline moves to the
+    // one column / the focused item. A drop target's border is never
+    // touched.
+    let border_color = if (col_highlighted
+        || (sel_focus && state.focus_item != Some(i)))
+        && selected
+        && !targeted
+    {
         bgc
     } else {
         chrome_border(state, skin, selected || targeted || focused_idle)
     };
+    // the hidden selected border keeps drawing (in the fill color) so
+    // adjacent rows still share their 1px line
+    let border_on = selected || targeted || focused_idle || col_highlighted;
+    (bgc, border_color, border_on)
+}
+
+fn item_chrome<'a>(
+    i: usize,
+    content: impl iced::Widget<Message, iced::Theme, iced::Renderer> + 'a,
+    state: &'a Explorer,
+    skin: skin::Skin,
+) -> Element<'a, Message> {
+    let (bgc, border_color, border_on) = chrome_paint(state, skin, i);
     let styled = container(content).style(move |_t: &iced::Theme| container::Style {
         background: Some(bgc.into()),
         border: iced::Border {
             color: border_color,
-            // the hidden selected border keeps drawing (in the fill
-            // color) so adjacent rows still share their 1px line
-            width: if selected || targeted || focused_idle || col_highlighted {
+            width: if border_on {
                 crate::theme::border_w(1.0)
             } else {
                 0.0
@@ -1369,16 +1394,22 @@ fn details_header_drag(
 
 fn content_view(state: &Explorer, skin: skin::Skin, width: f32) -> Element<'_, Message> {
     let row_h = state.view_cfg.layouts.content.row_h;
+    // the Details overlap convention: the pitch is row_h − 1 border
+    // px, so adjacent rows share a single 1px line (the divider / the
+    // selection borders) instead of stacking two. See details_view
+    // for why the spacers are shaved by the gap.
+    let pitch = state.view_cfg.content_pitch();
+    let gap = pitch - row_h;
     let total = state.entries.len();
     // the rows sit below the reserved files_top strip (rubber-band space)
     let top = state.view_cfg.files_top(state.view_index);
     // …and right of the reserved files_left strip (the rubber band can
     // reach or start there)
     let left = state.view_cfg.files_left(state.view_index);
-    let (first, last) = row_window(total, row_h, (state.scroll_y - top).max(0.0), state.viewport_h);
-    let mut rows = column![vspacer(top).boxed()].spacing(0);
+    let (first, last) = row_window(total, pitch, (state.scroll_y - top).max(0.0), state.viewport_h);
+    let mut rows = column![vspacer(top - gap).boxed()].spacing(gap);
     if first > 0 {
-        rows = rows.push(vspacer(first as f32 * row_h).boxed());
+        rows = rows.push(vspacer(first as f32 * pitch - gap).boxed());
     }
     for i in first..last {
         if let Some(e) = state.entries.get(i) {
@@ -1392,9 +1423,18 @@ fn content_view(state: &Explorer, skin: skin::Skin, width: f32) -> Element<'_, M
         }
     }
     if last < total {
-        rows = rows.push(vspacer((total - last) as f32 * row_h).boxed());
+        rows = rows.push(vspacer((total - last) as f32 * pitch - gap).boxed());
     }
-    file_scrollable(rows.boxed()).boxed()
+    // tail room for the chrome's bottom overflow (same as Details)
+    rows = rows.push(vspacer((row_h - pitch).max(0.0)).boxed());
+    // the fill of a later row paints over the shared line above it, so
+    // the visible selected / focused rows' borders are redrawn on top
+    let rows: Element<Message> = stack![
+        rows.boxed(),
+        selection_borders(state, skin, first, last, top, pitch, row_h, left, width - left),
+    ]
+    .boxed();
+    file_scrollable(rows).boxed()
 }
 
 /// §8.1 Content row: 32px icon, name (semibold) + 2 property lines,
@@ -1441,14 +1481,25 @@ fn content_row<'a>(
     .spacing(c.icon_text_gap)
     .padding([c.pad_h, c.pad_w])
     .align_y(iced::Alignment::Center);
-    // divider line between rows (§8.1): the bottom 1px of the row pitch
+    // divider line between rows (§8.1): the bottom 1px of the row
+    // pitch. It sits inside the chrome, and the container draws its
+    // border UNDER the content — so this divider always covers the
+    // chrome's bottom border line. It therefore carries the border
+    // color itself whenever the chrome border is shown (selected /
+    // idle selector / drop target); otherwise it stays the plain
+    // separator.
+    let (_, bcol, border_on) = chrome_paint(state, skin, i);
+    let div = if border_on { bcol } else { skin.sep };
     let content = column![
         container(content)
             .width(Length::Fill)
             .height(Length::Fixed(c.row_h - 1.0)),
         container(Space::new().width(Length::Fill).height(Length::Fixed(crate::theme::border_w(1.0))))
             .width(Length::Fill)
-            .style(bg(skin.sep)),
+            .style(move |_t: &iced::Theme| container::Style {
+                background: Some(div.into()),
+                ..Default::default()
+            }),
     ];
     item_chrome(i, content, state, skin)
 }
@@ -1541,7 +1592,17 @@ fn details_view(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     // rows' selection borders are drawn once more, on top of the fills
     let rows: Element<Message> = stack![
         rows.boxed(),
-        selection_borders(state, skin, first, last, top, pitch, row_h),
+        selection_borders(
+            state,
+            skin,
+            first,
+            last,
+            top,
+            pitch,
+            row_h,
+            state.detail_cfg.files_left,
+            state.details_row_w(),
+        ),
         data_selector_border(state, skin, first, last, top, pitch, row_h),
     ]
     .boxed();
@@ -1623,12 +1684,11 @@ fn data_selector_border<'a>(
     .boxed()
 }
 
-/// Border-only rectangles of the visible selected Details rows and
-/// the idle selector, stacked above the row fills (see `details_view`).
-/// Spacer-positioned
-/// like the marquee rectangle; the geometry mirrors `file_row`'s
-/// chrome: the files_left margin (§13), then the column block whose
-/// right edge is the item's right border (§16).
+/// Border-only rectangles of the visible selected rows and the idle
+/// selector, stacked above the row fills (see `details_view` and
+/// `content_view` — the shared 1px overlap lines this redraws are the
+/// same convention in both). Spacer-positioned like the marquee
+/// rectangle; the rect is `w` wide starting at the `left` margin.
 fn selection_borders<'a>(
     state: &'a Explorer,
     skin: skin::Skin,
@@ -1637,19 +1697,26 @@ fn selection_borders<'a>(
     top: f32,
     pitch: f32,
     row_h: f32,
+    left: f32,
+    w: f32,
 ) -> Element<'a, Message> {
-    // the same width the rubber-band hit test (details_row_w) and
-    // file_row's chrome use; the chrome starts right of the files
-    // margin (§13)
-    let w = state.details_row_w();
-    let left = state.detail_cfg.files_left;
     let radius = state.view_cfg.style.corner_radius;
-    // while the data-column highlight walks a selected row, the
-    // selected border repaints in the fill color (the overlay redraws
-    // it above the neighbor fills — the outline moves to the column,
-    // the background stays)
+    // while the data-column highlight walks a selected row — or the
+    // idle selector sits on one (Ctrl+A then Ctrl+arrows) — the other
+    // selected borders repaint in the fill color (the overlay redraws
+    // them above the neighbor fills — the outline moves to the column
+    // / the focused row, the background stays)
     let col_highlighted = state.detail_col_focus.is_some_and(|n| n > 0);
+    let sel_focus = state.focus_shown
+        && state
+            .focus_item
+            .is_some_and(|f| state.selected.contains(&f));
     let mut overlay = stack![];
+    // the focused row's rectangle is drawn LAST: adjacent rows overlap
+    // by one border px, so a later rectangle's top line paints over the
+    // previous rectangle's bottom line — a fill-colored (hidden)
+    // neighbor border would erase the selector's bottom edge
+    let mut focused_rect = None;
     for i in first..last {
         // selected rows redraw their border above the neighbor fills;
         // the idle selector draws the same border-only rectangle —
@@ -1661,7 +1728,9 @@ fn selection_borders<'a>(
         {
             continue;
         }
-        let color = if selected_row && col_highlighted {
+        let hide_border = col_highlighted
+            || (sel_focus && state.focus_item != Some(i));
+        let color = if selected_row && hide_border {
             selection_fill(state, skin)
         } else {
             chrome_border(state, skin, true)
@@ -1670,26 +1739,37 @@ fn selection_borders<'a>(
             continue;
         }
         let y = (top + i as f32 * pitch).max(0.0);
-        overlay = overlay.push(
-            column![
-                vspacer(y),
-                row![
-                    Space::new().width(Length::Fixed(left)),
-                    container(Space::new().width(Length::Fixed(w)).height(Length::Fixed(row_h)))
-                        .style(move |_t: &iced::Theme| container::Style {
-                            border: iced::Border {
-                                color,
-                                width: crate::theme::border_w(1.0),
-                                radius: radius.into(),
-                            },
-                            ..Default::default()
-                        }),
-                ],
-            ]
-            .boxed(),
-        );
+        let rect = column![
+            vspacer(y),
+            row![
+                Space::new().width(Length::Fixed(left)),
+                container(Space::new().width(Length::Fixed(w)).height(Length::Fixed(row_h)))
+                    .style(move |_t: &iced::Theme| container::Style {
+                        border: iced::Border {
+                            color,
+                            width: crate::theme::border_w(1.0),
+                            radius: radius.into(),
+                        },
+                        ..Default::default()
+                    }),
+            ],
+        ]
+        .boxed();
+        if state.focus_shown && state.focus_item == Some(i) {
+            focused_rect = Some(rect);
+        } else {
+            overlay = overlay.push(rect);
+        }
     }
-    overlay.boxed()
+    if let Some(rect) = focused_rect {
+        overlay = overlay.push(rect);
+    }
+    // a Stack sizes itself to its FIRST child and caps every later
+    // child at that size — the first rect here is the shortest one
+    // (lowest y), which would collapse every lower rect's trailing
+    // container to zero height; Fill lifts the cap to the outer
+    // stack's size (the full rows column)
+    overlay.width(Length::Fill).height(Length::Fill).boxed()
 }
 
 fn file_row<'a>(
