@@ -402,11 +402,12 @@ fn marquee_rect(
 /// Selection/hover chrome shared by the per-item renderers (§8.4:
 /// rounded rectangle, radius 4).
 /// The chrome paint decision for item `i`: (fill, border color,
-/// border shown). Shared with the Content row, whose bottom divider
-/// doubles as the bottom border line: the container draws its border
-/// UNDER its content, so the divider (the bottom 1px of the row,
-/// inside the chrome) always covers the border and must carry its
-/// color itself.
+/// border shown). Consumed by both chromes: the container-border one
+/// (item_chrome: Tiles/List/SmallIcon/IconTop) and the line one
+/// (rule_item_chrome: Content/Details, where the "border" is the
+/// item's explicit top/bottom/left/right line widgets — the Content
+/// row's bottom line doubles as the divider and carries this color
+/// whenever the border is shown).
 fn chrome_paint(state: &Explorer, skin: skin::Skin, i: usize) -> (Color, Color, bool) {
     let selected = state.selected.contains(&i);
     let hovered = state.hovered == Some(i);
@@ -502,6 +503,16 @@ fn item_chrome<'a>(
     // drop target: directories/archives accept, executables offer
     // "Run with", plain files reject per policy (the caption shows
     // the banned glyph and the status bar says "Cannot drop here")
+    item_interactions(styled.boxed(), i, state)
+}
+
+/// The pointer wiring every file item carries, whatever its chrome:
+/// press selects, double-click opens, right-press opens the context
+/// menu, hover drives the hover fill, and the whole item is a drop
+/// zone (directories/archives accept, executables offer "Run with",
+/// plain files reject per policy — the caption shows the banned glyph
+/// and the status bar says "Cannot drop here").
+fn item_interactions<'a>(el: Element<'a, Message>, i: usize, state: &'a Explorer) -> Element<'a, Message> {
     let zone_target = state.entries.get(i).map(|e| {
         if e.is_dir() || fs::archive::is_archive_path(&e.path) {
             crate::dnd::DropTarget::Directory(e.path.clone())
@@ -515,7 +526,7 @@ fn item_chrome<'a>(
     // the mouse_area's own messages: the drag arms and the
     // release-time context menu anchor read Explorer::cursor, which
     // idle moves no longer refresh (main.rs drops them)
-    let el: Element<Message> = mouse_area(crate::ui_common::cursor_seed(styled))
+    let el: Element<Message> = mouse_area(crate::ui_common::cursor_seed(el))
         .on_press(Message::Select(i))
         .on_double_click(Message::Open(i))
         .on_right_press(Message::RightPress(i))
@@ -526,6 +537,85 @@ fn item_chrome<'a>(
         Some(t) => crate::dnd::drop_zone(el, t),
         None => el,
     }
+}
+
+/// The line-based item chrome of the Content and Details views. The
+/// item is NOT a container border; it is assembled from explicit
+/// 1px line widgets (border_w(1.0), the same DPI-unscaled px the old
+/// borders used):
+///
+///   line(top)                       — full item width
+///   leftline | file_content | rightline
+///   line(bottom)                    — full item width
+///
+/// The lines carry the selection / idle-selector / drop-target
+/// border color (the same chrome_paint decision as item_chrome) and
+/// the file_content carries the selection/hover fill. Compact rows
+/// (Details) and Content rows overlap adjacent items by one line px
+/// so the bottom line of one item and the top line of the next
+/// coincide — one shared line; a later item's transparent top line
+/// never erases the line under it. Non-compact Details inserts a
+/// spacer instead, so each item keeps its own pair of lines. The
+/// lines are square: corner_radius does not apply here (the
+/// selection overlay still rounds its redrawn rectangles).
+///
+/// `width` is the item's full width (the side lines sit INSIDE it:
+/// the file_content is `width − 2 line px` wide, exactly where the
+/// container border used to put its content). `idle_bottom` is the
+/// always-drawn bottom-line color when the border is off (the Content
+/// row divider); None hides the idle bottom line (Details).
+fn rule_item_chrome<'a>(
+    i: usize,
+    content: impl iced::Widget<Message, iced::Theme, iced::Renderer> + 'a,
+    content_h: f32,
+    width: Length,
+    idle_bottom: Option<Color>,
+    state: &'a Explorer,
+    skin: skin::Skin,
+) -> Element<'a, Message> {
+    let (bgc, bcol, border_on) = chrome_paint(state, skin, i);
+    let bw = crate::theme::border_w(1.0);
+    let edge = if border_on { bcol } else { Color::TRANSPARENT };
+    let bottom = if border_on {
+        bcol
+    } else {
+        idle_bottom.unwrap_or(Color::TRANSPARENT)
+    };
+    let hline = |color: Color| -> Element<'static, Message> {
+        container(Space::new().width(Length::Fill).height(Length::Fixed(bw)))
+            .style(move |_t: &iced::Theme| container::Style {
+                background: Some(color.into()),
+                ..Default::default()
+            })
+            .boxed()
+    };
+    let vline = |color: Color| -> Element<'static, Message> {
+        container(Space::new().width(Length::Fixed(bw)).height(Length::Fixed(content_h)))
+            .style(move |_t: &iced::Theme| container::Style {
+                background: Some(color.into()),
+                ..Default::default()
+            })
+            .boxed()
+    };
+    let body = container(
+        column![
+            hline(edge),
+            row![
+                vline(edge),
+                container(content)
+                    .width(Length::Fill)
+                    .height(Length::Fixed(content_h))
+                    .style(move |_t: &iced::Theme| container::Style {
+                        background: Some(bgc.into()),
+                        ..Default::default()
+                    }),
+                vline(edge),
+            ],
+            hline(bottom),
+        ],
+    )
+    .width(width);
+    item_interactions(body.boxed(), i, state)
 }
 
 /// Selection fill color: the live accent while the folder pane is
@@ -1393,10 +1483,12 @@ fn details_header_drag(
 // index 0 — Content (§8.1)
 
 fn content_view(state: &Explorer, skin: skin::Skin, width: f32) -> Element<'_, Message> {
+    // the item is row_h tall (top line + file_content + bottom line,
+    // see rule_item_chrome)
     let row_h = state.view_cfg.layouts.content.row_h;
-    // the Details overlap convention: the pitch is row_h − 1 border
-    // px, so adjacent rows share a single 1px line (the divider / the
-    // selection borders) instead of stacking two. See details_view
+    // the Details overlap convention: the pitch is row_h − 1 line px,
+    // so adjacent items share a single 1px line (the divider / the
+    // selection lines) instead of stacking two. See details_view
     // for why the spacers are shaved by the gap.
     let pitch = state.view_cfg.content_pitch();
     let gap = pitch - row_h;
@@ -1425,9 +1517,8 @@ fn content_view(state: &Explorer, skin: skin::Skin, width: f32) -> Element<'_, M
     if last < total {
         rows = rows.push(vspacer((total - last) as f32 * pitch - gap).boxed());
     }
-    // tail room for the chrome's bottom overflow (same as Details)
+    // tail room for the item's bottom line overflow (same as Details)
     rows = rows.push(vspacer((row_h - pitch).max(0.0)).boxed());
-    // the fill of a later row paints over the shared line above it, so
     // the visible selected / focused rows' borders are redrawn on top
     let rows: Element<Message> = stack![
         rows.boxed(),
@@ -1438,7 +1529,11 @@ fn content_view(state: &Explorer, skin: skin::Skin, width: f32) -> Element<'_, M
 }
 
 /// §8.1 Content row: 32px icon, name (semibold) + 2 property lines,
-/// left-aligned; divider line between rows.
+/// left-aligned; divider line between rows. The lines around the row
+/// are explicit widgets (rule_item_chrome): the bottom line is the
+/// divider — always drawn (skin.sep), carrying the border color when
+/// the row is selected / focused / drop-targeted; the top / left /
+/// right lines only appear with that border color.
 fn content_row<'a>(
     i: usize,
     e: &Entry,
@@ -1447,6 +1542,9 @@ fn content_row<'a>(
     width: f32,
 ) -> Element<'a, Message> {
     let c = &state.view_cfg.layouts.content;
+    let bw = crate::theme::border_w(1.0);
+    // the file_content strip between the item's top and bottom lines
+    let content_h = c.row_h - 2.0 * bw;
     // base on the resolved primary family (fonts.yaml priority list),
     // not Font::DEFAULT: an explicit .font() replaces the app's
     // default_font and would drop Selawik for generic sans-serif
@@ -1454,7 +1552,7 @@ fn content_row<'a>(
         weight: iced::font::Weight::Semibold,
         ..crate::fonts::primary()
     };
-    let text_w = (width - c.icon - c.icon_text_gap - 2.0 * c.pad_w - 8.0).max(60.0);
+    let text_w = (width - 2.0 * bw - c.icon - c.icon_text_gap - 2.0 * c.pad_w - 8.0).max(60.0);
     let date = e.modified.map(model::format_date).unwrap_or_default();
     let lines = column![
         text(text_metrics::ellipsize(&e.name, text_w, c.name_size, semibold))
@@ -1481,27 +1579,7 @@ fn content_row<'a>(
     .spacing(c.icon_text_gap)
     .padding([c.pad_h, c.pad_w])
     .align_y(iced::Alignment::Center);
-    // divider line between rows (§8.1): the bottom 1px of the row
-    // pitch. It sits inside the chrome, and the container draws its
-    // border UNDER the content — so this divider always covers the
-    // chrome's bottom border line. It therefore carries the border
-    // color itself whenever the chrome border is shown (selected /
-    // idle selector / drop target); otherwise it stays the plain
-    // separator.
-    let (_, bcol, border_on) = chrome_paint(state, skin, i);
-    let div = if border_on { bcol } else { skin.sep };
-    let content = column![
-        container(content)
-            .width(Length::Fill)
-            .height(Length::Fixed(c.row_h - 1.0)),
-        container(Space::new().width(Length::Fill).height(Length::Fixed(crate::theme::border_w(1.0))))
-            .width(Length::Fill)
-            .style(move |_t: &iced::Theme| container::Style {
-                background: Some(div.into()),
-                ..Default::default()
-            }),
-    ];
-    item_chrome(i, content, state, skin)
+    rule_item_chrome(i, content, content_h, Length::Fill, Some(skin.sep), state, skin)
 }
 
 // ---------------------------------------------------------------------------
@@ -1553,24 +1631,27 @@ fn tile_cell<'a>(i: usize, e: &Entry, state: &'a Explorer, skin: skin::Skin) -> 
 
 fn details_view(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     let d = &state.view_cfg.layouts.details;
-    let row_h = state.view_cfg.details_row_h(state.details_compact);
-    // the pitch is row_h − 1 border px: adjacent rows overlap by one
-    // border px so their selected borders share a single line. The
-    // rows must land exactly on the model pitch grid (top + i·pitch)
-    // that the selection overlay and the hit tests use. A Fixed(pitch)
-    // wrapper per row would clamp the Shrink-height chrome into the
-    // slot (a Fixed length clears the infinite limit), shifting its
-    // bottom border 1 px off the overlay — and spacing(gap) inserts a
-    // gap after EVERY child, so the spacers are shaved by it to
-    // compensate
+    // the item is content_h + 2 line px tall: top line, file_content,
+    // bottom line (see rule_item_chrome)
+    let item_h = state.view_cfg.details_item_h();
+    // the pitch: compact overlaps adjacent items by one line px so
+    // their lines coincide (a shared line — the 1st and 2nd file draw
+    // over the same 1px); non-compact adds the row_gap spacer instead,
+    // so each item keeps its own pair of lines. The rows must land
+    // exactly on the model pitch grid (top + i·pitch) that the
+    // selection overlay and the hit tests use. A Fixed(pitch) wrapper
+    // per row would clamp the Shrink-height item into the slot (a
+    // Fixed length clears the infinite limit), shifting its bottom
+    // line 1 px off the overlay — and spacing(gap) inserts a gap after
+    // EVERY child, so the spacers are shaved by it to compensate
     let pitch = state.view_cfg.details_pitch(state.details_compact);
-    let gap = pitch - row_h;
+    let gap = pitch - item_h;
     let total = state.entries.len();
     // the content reserves the header strip + the §12 gap (the real
     // header overlays the strip)
     let top = d.header_h + d.files_gap;
     let (first, last) = row_window(total, pitch, (state.scroll_y - top).max(0.0), state.viewport_h);
-    let mut rows = column![vspacer(top - gap)].spacing(gap);
+    let mut rows = column![vspacer((top - gap).max(0.0))].spacing(gap);
     if first > 0 {
         rows = rows.push(vspacer(first as f32 * pitch - gap).boxed());
     }
@@ -1582,14 +1663,13 @@ fn details_view(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
     if last < total {
         rows = rows.push(vspacer((total - last) as f32 * pitch - gap).boxed());
     }
-    // tail room for the chrome's bottom overflow (one border px past
-    // the last slot): without it the stack would clamp the overlay's
-    // last border box 1 px short
-    rows = rows.push(vspacer((row_h - pitch).max(0.0)).boxed());
-    // row_gap overlaps adjacent rows by one border px so their
-    // selected borders share a single line — but the fill of a hovered
-    // neighbor row (drawn later) paints over that line, so the visible
-    // rows' selection borders are drawn once more, on top of the fills
+    // tail room for the item's bottom line overflow (compact: one line
+    // px past the last slot): without it the stack would clamp the
+    // overlay's last rectangle 1 px short
+    rows = rows.push(vspacer((item_h - pitch).max(0.0)).boxed());
+    // the shared line between adjacent items is redrawn once more, on
+    // top of the later item's fill — the same convention as before
+    // (see selection_borders)
     let rows: Element<Message> = stack![
         rows.boxed(),
         selection_borders(
@@ -1599,11 +1679,11 @@ fn details_view(state: &Explorer, skin: skin::Skin) -> Element<'_, Message> {
             last,
             top,
             pitch,
-            row_h,
+            item_h,
             state.detail_cfg.files_left,
             state.details_row_w(),
         ),
-        data_selector_border(state, skin, first, last, top, pitch, row_h),
+        data_selector_border(state, skin, first, last, top, pitch, item_h),
     ]
     .boxed();
     file_scrollable(rows).boxed()
@@ -1627,7 +1707,7 @@ fn data_selector_border<'a>(
     last: usize,
     top: f32,
     pitch: f32,
-    row_h: f32,
+    item_h: f32,
 ) -> Element<'a, Message> {
     let hide = || -> Element<'a, Message> { Space::new().boxed() };
     let Some(n) = state.detail_col_focus else {
@@ -1670,7 +1750,7 @@ fn data_selector_border<'a>(
         vspacer(y),
         row![
             Space::new().width(Length::Fixed(x)),
-            container(Space::new().width(Length::Fixed(w)).height(Length::Fixed(row_h)))
+            container(Space::new().width(Length::Fixed(w)).height(Length::Fixed(item_h)))
                 .style(move |_t: &iced::Theme| container::Style {
                     border: iced::Border {
                         color,
@@ -1696,7 +1776,7 @@ fn selection_borders<'a>(
     last: usize,
     top: f32,
     pitch: f32,
-    row_h: f32,
+    item_h: f32,
     left: f32,
     w: f32,
 ) -> Element<'a, Message> {
@@ -1743,7 +1823,7 @@ fn selection_borders<'a>(
             vspacer(y),
             row![
                 Space::new().width(Length::Fixed(left)),
-                container(Space::new().width(Length::Fixed(w)).height(Length::Fixed(row_h)))
+                container(Space::new().width(Length::Fixed(w)).height(Length::Fixed(item_h)))
                     .style(move |_t: &iced::Theme| container::Style {
                         border: iced::Border {
                             color,
@@ -1779,16 +1859,16 @@ fn file_row<'a>(
     skin: skin::Skin,
 ) -> Element<'a, Message> {
     let dc = &state.detail_cfg;
-    let row_h = state.view_cfg.details_row_h(state.details_compact);
+    let content_h = state.view_cfg.layouts.details.content_h;
     let vis = details_visible(state);
     let total_w = details_cols_w(state);
     let mut cells = row![].align_y(iced::Alignment::Center);
     for (n, &g) in vis.iter().enumerate() {
         let w = details_col_w(state, g);
         let cell = if dc.columns[g].id == "name" {
-            name_cell(i, e, state, skin, w, row_h)
+            name_cell(i, e, state, skin, w, content_h)
         } else {
-            value_cell(&dc.columns[g], e, state, skin, w, row_h)
+            value_cell(&dc.columns[g], e, state, skin, w, content_h)
         };
         cells = cells.push(cell);
         // between columns: the header's right resizers sit here (§15)
@@ -1798,18 +1878,23 @@ fn file_row<'a>(
     }
     // §13: the 14px files margin lives OUTSIDE the item chrome — the
     // column header contains it and the item shifts right past it.
-    // §16: the item's right border sits at the column block's right
+    // §16: the item's right line sits at the column block's right
     // edge; the 4px right reserve belongs to the header, not to the
-    // item. The reserve must be a SIBLING of item_chrome: inside it
-    // the chrome box would still cover the margin (hover/selection
+    // item. The reserve must be a SIBLING of the item chrome: inside
+    // it the chrome box would still cover the margin (hover/selection
     // reaching the pane's left edge, doubled by the selection-border
     // overlay at files_left).
-    let content = container(cells)
-        .width(Length::Fixed(total_w))
-        .height(Length::Fixed(row_h));
     row![
         Space::new().width(Length::Fixed(dc.files_left)),
-        item_chrome(i, content, state, skin),
+        rule_item_chrome(
+            i,
+            container(cells).height(Length::Fixed(content_h)),
+            content_h,
+            Length::Fixed(total_w),
+            None,
+            state,
+            skin,
+        ),
     ]
     .boxed()
 }
@@ -1817,14 +1902,15 @@ fn file_row<'a>(
 /// The Details name cell: icon + (elided) name; the renaming row swaps
 /// the name for the edit field. The icon sits text_pad_left into the
 /// column (§4) so it left-aligns with the header title above it —
-/// like the value cells' text does.
+/// like the value cells' text does. `content_h` is the height of the
+/// file_content strip the cell sits in (between the item's lines).
 fn name_cell<'a>(
     i: usize,
     e: &Entry,
     state: &'a Explorer,
     skin: skin::Skin,
     w: f32,
-    row_h: f32,
+    content_h: f32,
 ) -> Element<'a, Message> {
     let d = &state.view_cfg.layouts.details;
     let dc = &state.detail_cfg;
@@ -1866,15 +1952,15 @@ fn name_cell<'a>(
             crate::icon::for_entry(e, d.icon, &skin),
             container(name)
                 .width(Length::Fixed(name_w))
-                .height(Length::Fixed(row_h))
+                .height(Length::Fixed(content_h))
                 .align_y(iced::alignment::Vertical::Center),
         ]
         .spacing(ICON_GAP)
-        .height(Length::Fixed(row_h))
+        .height(Length::Fixed(content_h))
         .align_y(iced::Alignment::Center),
     )
     .width(Length::Fixed(w))
-    .height(Length::Fixed(row_h))
+    .height(Length::Fixed(content_h))
     .padding(iced::Padding {
         left: dc.text_pad_left,
         ..Default::default()
@@ -1890,7 +1976,7 @@ fn value_cell<'a>(
     state: &'a Explorer,
     skin: skin::Skin,
     w: f32,
-    row_h: f32,
+    content_h: f32,
 ) -> Element<'a, Message> {
     let dc = &state.detail_cfg;
     let font = state.view_cfg.style.font_size;
@@ -1911,7 +1997,7 @@ fn value_cell<'a>(
             .color(skin.text),
     )
     .width(Length::Fixed(w))
-    .height(Length::Fixed(row_h))
+    .height(Length::Fixed(content_h))
     .align_y(iced::alignment::Vertical::Center)
     .padding(iced::Padding {
         left: dc.text_pad_left,

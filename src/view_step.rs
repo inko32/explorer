@@ -224,13 +224,14 @@ impl Default for TilesCfg {
 #[serde(default)]
 pub struct DetailsCfg {
     pub index: u8,
-    /// DetailsRowHeight: normal and compact (compact is the default).
-    pub row_h: f32,
-    pub row_h_compact: f32,
-    /// Vertical gap between rows, in border pixels (follows the
-    /// border DPI unscale like `theme::border_w`): negative overlaps
-    /// rows so adjacent item borders coincide (-1 shares a 1px
-    /// border); positive is looser.
+    /// Height of the file_content strip between the item's top and
+    /// bottom lines (20px: the 16px icon plus 2px above and below).
+    /// The item itself is content_h + 2 line px tall.
+    pub content_h: f32,
+    /// Non-compact mode only: the spacer between two items, in border
+    /// pixels (follows the border DPI unscale like `theme::border_w`).
+    /// Compact mode ignores it: adjacent items overlap by one line px
+    /// so their lines coincide (one shared line).
     pub row_gap: f32,
     /// Column header strip height (25px).
     /// The header metrics themselves live in details-view.yaml.
@@ -245,9 +246,8 @@ impl Default for DetailsCfg {
     fn default() -> Self {
         Self {
             index: 2,
-            row_h: 32.0,
-            row_h_compact: 24.0,
-            row_gap: -1.0,
+            content_h: 20.0,
+            row_gap: 4.0,
             header_h: 25.0,
             files_gap: 6.0,
             icon: 16.0,
@@ -602,10 +602,11 @@ impl ViewCfg {
             .unwrap_or(0)
     }
 
-    /// §8.1 Details row height for the current mode.
-    pub fn details_row_h(&self, compact: bool) -> f32 {
-        let d = &self.layouts.details;
-        if compact { d.row_h_compact } else { d.row_h }
+    /// §8.1 Details item height: the file_content strip plus the top
+    /// and bottom line px. The item is assembled from explicit line
+    /// widgets, not a container border (see folder::rule_item_chrome).
+    pub fn details_item_h(&self) -> f32 {
+        self.layouts.details.content_h + 2.0 * crate::theme::border_w(1.0)
     }
 
     /// §8.1 Content row pitch: row height minus one border px —
@@ -617,15 +618,21 @@ impl ViewCfg {
         (self.layouts.content.row_h - crate::theme::border_w(1.0)).max(1.0)
     }
 
-    /// §8.1 Details row pitch: row height plus the effective row gap.
-    /// The configured gap is in border pixels, so it goes through the
-    /// same DPI unscale as the chrome borders (`theme::border_w`). All
-    /// scroll math (extent, anchors, hit tests) must use the pitch,
-    /// never the bare row height. Clamped so a hostile gap can't
-    /// break the math.
+    /// §8.1 Details row pitch. Compact: item height minus one line px
+    /// — adjacent items overlap so the 1st and 2nd file share a single
+    /// line. Non-compact: item height plus the row_gap spacer (in
+    /// border pixels, through the same DPI unscale as the line px), so
+    /// the two items keep their own separate lines. All scroll math
+    /// (extent, anchors, hit tests) must use the pitch, never the bare
+    /// item height. Clamped so a hostile gap can't break the math.
     pub fn details_pitch(&self, compact: bool) -> f32 {
-        let gap = crate::theme::border_w(self.layouts.details.row_gap);
-        (self.details_row_h(compact) + gap).max(1.0)
+        let item_h = self.details_item_h();
+        let pitch = if compact {
+            item_h - crate::theme::border_w(1.0)
+        } else {
+            item_h + crate::theme::border_w(self.layouts.details.row_gap).max(0.0)
+        };
+        pitch.max(1.0)
     }
 
     /// §8.2 small-icon cell metrics for icon size s.

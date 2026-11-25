@@ -833,11 +833,14 @@ impl Explorer {
         };
         match cfg.family(self.view_index) {
             vs::Family::Content => {
-                let row_h = cfg.layouts.content.row_h;
-                (left, top + i as f32 * row_h, (pane_w - left).max(0.0), row_h)
+                // the item is row_h tall; the pitch overlaps adjacent
+                // items by one line px (the shared divider line)
+                let item_h = cfg.layouts.content.row_h;
+                let pitch = cfg.content_pitch();
+                (left, top + i as f32 * pitch, (pane_w - left).max(0.0), item_h)
             }
             vs::Family::Details => {
-                let row_h = cfg.details_row_h(self.details_compact);
+                let item_h = cfg.details_item_h();
                 let pitch = cfg.details_pitch(self.details_compact);
                 (
                     left,
@@ -847,7 +850,7 @@ impl Explorer {
                     // the rendered row spans only the column block;
                     // pane_w would rubber-band-select empty background
                     self.details_row_w(),
-                    row_h,
+                    item_h,
                 )
             }
             vs::Family::List => {

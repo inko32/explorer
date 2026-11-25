@@ -65,11 +65,12 @@ layouts:
     pad: 8.0                # padding inside the cell
   details:                  # index 2: column list with a sortable header
     index: 2
-    row_h: 32.0             # DetailsRowHeight…
-    row_h_compact: 24.0     # …and compact (compact is the default)
-    row_gap: -1.0           # gap between rows, in border pixels (follows the
-                            # border DPI unscale): -1 overlaps rows so adjacent
-                            # item borders share one line; raise it for a looser list
+    content_h: 20.0         # file_content height (the 16px icon + 2px above and
+                            # below); the item is content_h + 2 line px tall
+    row_gap: 4.0            # non-compact mode only: spacer between two items, in
+                            # border pixels (follows the border DPI unscale).
+                            # compact mode ignores it — adjacent items overlap by
+                            # one line px so their lines coincide (one shared line)
     header_h: 25.0          # column header strip;
                             # the header metrics live in details-view.yaml
     files_gap: 6.0          # space below the title bar
